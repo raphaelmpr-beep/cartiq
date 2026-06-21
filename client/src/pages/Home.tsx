@@ -9,6 +9,14 @@ import type { Listing, SeoArticle } from "@/lib/types";
 import { useState } from "react";
 import { useLocation } from "wouter";
 
+// Navigate to a hash route with query params encoded INSIDE the hash
+// e.g. hashNav("/search", { city: "Nocatee", state: "FL" })
+// → sets window.location.hash = "#/search?city=Nocatee&state=FL"
+function hashNav(path: string, params: Record<string, string> = {}) {
+  const qs = new URLSearchParams(params).toString();
+  window.location.hash = qs ? `#${path}?${qs}` : `#${path}`;
+}
+
 export default function Home() {
   const [dealUrl, setDealUrl] = useState("");
   const [heroSearch, setHeroSearch] = useState("");
@@ -16,8 +24,8 @@ export default function Home() {
 
   function handleHeroSearch(e: React.FormEvent) {
     e.preventDefault();
-    const qs = heroSearch.trim() ? `?q=${encodeURIComponent(heroSearch.trim())}` : "";
-    navigate(`/search${qs}`);
+    const params = heroSearch.trim() ? { q: heroSearch.trim() } : {};
+    hashNav("/search", params);
   }
 
   const { data: listings = [] } = useQuery<Listing[]>({
@@ -44,7 +52,7 @@ export default function Home() {
 
   function handleDealCheck(e: React.FormEvent) {
     e.preventDefault();
-    navigate("/deal-checker");
+    hashNav("/deal-checker");
   }
 
   return (
@@ -93,22 +101,34 @@ export default function Home() {
               <div className="bg-white border border-border rounded-xl p-4 shadow-sm space-y-3 max-w-md">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Quick Search</p>
                 <div className="flex flex-wrap gap-2">
-                  {["Nocatee, FL", "The Villages, FL", "Jacksonville, FL", "Orlando, FL", "Atlanta, GA", "Peachtree City, GA"].map((loc) => (
-                    <Link
-                      key={loc}
-                      href={`/search?city=${loc.split(",")[0]}&state=${loc.split(", ")[1]}`}
-                      className="text-xs px-2.5 py-1.5 rounded-full border border-border hover:bg-secondary transition-colors"
-                    >
-                      {loc}
-                    </Link>
-                  ))}
+                  {["Nocatee, FL", "The Villages, FL", "Jacksonville, FL", "Orlando, FL", "Atlanta, GA", "Peachtree City, GA"].map((loc) => {
+                    const [city, state] = loc.split(", ");
+                    return (
+                      <button
+                        key={loc}
+                        onClick={() => hashNav("/search", { city, state })}
+                        className="text-xs px-2.5 py-1.5 rounded-full border border-border hover:bg-secondary transition-colors cursor-pointer"
+                      >
+                        {loc}
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span>Filter by:</span>
-                  {[["Lithium", "batteryType=lithium"], ["Dealer", "sellerType=dealer"], ["Street Legal", "streetLegal=true"], ["With Warranty", "warrantyIncluded=yes"]].map(([label, param]) => (
-                    <Link key={label} href={`/search?${param}`} className="text-green-700 hover:underline">
+                  {([
+                    ["Lithium", { batteryType: "lithium" }],
+                    ["Dealer", { sellerType: "dealer" }],
+                    ["Street Legal", { streetLegal: "true" }],
+                    ["With Warranty", { warrantyIncluded: "yes" }],
+                  ] as [string, Record<string, string>][]).map(([label, params]) => (
+                    <button
+                      key={label}
+                      onClick={() => hashNav("/search", params)}
+                      className="text-green-700 hover:underline cursor-pointer"
+                    >
                       {label}
-                    </Link>
+                    </button>
                   ))}
                 </div>
               </div>
