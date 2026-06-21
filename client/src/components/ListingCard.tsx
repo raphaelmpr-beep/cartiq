@@ -1,0 +1,117 @@
+import { Link } from "wouter";
+import { MapPin, Users } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { DealBadge, SourceBadge, BuyerScoreBadge, WarrantyBadge, DeliveryCostBadge, BatteryRiskBadge, DealDeltaBadge, StreetLegalBadge, RetailSourceBadge } from "./Badges";
+import { formatPrice, batteryTypeLabel } from "@/lib/utils";
+import SaveButton from "./SaveButton";
+import WatchButton from "./WatchButton";
+import type { Listing } from "@/lib/types";
+
+interface ListingCardProps {
+  listing: Listing;
+  compact?: boolean;
+}
+
+export function ListingCard({ listing, compact }: ListingCardProps) {
+  const effectivePrice = listing.salePrice ?? listing.askingPrice ?? listing.regularPrice;
+
+  return (
+    <Card className="overflow-hidden hover:shadow-md transition-shadow bg-card" data-testid={`card-listing-${listing.id}`}>
+      {/* Image */}
+      <div className="relative aspect-[16/9] bg-muted overflow-hidden">
+        {listing.imageUrl ? (
+          <img src={listing.imageUrl} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-muted text-muted-foreground text-sm">
+            No Image
+          </div>
+        )}
+        <div className="absolute top-2 left-2">
+          <DealBadge rating={listing.dealRating} />
+        </div>
+        <div className="absolute top-2 right-2 flex items-center gap-1">
+          <SaveButton listingId={listing.id} size="sm" />
+          <WatchButton listingId={listing.id} size="sm" />
+        </div>
+        <div className="absolute bottom-2 right-2">
+          <SourceBadge sellerType={listing.sellerType} sourceType={listing.sourceType} retailerName={listing.retailerName} />
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="p-4 space-y-3">
+        <div>
+          <h3 className="font-semibold text-sm leading-tight line-clamp-2" data-testid={`text-title-${listing.id}`}>{listing.title}</h3>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+            <MapPin className="h-3 w-3" />
+            {listing.city}{listing.city && listing.state ? ", " : ""}{listing.state}
+          </div>
+        </div>
+
+        {/* Specs row */}
+        <div className="flex flex-wrap gap-1.5">
+          <BatteryRiskBadge batteryType={listing.batteryType} batteryAh={listing.batteryAh} />
+          {listing.seating && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs text-muted-foreground">
+              <Users className="h-3 w-3" />{listing.seating}-Seat
+            </span>
+          )}
+          {listing.lifted && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded bg-muted text-xs text-muted-foreground">Lifted</span>
+          )}
+          <WarrantyBadge warrantyIncluded={listing.warrantyIncluded} warrantyMonths={listing.warrantyMonths} />
+          <StreetLegalBadge streetLegalClaimed={listing.streetLegalClaimed} streetLegalConfidence={listing.streetLegalConfidence} />
+        </div>
+
+        {/* Pricing */}
+        <div className="space-y-1">
+          {listing.sellerType === "retail" && listing.regularPrice && listing.salePrice && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground line-through">{formatPrice(listing.regularPrice)}</span>
+              <span className="font-semibold text-green-700">{formatPrice(listing.salePrice)}</span>
+              <span className="text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded">Sale</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-lg font-bold text-foreground" data-testid={`text-price-${listing.id}`}>{formatPrice(effectivePrice)}</div>
+              {listing.cartiqEstimatedValue && (
+                <div className="text-xs text-muted-foreground">CartIQ Value: {formatPrice(listing.cartiqEstimatedValue)}</div>
+              )}
+            </div>
+            <BuyerScoreBadge score={listing.buyerScore} />
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <DeliveryCostBadge
+              deliveryIncluded={listing.deliveryIncluded}
+              deliveryCost={listing.estimatedDeliveryCost}
+              deliveryAvailable={listing.deliveryAvailable}
+            />
+            {listing.totalDeliveredCost && (
+              <span className="text-muted-foreground">Total: <strong>{formatPrice(listing.totalDeliveredCost)}</strong></span>
+            )}
+          </div>
+          <DealDeltaBadge delta={listing.dealDelta} />
+        </div>
+
+        {/* Retail source notice */}
+        {listing.sellerType === "retail" && (
+          <RetailSourceBadge
+            retailerName={listing.retailerName}
+            lastVerifiedAt={listing.lastVerifiedAt}
+            availabilityStatus={listing.availabilityStatus}
+          />
+        )}
+
+        <Link href={`/listing/${listing.id}`}>
+          <a>
+            <Button className="w-full mt-1" size="sm" data-testid={`btn-view-deal-${listing.id}`}>
+              {listing.sellerType === "retail" ? "View Retailer" : "View Deal"}
+            </Button>
+          </a>
+        </Link>
+      </div>
+    </Card>
+  );
+}

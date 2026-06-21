@@ -1,0 +1,291 @@
+import { useQuery } from "@tanstack/react-query";
+import { useParams, Link } from "wouter";
+import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone } from "lucide-react";
+import SaveButton from "@/components/SaveButton";
+import WatchButton from "@/components/WatchButton";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DealBadge, SourceBadge, BuyerScoreBadge, WarrantyBadge, BatteryRiskBadge, StreetLegalBadge, DeliveryCostBadge, RetailSourceBadge } from "@/components/Badges";
+import { MarketCompareCard } from "@/components/MarketCompareCard";
+import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText } from "@/lib/utils";
+import type { Listing } from "@/lib/types";
+import { apiRequest } from "@/lib/queryClient";
+
+// We run the pricing engine client-side so questions/redFlags are available
+function usePricingResult(listing?: Listing) {
+  if (!listing) return null;
+  const redFlags = parseJsonField<string>(undefined);
+  const questionsToAsk = parseJsonField<string>(undefined);
+  return { redFlags, questionsToAsk };
+}
+
+export default function ListingDetail() {
+  const { id } = useParams<{ id: string }>();
+
+  const { data: listing, isLoading } = useQuery<Listing>({
+    queryKey: ["/api/listings", id],
+    queryFn: () => apiRequest("GET", `/api/listings/${id}`).then((r) => r.json()),
+    enabled: !!id,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-8 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-72 w-full rounded-xl" />
+        <div className="grid md:grid-cols-2 gap-6">
+          <Skeleton className="h-48" />
+          <Skeleton className="h-48" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!listing) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-20 text-center text-muted-foreground">
+        <p className="text-lg font-medium mb-2">Listing not found</p>
+        <Link href="/search"><a><Button variant="outline">Back to Search</Button></a></Link>
+      </div>
+    );
+  }
+
+  const effectivePrice = listing.salePrice ?? listing.askingPrice ?? listing.regularPrice;
+
+  // Generate questions and red flags from listing data
+  const questions: string[] = [];
+  const redFlags: string[] = [];
+
+  if (listing.chargerIncluded === "unknown") questions.push("Is the correct charger included and matched to the battery type and voltage?");
+  if (listing.warrantyIncluded === "unknown") questions.push("Is any dealer, manufacturer, battery, retailer, or third-party warranty included?");
+  if (listing.batteryType === "lithium" && listing.batteryWarrantyIncluded === "unknown") questions.push("Is there a separate lithium battery warranty, and is it transferable?");
+  if (listing.streetLegalClaimed) {
+    questions.push("Is there a title and VIN for this cart?");
+    questions.push("Is it registered as an LSV (Low-Speed Vehicle)?");
+    questions.push("Are seat belts, mirrors, turn signals, brake lights, and windshield present?");
+    redFlags.push("Seller claims street legal, but title/VIN/registration should be independently verified.");
+  }
+  if (listing.batteryType === "lead_acid" && (listing.batteryAgeMonths == null || listing.batteryAgeMonths > 48)) {
+    redFlags.push("Lead-acid battery age is unknown or over 4 years. Factor in replacement cost ($800–$1,500).");
+  }
+  if (listing.chargerIncluded === "no") redFlags.push("Charger not included. Confirm compatible charger cost before buying.");
+  if (listing.warrantyIncluded === "no" && (listing.sellerType === "dealer" || listing.sellerType === "retail")) {
+    redFlags.push("No warranty listed for a dealer or retail cart. Treat as as-is unless confirmed otherwise in writing.");
+  }
+  if (listing.batteryAh && listing.batteryAh <= 105 && (listing.seating && listing.seating >= 6 || listing.lifted)) {
+    redFlags.push(`Battery size (${listing.batteryAh}Ah) may be light for this setup. Confirm real-world range with passengers.`);
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        {/* Back */}
+        <Link href="/search">
+          <a className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4">
+            <ArrowLeft className="h-4 w-4" /> Back to Search
+          </a>
+        </Link>
+
+        {/* Image */}
+        <div className="relative rounded-xl overflow-hidden bg-muted mb-6 aspect-[16/7]">
+          {listing.imageUrl ? (
+            <img src={listing.imageUrl} alt={listing.title} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-muted-foreground">No Image Available</div>
+          )}
+          <div className="absolute top-3 left-3 flex gap-2">
+            <DealBadge rating={listing.dealRating} />
+            <SourceBadge sellerType={listing.sellerType} sourceType={listing.sourceType} retailerName={listing.retailerName} />
+          </div>
+          {/* Save + Watch buttons */}
+          <div className="absolute top-3 right-3 flex gap-1.5">
+            <SaveButton listingId={listing.id} size="md" />
+            <WatchButton listingId={listing.id} size="md" />
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-6">
+          {/* Main content */}
+          <div className="md:col-span-2 space-y-5">
+            <div>
+              <h1 className="text-xl font-bold leading-snug">{listing.title}</h1>
+              <p className="text-sm text-muted-foreground mt-1">{listing.city}{listing.city && listing.state ? ", " : ""}{listing.state}</p>
+            </div>
+
+            {/* Pricing block */}
+            <Card>
+              <CardContent className="pt-5 space-y-3">
+                {listing.sellerType === "retail" && listing.regularPrice && listing.salePrice && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground line-through text-sm">{formatPrice(listing.regularPrice)}</span>
+                    <span className="text-2xl font-bold text-green-700">{formatPrice(listing.salePrice)}</span>
+                    <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200">Sale Price</span>
+                  </div>
+                )}
+                {(!listing.salePrice || listing.sellerType !== "retail") && (
+                  <div className="text-2xl font-bold">{formatPrice(effectivePrice)}</div>
+                )}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">CartIQ Estimated Value</span>
+                  <span className="font-semibold">{formatPrice(listing.cartiqEstimatedValue)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Delivery Cost</span>
+                  <DeliveryCostBadge deliveryIncluded={listing.deliveryIncluded} deliveryCost={listing.estimatedDeliveryCost} deliveryAvailable={listing.deliveryAvailable} />
+                </div>
+                {listing.totalDeliveredCost && (
+                  <div className="flex items-center justify-between text-sm border-t pt-2">
+                    <span className="text-muted-foreground font-medium">Total Delivered Cost</span>
+                    <span className="font-bold">{formatPrice(listing.totalDeliveredCost)}</span>
+                  </div>
+                )}
+                <div className={`text-base font-bold ${dealDeltaColor(listing.dealDelta)}`}>{dealDeltaText(listing.dealDelta)}</div>
+                {listing.sellerType === "retail" && listing.lastVerifiedAt && (
+                  <p className="text-xs text-muted-foreground">Price/availability last verified: {listing.lastVerifiedAt}</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Buyer Intelligence */}
+            <Card>
+              <CardHeader><CardTitle className="text-base">Buyer Intelligence</CardTitle></CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    ["Battery Type", batteryTypeLabel(listing.batteryType)],
+                    ["Battery Size", listing.batteryAh ? `${listing.batteryAh}Ah` : "Unknown"],
+                    ["Battery Age", listing.batteryAgeMonths ? `${listing.batteryAgeMonths} months` : "Unknown"],
+                    ["Power Type", listing.powerType || "Unknown"],
+                    ["Seating", listing.seating ? `${listing.seating} passengers` : "Unknown"],
+                    ["Lifted", listing.lifted ? "Yes" : "No"],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className="font-medium">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <BatteryRiskBadge batteryType={listing.batteryType} batteryAh={listing.batteryAh} />
+                  <WarrantyBadge warrantyIncluded={listing.warrantyIncluded} warrantyMonths={listing.warrantyMonths} />
+                  <StreetLegalBadge streetLegalClaimed={listing.streetLegalClaimed} streetLegalConfidence={listing.streetLegalConfidence} />
+                </div>
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+                  {[
+                    ["Charger Included", yesNoUnknownLabel(listing.chargerIncluded)],
+                    ["Street Legal Claimed", listing.streetLegalClaimed ? "Yes" : "No"],
+                    ["Street Legal Confidence", listing.streetLegalConfidence || "Unknown"],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className="font-medium">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Warranty Panel */}
+            <Card>
+              <CardHeader><CardTitle className="text-base">Warranty</CardTitle></CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    ["Warranty Included", yesNoUnknownLabel(listing.warrantyIncluded)],
+                    ["Warranty Provider", warrantyProviderLabel(listing.warrantyProvider)],
+                    ["Warranty Length", listing.warrantyMonths ? `${listing.warrantyMonths} months` : "Unknown"],
+                    ["Battery Warranty", yesNoUnknownLabel(listing.batteryWarrantyIncluded)],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className="font-medium">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                {listing.warrantyNotes && <p className="text-xs text-muted-foreground pt-2">{listing.warrantyNotes}</p>}
+                {listing.warrantyIncluded === "unknown" && (
+                  <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-xs text-amber-800 flex gap-2 mt-2">
+                    <HelpCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    Ask seller: Is any dealer, manufacturer, battery, retailer, or third-party warranty included?
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Retail source notice */}
+            {listing.sellerType === "retail" && (
+              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-sm text-purple-800 space-y-1">
+                <p className="font-semibold">Retail / {listing.retailerName || "Retailer"} Listing</p>
+                <p>CartIQ does not guarantee retailer price or availability. Retail prices, availability, shipping, delivery, warranty, and state eligibility may change. Verify all details on the retailer site before purchase.</p>
+                {listing.retailerProductUrl && (
+                  <a href={listing.retailerProductUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-purple-700 font-medium hover:underline text-xs mt-1">
+                    View on {listing.retailerName || "Retailer"} <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* Red Flags */}
+            {redFlags.length > 0 && (
+              <Card className="border-red-200">
+                <CardHeader><CardTitle className="text-base text-red-700 flex items-center gap-2"><AlertTriangle className="h-4 w-4" /> Red Flags</CardTitle></CardHeader>
+                <CardContent>
+                  <ul className="space-y-2">
+                    {redFlags.map((flag, i) => (
+                      <li key={i} className="flex gap-2 text-sm text-red-700 bg-red-50 p-2.5 rounded">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" /> {flag}
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Questions to Ask */}
+            {questions.length > 0 && (
+              <Card>
+                <CardHeader><CardTitle className="text-base">Questions to Ask the Seller</CardTitle></CardHeader>
+                <CardContent>
+                  <ul className="space-y-2">
+                    {questions.map((q, i) => (
+                      <li key={i} className="flex gap-2 text-sm bg-blue-50 p-2.5 rounded text-blue-800">
+                        <HelpCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" /> {q}
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Description */}
+            {listing.description && (
+              <Card>
+                <CardHeader><CardTitle className="text-base">Listing Description</CardTitle></CardHeader>
+                <CardContent><p className="text-sm text-muted-foreground whitespace-pre-wrap">{listing.description}</p></CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-5">
+            <MarketCompareCard listing={listing} />
+            <BuyerScoreBadge score={listing.buyerScore} className="text-lg" />
+
+            {/* CTAs */}
+            <div className="space-y-2">
+              {listing.sellerType === "retail" && listing.retailerProductUrl ? (
+                <a href={listing.retailerProductUrl} target="_blank" rel="noopener noreferrer">
+                  <Button className="w-full gap-2" data-testid="btn-view-retailer"><ExternalLink className="h-4 w-4" /> View Retailer</Button>
+                </a>
+              ) : (
+                <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Contact Seller</Button>
+              )}
+              <Link href="/deal-checker"><a><Button variant="outline" className="w-full" data-testid="btn-check-similar">Check Similar Deals</Button></a></Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
