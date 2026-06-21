@@ -146,6 +146,7 @@ const CREATE_TABLES_SQL = `
     delivery_included INTEGER DEFAULT 0,
     delivery_notes TEXT,
     image_url TEXT,
+    image_urls TEXT,
     seller_name TEXT,
     seller_phone TEXT,
     seller_email TEXT,
@@ -285,6 +286,16 @@ export async function initStorage(): Promise<void> {
 
   // Create all tables
   sqlJsDb.run(CREATE_TABLES_SQL);
+
+  // Schema migrations — add new columns to existing DBs (safe: IF NOT EXISTS not supported
+  // for ALTER TABLE in SQLite, so wrap each in try/catch)
+  const migrations = [
+    "ALTER TABLE listings ADD COLUMN image_urls TEXT",
+  ];
+  for (const sql of migrations) {
+    try { sqlJsDb.run(sql); } catch (_) { /* column already exists */ }
+  }
+
   persistDb();
 
   db = drizzle(sqlJsDb, { schema });
