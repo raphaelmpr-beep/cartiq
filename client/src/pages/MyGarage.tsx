@@ -202,9 +202,7 @@ export default function MyGarage() {
               <div className="text-center py-12">
                 <Heart size={32} className="mx-auto text-muted-foreground mb-3 opacity-30" />
                 <p className="text-sm text-muted-foreground">No saved carts yet.</p>
-                <Link href="/search">
-                  <a className="mt-3 inline-block text-sm text-green-700 hover:underline">Browse listings →</a>
-                </Link>
+                <Link href="/search" className="mt-3 inline-block text-sm text-green-700 hover:underline">Browse listings →</Link>
               </div>
             ) : (
               <div className="space-y-3">
@@ -222,9 +220,7 @@ export default function MyGarage() {
                         />
                       )}
                       <div className="flex-1 min-w-0">
-                        <Link href={`/listing/${l.id}`}>
-                          <a className="text-sm font-semibold text-foreground hover:text-green-700 line-clamp-1">{l.title}</a>
-                        </Link>
+                        <Link href={`/listing/${l.id}`} className="text-sm font-semibold text-foreground hover:text-green-700 line-clamp-1">{l.title}</Link>
                         <p className="text-xs text-muted-foreground mt-0.5">{l.city}, {l.state} · {l.year} {l.brand}</p>
                         <div className="flex items-center gap-2 mt-1.5">
                           {price && <span className="text-sm font-bold">{formatPrice(price)}</span>}
@@ -274,9 +270,7 @@ export default function MyGarage() {
                                 <img src={l.imageUrl} alt={l.title} className="w-16 h-12 object-cover rounded-lg shrink-0" />
                               )}
                               <div className="flex-1 min-w-0">
-                                <Link href={`/listing/${l.id}`}>
-                                  <a className="text-sm font-semibold text-foreground hover:text-green-700 line-clamp-1">{l.title}</a>
-                                </Link>
+                                <Link href={`/listing/${l.id}`} className="text-sm font-semibold text-foreground hover:text-green-700 line-clamp-1">{l.title}</Link>
                                 <p className="text-xs text-muted-foreground mt-0.5">{l.city}, {l.state}</p>
                                 <div className="flex items-center gap-3 mt-2">
                                   <span className="text-xs text-muted-foreground line-through">{formatPrice(w.priceAtWatch)}</span>
@@ -287,10 +281,8 @@ export default function MyGarage() {
                               </div>
                             </div>
                             <div className="flex gap-2 mt-3">
-                              <Link href={`/listing/${l.id}`}>
-                                <a className="text-xs bg-green-700 text-white px-3 py-1.5 rounded-lg hover:bg-green-800 transition-colors">
-                                  View Listing
-                                </a>
+                              <Link href={`/listing/${l.id}`} className="text-xs bg-green-700 text-white px-3 py-1.5 rounded-lg hover:bg-green-800 transition-colors">
+                                View Listing
                               </Link>
                               <button
                                 onClick={() => dismissAlert(w.id)}
@@ -327,9 +319,7 @@ export default function MyGarage() {
                               <img src={l.imageUrl} alt={l.title} className="w-16 h-12 object-cover rounded-lg shrink-0" />
                             )}
                             <div className="flex-1 min-w-0">
-                              <Link href={`/listing/${l.id}`}>
-                                <a className="text-sm font-semibold text-foreground hover:text-green-700 line-clamp-1">{l.title}</a>
-                              </Link>
+                              <Link href={`/listing/${l.id}`} className="text-sm font-semibold text-foreground hover:text-green-700 line-clamp-1">{l.title}</Link>
                               <p className="text-xs text-muted-foreground mt-0.5">{l.city}, {l.state}</p>
                               <div className="flex items-center gap-2 mt-1.5">
                                 <span className="text-xs text-muted-foreground">

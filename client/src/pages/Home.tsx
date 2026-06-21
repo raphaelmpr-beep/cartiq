@@ -82,12 +82,10 @@ export default function Home() {
                 </Button>
               </form>
               <div className="flex flex-wrap gap-3">
-                <Link href="/deal-checker">
-                  <a>
-                    <Button size="lg" variant="outline" className="gap-2" data-testid="hero-deal-checker-btn">
-                      <ClipboardCheck className="h-4 w-4" /> Check a Deal
-                    </Button>
-                  </a>
+                <Link href="/deal-checker" className="inline-flex">
+                  <Button size="lg" variant="outline" className="gap-2" data-testid="hero-deal-checker-btn">
+                    <ClipboardCheck className="h-4 w-4" /> Check a Deal
+                  </Button>
                 </Link>
               </div>
 
@@ -96,16 +94,20 @@ export default function Home() {
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Quick Search</p>
                 <div className="flex flex-wrap gap-2">
                   {["Nocatee, FL", "The Villages, FL", "Jacksonville, FL", "Orlando, FL", "Atlanta, GA", "Peachtree City, GA"].map((loc) => (
-                    <Link key={loc} href={`/search?city=${loc.split(",")[0]}&state=${loc.split(", ")[1]}`}>
-                      <a className="text-xs px-2.5 py-1.5 rounded-full border border-border hover:bg-secondary transition-colors">{loc}</a>
+                    <Link
+                      key={loc}
+                      href={`/search?city=${loc.split(",")[0]}&state=${loc.split(", ")[1]}`}
+                      className="text-xs px-2.5 py-1.5 rounded-full border border-border hover:bg-secondary transition-colors"
+                    >
+                      {loc}
                     </Link>
                   ))}
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span>Filter by:</span>
                   {[["Lithium", "batteryType=lithium"], ["Dealer", "sellerType=dealer"], ["Street Legal", "streetLegal=true"], ["With Warranty", "warrantyIncluded=yes"]].map(([label, param]) => (
-                    <Link key={label} href={`/search?${param}`}>
-                      <a className="text-green-700 hover:underline">{label}</a>
+                    <Link key={label} href={`/search?${param}`} className="text-green-700 hover:underline">
+                      {label}
                     </Link>
                   ))}
                 </div>
@@ -159,10 +161,8 @@ export default function Home() {
           <div className="max-w-7xl mx-auto px-4 py-10">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold">Recent Listings</h2>
-              <Link href="/search">
-                <a className="text-sm text-green-700 hover:underline flex items-center gap-1">
-                  See all <ChevronRight className="h-3.5 w-3.5" />
-                </a>
+              <Link href="/search" className="text-sm text-green-700 hover:underline flex items-center gap-1">
+                See all <ChevronRight className="h-3.5 w-3.5" />
               </Link>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -180,26 +180,26 @@ export default function Home() {
           <div className="max-w-7xl mx-auto px-4 py-10">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold">Learn Before You Buy</h2>
-              <Link href="/buyer-guide">
-                <a className="text-sm text-green-700 hover:underline flex items-center gap-1">
-                  All guides <ChevronRight className="h-3.5 w-3.5" />
-                </a>
+              <Link href="/buyer-guide" className="text-sm text-green-700 hover:underline flex items-center gap-1">
+                All guides <ChevronRight className="h-3.5 w-3.5" />
               </Link>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {guideCards.map((article) => (
-                <Link key={article.id} href={`/buyer-guide/${article.slug}`}>
-                  <a className="block p-5 rounded-xl border border-border bg-gray-50 hover:bg-white hover:shadow-sm transition-all group">
-                    <div className="flex items-start gap-3">
-                      <BookOpen className="h-5 w-5 text-green-600 mt-0.5 shrink-0" />
-                      <div>
-                        <h3 className="font-semibold text-sm leading-snug mb-1 group-hover:text-green-700 transition-colors">{article.title}</h3>
-                        {article.shortAnswer && (
-                          <p className="text-xs text-muted-foreground line-clamp-2">{article.shortAnswer}</p>
-                        )}
-                      </div>
+                <Link
+                  key={article.id}
+                  href={`/buyer-guide/${article.slug}`}
+                  className="block p-5 rounded-xl border border-border bg-gray-50 hover:bg-white hover:shadow-sm transition-all group"
+                >
+                  <div className="flex items-start gap-3">
+                    <BookOpen className="h-5 w-5 text-green-600 mt-0.5 shrink-0" />
+                    <div>
+                      <h3 className="font-semibold text-sm leading-snug mb-1 group-hover:text-green-700 transition-colors">{article.title}</h3>
+                      {article.shortAnswer && (
+                        <p className="text-xs text-muted-foreground line-clamp-2">{article.shortAnswer}</p>
+                      )}
                     </div>
-                  </a>
+                  </div>
                 </Link>
               ))}
             </div>

@@ -514,7 +514,7 @@ export default function DealChecker() {
 
             <div className="flex gap-3">
               <Button variant="outline" onClick={() => { setStep(1); setForm(defaultForm); setResult(null); }} className="flex-1">Check Another Deal</Button>
-              <Link href="/search"><a><Button className="flex-1">Search Listings</Button></a></Link>
+              <Link href="/search"><Button className="flex-1">Search Listings</Button></Link>
             </div>
           </div>
         )}

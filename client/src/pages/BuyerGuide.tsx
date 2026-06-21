@@ -19,7 +19,7 @@ export function BuyerGuideIndex() {
           <h1 className="text-2xl font-bold">Golf Cart Buyer Guide</h1>
           <p className="text-muted-foreground mt-2 text-sm">
             Everything you need to know before buying a golf cart in Florida or Georgia.
-            <Link href="/deal-checker"><a className="text-green-700 hover:underline ml-1">Check any deal →</a></Link>
+            <Link href="/deal-checker" className="text-green-700 hover:underline ml-1">Check any deal →</Link>
           </p>
         </div>
 
@@ -30,8 +30,7 @@ export function BuyerGuideIndex() {
         ) : (
           <div className="grid sm:grid-cols-2 gap-5">
             {articles.map((article) => (
-              <Link key={article.id} href={`/buyer-guide/${article.slug}`}>
-                <a className="block p-5 rounded-xl border border-border bg-white hover:shadow-md transition-all group">
+              <Link key={article.id} href={`/buyer-guide/${article.slug}`} className="block p-5 rounded-xl border border-border bg-white hover:shadow-md transition-all group">
                   <div className="flex items-start gap-3">
                     <BookOpen className="h-5 w-5 text-green-600 mt-0.5 shrink-0" />
                     <div className="flex-1 min-w-0">
@@ -42,8 +41,7 @@ export function BuyerGuideIndex() {
                     </div>
                     <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
                   </div>
-                </a>
-              </Link>
+                </Link>
             ))}
           </div>
         )}
@@ -51,7 +49,7 @@ export function BuyerGuideIndex() {
         <div className="mt-10 bg-foreground text-background rounded-xl p-6 text-center">
           <h2 className="font-bold text-lg mb-2">Ready to check a deal?</h2>
           <p className="text-sm opacity-80 mb-4">Find a cart anywhere. Enter the details. Get your private CartIQ analysis in seconds.</p>
-          <Link href="/deal-checker"><a><Button variant="secondary" size="lg">Check a Deal</Button></a></Link>
+          <Link href="/deal-checker"><Button variant="secondary" size="lg">Check a Deal</Button></Link>
         </div>
       </div>
     </div>
@@ -85,7 +83,7 @@ export function ArticleDetail() {
     return (
       <div className="max-w-3xl mx-auto px-4 py-20 text-center text-muted-foreground">
         <p className="text-lg font-medium mb-2">Article not found</p>
-        <Link href="/buyer-guide"><a><Button variant="outline">Back to Guide</Button></a></Link>
+        <Link href="/buyer-guide"><Button variant="outline">Back to Guide</Button></Link>
       </div>
     );
   }
@@ -165,11 +163,9 @@ export function ArticleDetail() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-3xl mx-auto px-4 py-8">
-        <Link href="/buyer-guide">
-          <a className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6">
+        <Link href="/buyer-guide" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6">
             <ArrowLeft className="h-4 w-4" /> Buyer Guide
-          </a>
-        </Link>
+          </Link>
 
         {/* Article header */}
         <div className="mb-8">
@@ -208,8 +204,8 @@ export function ArticleDetail() {
             <p className="text-xs text-muted-foreground mt-1">Use the Deal Checker to analyze any cart from Facebook, Craigslist, a dealer, or Costco.</p>
           </div>
           <div className="flex gap-2 shrink-0">
-            <Link href="/deal-checker"><a><Button size="sm">Check a Deal</Button></a></Link>
-            <Link href="/search"><a><Button size="sm" variant="outline">Search Carts</Button></a></Link>
+            <Link href="/deal-checker"><Button size="sm">Check a Deal</Button></Link>
+            <Link href="/search"><Button size="sm" variant="outline">Search Carts</Button></Link>
           </div>
         </div>
 

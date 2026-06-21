@@ -57,6 +57,7 @@ export interface Listing {
   deliveryIncluded?: boolean;
   deliveryNotes?: string;
   imageUrl?: string;
+  imageUrls?: string;  // JSON array string
   sellerName?: string;
   sellerPhone?: string;
   sellerEmail?: string;

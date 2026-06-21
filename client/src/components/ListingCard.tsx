@@ -138,12 +138,10 @@ export function ListingCard({ listing, compact }: ListingCardProps) {
           />
         )}
 
-        <Link href={`/listing/${listing.id}`}>
-          <a>
-            <Button className="w-full mt-1" size="sm" data-testid={`btn-view-deal-${listing.id}`}>
-              {listing.sellerType === "retail" ? "View Retailer" : "View Deal"}
-            </Button>
-          </a>
+        <Link href={`/listing/${listing.slug || listing.id}`} className="block w-full mt-1">
+          <Button className="w-full" size="sm" data-testid={`btn-view-deal-${listing.id}`}>
+            {listing.sellerType === "retail" ? "View Retailer" : "View Deal"}
+          </Button>
         </Link>
       </div>
     </Card>

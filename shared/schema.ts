@@ -121,6 +121,7 @@ export const listings = sqliteTable("listings", {
   deliveryIncluded: integer("delivery_included", { mode: "boolean" }).default(false),
   deliveryNotes: text("delivery_notes"),
   imageUrl: text("image_url"),
+  imageUrls: text("image_urls"),            // JSON array of additional image URLs for carousel
   sellerName: text("seller_name"),          // dealer business name or "Private Seller"
   sellerPhone: text("seller_phone"),        // displayed on card and detail page
   sellerEmail: text("seller_email"),        // shown on detail page only

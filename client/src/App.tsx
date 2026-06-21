@@ -3,6 +3,26 @@ import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
+import { Component, type ReactNode } from "react";
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex items-center justify-center px-4">
+          <div className="text-center max-w-sm">
+            <h1 className="text-lg font-bold mb-2">Something went wrong</h1>
+            <p className="text-sm text-muted-foreground mb-4">Try refreshing the page.</p>
+            <button onClick={() => window.location.reload()} className="text-sm text-green-700 hover:underline">Refresh</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { Header } from "@/components/Header";
 import Home from "@/pages/Home";
 import Search from "@/pages/Search";
@@ -77,11 +97,13 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <Router hook={useHashLocation}>
-        <AppRoutes />
-      </Router>
-      <Toaster />
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <Router hook={useHashLocation}>
+          <AppRoutes />
+        </Router>
+        <Toaster />
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

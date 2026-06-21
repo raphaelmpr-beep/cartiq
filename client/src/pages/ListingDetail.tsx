@@ -3,6 +3,8 @@ import { useParams, Link } from "wouter";
 import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone, Mail, Store, User } from "lucide-react";
 import SaveButton from "@/components/SaveButton";
 import WatchButton from "@/components/WatchButton";
+import { ImageCarousel } from "@/components/ImageCarousel";
+import { parseJsonField } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,7 +48,7 @@ export default function ListingDetail() {
     return (
       <div className="max-w-4xl mx-auto px-4 py-20 text-center text-muted-foreground">
         <p className="text-lg font-medium mb-2">Listing not found</p>
-        <Link href="/search"><a><Button variant="outline">Back to Search</Button></a></Link>
+        <Link href="/search"><Button variant="outline">Back to Search</Button></Link>
       </div>
     );
   }
@@ -81,29 +83,31 @@ export default function ListingDetail() {
     <div className="min-h-screen bg-background">
       <div className="max-w-5xl mx-auto px-4 py-6">
         {/* Back */}
-        <Link href="/search">
-          <a className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4">
+        <Link href="/search" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4">
             <ArrowLeft className="h-4 w-4" /> Back to Search
-          </a>
-        </Link>
+          </Link>
 
-        {/* Image */}
-        <div className="relative rounded-xl overflow-hidden bg-muted mb-6 aspect-[16/7]">
-          {listing.imageUrl ? (
-            <img src={listing.imageUrl} alt={listing.title} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-muted-foreground">No Image Available</div>
-          )}
-          <div className="absolute top-3 left-3 flex gap-2">
-            <DealBadge rating={listing.dealRating} />
-            <SourceBadge sellerType={listing.sellerType} sourceType={listing.sourceType} retailerName={listing.retailerName} />
-          </div>
-          {/* Save + Watch buttons */}
-          <div className="absolute top-3 right-3 flex gap-1.5">
-            <SaveButton listingId={listing.id} size="md" />
-            <WatchButton listingId={listing.id} size="md" />
-          </div>
-        </div>
+        {/* Image Carousel */}
+        {(() => {
+          const extraImages = parseJsonField<string>(listing.imageUrls);
+          const allImages = extraImages.length > 0
+            ? extraImages
+            : listing.imageUrl ? [listing.imageUrl] : [];
+          return (
+            <div className="relative mb-6">
+              <ImageCarousel images={allImages} alt={listing.title} aspectClass="aspect-[16/7]" />
+              {/* Overlay badges */}
+              <div className="absolute top-3 left-3 flex gap-2 z-20">
+                <DealBadge rating={listing.dealRating} />
+                <SourceBadge sellerType={listing.sellerType} sourceType={listing.sourceType} retailerName={listing.retailerName} />
+              </div>
+              <div className="absolute top-3 right-3 flex gap-1.5 z-20">
+                <SaveButton listingId={listing.id} size="md" />
+                <WatchButton listingId={listing.id} size="md" />
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="grid md:grid-cols-3 gap-6">
           {/* Main content */}
@@ -318,7 +322,7 @@ export default function ListingDetail() {
                 ) : (
                   <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Contact Seller</Button>
                 )}
-                <Link href="/deal-checker"><a><Button variant="outline" className="w-full" data-testid="btn-check-similar">Check Similar Deals</Button></a></Link>
+                <Link href="/deal-checker"><Button variant="outline" className="w-full" data-testid="btn-check-similar">Check Similar Deals</Button></Link>
               </div>
             </div>
           </div>
