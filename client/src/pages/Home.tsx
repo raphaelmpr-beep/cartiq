@@ -11,7 +11,14 @@ import { useLocation } from "wouter";
 
 export default function Home() {
   const [dealUrl, setDealUrl] = useState("");
+  const [heroSearch, setHeroSearch] = useState("");
   const [, navigate] = useLocation();
+
+  function handleHeroSearch(e: React.FormEvent) {
+    e.preventDefault();
+    const qs = heroSearch.trim() ? `?q=${encodeURIComponent(heroSearch.trim())}` : "";
+    navigate(`/search${qs}`);
+  }
 
   const { data: listings = [] } = useQuery<Listing[]>({
     queryKey: ["/api/listings"],
@@ -58,14 +65,23 @@ export default function Home() {
               <p className="text-lg text-muted-foreground max-w-lg">
                 Compare dealer, private, Facebook-submitted, and retail golf cart deals. Check fair value, battery setup, warranty, and delivery-adjusted pricing before you buy.
               </p>
+              {/* Hero search input */}
+              <form onSubmit={handleHeroSearch} className="flex gap-2 max-w-md">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Brand, model, city…"
+                    value={heroSearch}
+                    onChange={(e) => setHeroSearch(e.target.value)}
+                    data-testid="hero-search-input"
+                  />
+                </div>
+                <Button type="submit" className="gap-2 shrink-0" data-testid="hero-search-btn">
+                  <Search className="h-4 w-4" /> Search
+                </Button>
+              </form>
               <div className="flex flex-wrap gap-3">
-                <Link href="/search">
-                  <a>
-                    <Button size="lg" className="gap-2" data-testid="hero-search-btn">
-                      <Search className="h-4 w-4" /> Search Carts
-                    </Button>
-                  </a>
-                </Link>
                 <Link href="/deal-checker">
                   <a>
                     <Button size="lg" variant="outline" className="gap-2" data-testid="hero-deal-checker-btn">

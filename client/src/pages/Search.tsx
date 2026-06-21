@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { SlidersHorizontal, X, ChevronDown, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -38,9 +38,10 @@ const SORT_OPTIONS = [
   { label: "Warranty Included", value: "warranty" },
 ];
 
-function buildQueryString(filters: Record<string, string>) {
+function buildQueryString(filters: Record<string, string>, keyword?: string) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v); });
+  if (keyword) params.set("q", keyword);
   return params.toString();
 }
 
@@ -57,22 +58,35 @@ function sortListings(listings: Listing[], sort: string): Listing[] {
 }
 
 export default function Search() {
-  const [location] = useLocation();
+  const [, navigate] = useLocation();
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [sort, setSort] = useState("best_match");
   const [keyword, setKeyword] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // Parse initial URL params
+  // Parse initial URL params — including ?q= for keyword
   useEffect(() => {
     const search = window.location.hash.split("?")[1] || "";
     const params = new URLSearchParams(search);
     const init: Record<string, string> = {};
-    params.forEach((v, k) => { init[k] = v; });
+    params.forEach((v, k) => {
+      if (k === "q") setKeyword(v);
+      else init[k] = v;
+    });
     setFilters(init);
   }, []);
 
-  const qs = buildQueryString(filters);
+  // Sync filters + keyword back into the URL hash so the page is bookmarkable
+  const syncUrl = useCallback(
+    (nextFilters: Record<string, string>, nextKeyword: string) => {
+      const qs = buildQueryString(nextFilters, nextKeyword);
+      const newHash = qs ? `/search?${qs}` : "/search";
+      window.history.replaceState(null, "", `#${newHash}`);
+    },
+    []
+  );
+
+  const qs = buildQueryString(filters); // API query — no keyword (client-side filter)
   const { data: listings = [], isLoading } = useQuery<Listing[]>({
     queryKey: ["/api/listings", qs],
     queryFn: () => apiRequest("GET", `/api/listings${qs ? `?${qs}` : ""}`).then(r => r.json()),
@@ -86,12 +100,25 @@ export default function Search() {
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
 
   function setFilter(key: string, value: string) {
-    setFilters((f) => ({ ...f, [key]: value }));
+    const next = { ...filters, [key]: value };
+    setFilters(next);
+    syncUrl(next, keyword);
   }
   function clearFilter(key: string) {
-    setFilters((f) => { const n = { ...f }; delete n[key]; return n; });
+    const next = { ...filters };
+    delete next[key];
+    setFilters(next);
+    syncUrl(next, keyword);
   }
-  function clearAll() { setFilters({}); }
+  function clearAll() {
+    setFilters({});
+    setKeyword("");
+    syncUrl({}, "");
+  }
+  function handleKeyword(value: string) {
+    setKeyword(value);
+    syncUrl(filters, value);
+  }
 
   const FilterPanel = () => (
     <div className="space-y-5">
@@ -175,7 +202,7 @@ export default function Search() {
               className="pl-9"
               placeholder="Search by brand, model, city…"
               value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
+              onChange={(e) => handleKeyword(e.target.value)}
               data-testid="search-keyword-input"
             />
           </div>
