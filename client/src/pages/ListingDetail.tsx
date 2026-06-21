@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
-import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone } from "lucide-react";
+import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone, Mail, Store, User } from "lucide-react";
 import SaveButton from "@/components/SaveButton";
 import WatchButton from "@/components/WatchButton";
 import { Button } from "@/components/ui/button";
@@ -272,16 +272,54 @@ export default function ListingDetail() {
             <MarketCompareCard listing={listing} />
             <BuyerScoreBadge score={listing.buyerScore} className="text-lg" />
 
-            {/* CTAs */}
-            <div className="space-y-2">
-              {listing.sellerType === "retail" && listing.retailerProductUrl ? (
-                <a href={listing.retailerProductUrl} target="_blank" rel="noopener noreferrer">
-                  <Button className="w-full gap-2" data-testid="btn-view-retailer"><ExternalLink className="h-4 w-4" /> View Retailer</Button>
+            {/* Contact Card */}
+            <div className="border border-border rounded-xl p-4 space-y-3 bg-white">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Point of Contact</p>
+
+              <div className="flex items-center gap-2">
+                {listing.sellerType === "dealer" || listing.sellerType === "retail"
+                  ? <Store size={15} className="text-muted-foreground shrink-0" />
+                  : <User size={15} className="text-muted-foreground shrink-0" />}
+                <span className="text-sm font-semibold text-foreground">
+                  {listing.sellerName ?? (listing.sellerType === "dealer" ? "Dealer" : "Private Seller")}
+                </span>
+              </div>
+
+              {listing.sellerPhone && (
+                <a
+                  href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}
+                  className="flex items-center gap-2 text-sm text-green-700 hover:text-green-900 font-medium"
+                >
+                  <Phone size={14} />
+                  {listing.sellerPhone}
                 </a>
-              ) : (
-                <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Contact Seller</Button>
               )}
-              <Link href="/deal-checker"><a><Button variant="outline" className="w-full" data-testid="btn-check-similar">Check Similar Deals</Button></a></Link>
+
+              {listing.sellerEmail && !listing.sellerEmail.endsWith(".local") && (
+                <a
+                  href={`mailto:${listing.sellerEmail}`}
+                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+                >
+                  <Mail size={14} />
+                  {listing.sellerEmail}
+                </a>
+              )}
+
+              {/* CTAs */}
+              <div className="space-y-2 pt-1">
+                {listing.sellerType === "retail" && listing.retailerProductUrl ? (
+                  <a href={listing.retailerProductUrl} target="_blank" rel="noopener noreferrer">
+                    <Button className="w-full gap-2" data-testid="btn-view-retailer"><ExternalLink className="h-4 w-4" /> View Retailer</Button>
+                  </a>
+                ) : listing.sellerPhone ? (
+                  <a href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}>
+                    <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Call Seller</Button>
+                  </a>
+                ) : (
+                  <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Contact Seller</Button>
+                )}
+                <Link href="/deal-checker"><a><Button variant="outline" className="w-full" data-testid="btn-check-similar">Check Similar Deals</Button></a></Link>
+              </div>
             </div>
           </div>
         </div>

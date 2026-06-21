@@ -114,6 +114,9 @@ sqlite.exec(`
     delivery_included INTEGER DEFAULT 0,
     delivery_notes TEXT,
     image_url TEXT,
+    seller_name TEXT,
+    seller_phone TEXT,
+    seller_email TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );

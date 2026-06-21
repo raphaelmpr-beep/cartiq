@@ -121,6 +121,9 @@ export const listings = sqliteTable("listings", {
   deliveryIncluded: integer("delivery_included", { mode: "boolean" }).default(false),
   deliveryNotes: text("delivery_notes"),
   imageUrl: text("image_url"),
+  sellerName: text("seller_name"),          // dealer business name or "Private Seller"
+  sellerPhone: text("seller_phone"),        // displayed on card and detail page
+  sellerEmail: text("seller_email"),        // shown on detail page only
   createdAt: text("created_at").notNull().default(new Date().toISOString()),
   updatedAt: text("updated_at").notNull().default(new Date().toISOString()),
 });

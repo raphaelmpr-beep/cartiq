@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { MapPin, Users } from "lucide-react";
+import { MapPin, Users, Phone, Store } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DealBadge, SourceBadge, BuyerScoreBadge, WarrantyBadge, DeliveryCostBadge, BatteryRiskBadge, DealDeltaBadge, StreetLegalBadge, RetailSourceBadge } from "./Badges";
@@ -21,12 +21,26 @@ export function ListingCard({ listing, compact }: ListingCardProps) {
       {/* Image */}
       <div className="relative aspect-[16/9] bg-muted overflow-hidden">
         {listing.imageUrl ? (
-          <img src={listing.imageUrl} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-muted text-muted-foreground text-sm">
-            No Image
-          </div>
-        )}
+          <img
+            src={listing.imageUrl}
+            alt={listing.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={(e) => {
+              const t = e.currentTarget;
+              t.onerror = null;
+              t.style.display = "none";
+              const fallback = t.nextElementSibling as HTMLElement | null;
+              if (fallback) fallback.style.display = "flex";
+            }}
+          />
+        ) : null}
+        <div
+          className="w-full h-full items-center justify-center bg-muted text-muted-foreground text-sm"
+          style={{ display: listing.imageUrl ? "none" : "flex" }}
+        >
+          No Image
+        </div>
         <div className="absolute top-2 left-2">
           <DealBadge rating={listing.dealRating} />
         </div>
@@ -94,6 +108,26 @@ export function ListingCard({ listing, compact }: ListingCardProps) {
           </div>
           <DealDeltaBadge delta={listing.dealDelta} />
         </div>
+
+        {/* Seller / dealer name + phone */}
+        {(listing.sellerName || listing.sellerPhone) && (
+          <div className="flex items-center justify-between text-xs text-muted-foreground border-t border-border pt-2">
+            <div className="flex items-center gap-1 min-w-0">
+              <Store size={11} className="shrink-0" />
+              <span className="truncate font-medium">{listing.sellerName ?? "Seller"}</span>
+            </div>
+            {listing.sellerPhone && (
+              <a
+                href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-1 text-green-700 hover:text-green-900 shrink-0 ml-2"
+              >
+                <Phone size={11} />
+                {listing.sellerPhone}
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Retail source notice */}
         {listing.sellerType === "retail" && (
