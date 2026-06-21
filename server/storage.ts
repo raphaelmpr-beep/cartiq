@@ -10,18 +10,19 @@ import * as schema from "@shared/schema";
 // Locally (pplx.app sandbox), use data.db in CWD so publish_website can snapshot it.
 const DB_PATH = process.env.VERCEL ? "/tmp/data.db" : "data.db";
 
-// Load the wasm binary.
+// Load the wasm binary SYNCHRONOUSLY.
 // At build time, script/build.ts generates server/generated/sql-wasm-loader.ts which
-// embeds the wasm as base64 — this is bundled into dist/index.cjs and works everywhere
-// including Vercel Lambda (no filesystem path lookup needed).
-// In dev (tsx), the generated file may not exist yet — fall back to reading from node_modules.
-async function loadWasmBinary(): Promise<Buffer> {
+// exports wasmBase64 as a plain string constant — esbuild inlines it into the CJS bundle.
+// We require() it synchronously so there is no async gap before httpServer.listen() is called
+// (Vercel Lambda's launcher only waits 1 second for listen() after module import).
+// In dev (tsx), the generated file may not exist — fall back to fs.readFileSync from node_modules.
+function loadWasmBinarySync(): Buffer {
   try {
-    // This import is resolved at build time by esbuild (inlined into the CJS bundle)
-    const { wasmBinary } = await import("./generated/sql-wasm-loader");
-    return wasmBinary as Buffer;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { wasmBase64 } = require("./generated/sql-wasm-loader");
+    return Buffer.from(wasmBase64 as string, "base64");
   } catch {
-    // Dev fallback: read from node_modules directly
+    // Dev fallback: read directly from node_modules
     const wasmPath = path.resolve("node_modules/sql.js/dist/sql-wasm.wasm");
     return fs.readFileSync(wasmPath);
   }
@@ -269,7 +270,8 @@ const CREATE_TABLES_SQL = `
 `;
 
 export async function initStorage(): Promise<void> {
-  const wasmBinary = await loadWasmBinary();
+  // Load binary synchronously (no async gap — base64 decode is instant)
+  const wasmBinary = loadWasmBinarySync();
 
   const SQL = await initSqlJs({ wasmBinary });
 
