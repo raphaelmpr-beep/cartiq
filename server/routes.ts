@@ -76,6 +76,16 @@ function enrichListingWithPricing(data: Record<string, any>): Record<string, any
 }
 
 export function registerRoutes(httpServer: Server, app: Express) {
+  // ─── Health / debug ─────────────────────────────────────────────────────────
+  app.get("/api/health", (_req, res) => {
+    try {
+      const count = storage.getListings({}).length;
+      res.json({ ok: true, listings: count, env: process.env.NODE_ENV, vercel: !!process.env.VERCEL });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message, stack: e.stack?.split('\n').slice(0,5) });
+    }
+  });
+
   // ─── Auth middleware ────────────────────────────────────────────────────────
   function requireAdmin(req: any, res: any, next: any) {
     const token = req.headers["x-admin-token"] || req.query.adminToken;
@@ -561,3 +571,6 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
   return httpServer;
 }
+
+// Diagnostic: surface startup errors for Vercel debugging
+// Remove before production
