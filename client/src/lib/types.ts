@@ -53,6 +53,8 @@ export interface Listing {
   city?: string;
   state?: string;
   zip?: string;
+  lat?: number | null;
+  lng?: number | null;
   deliveryAvailable?: boolean;
   deliveryIncluded?: boolean;
   deliveryNotes?: string;
