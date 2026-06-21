@@ -3,7 +3,10 @@ import Database from "better-sqlite3";
 import { eq, and, like, gte, lte, sql, inArray } from "drizzle-orm";
 import * as schema from "@shared/schema";
 
-const sqlite = new Database("data.db");
+// On Vercel (Lambda), the working directory is read-only — use /tmp for SQLite.
+// Locally (pplx.app sandbox), use data.db in CWD so publish_website can snapshot it.
+const DB_PATH = process.env.VERCEL ? "/tmp/data.db" : "data.db";
+const sqlite = new Database(DB_PATH);
 const db = drizzle(sqlite, { schema });
 
 // Enable WAL mode for better performance

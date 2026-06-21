@@ -1,15 +1,28 @@
 {
   "version": 2,
+  "buildCommand": "npm run build && npm rebuild better-sqlite3",
+  "outputDirectory": "dist/public",
   "builds": [
     {
       "src": "dist/index.cjs",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["dist/public/**"]
+      }
     }
   ],
   "routes": [
     {
-      "src": "/(.*)",
+      "src": "/api/(.*)",
       "dest": "dist/index.cjs"
+    },
+    {
+      "src": "/assets/(.*)",
+      "dest": "dist/public/assets/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "dist/public/index.html"
     }
   ],
   "env": {
