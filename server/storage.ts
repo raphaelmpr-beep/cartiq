@@ -10,16 +10,21 @@ import * as schema from "@shared/schema";
 // Locally (pplx.app sandbox), use data.db in CWD so publish_website can snapshot it.
 const DB_PATH = process.env.VERCEL ? "/tmp/data.db" : "data.db";
 
-// Resolve the sql-wasm.wasm file path.
-// In production (dist/index.cjs), __dirname is dist/. We copy the wasm there at build time.
-// In dev, it lives in node_modules/sql.js/dist/.
-function resolveWasmPath(): string {
-  // Try alongside the bundle first (production)
-  const bundleDir = __dirname;
-  const bundleWasm = path.join(bundleDir, "sql-wasm.wasm");
-  if (fs.existsSync(bundleWasm)) return bundleWasm;
-  // Fall back to node_modules (dev)
-  return path.resolve("node_modules/sql.js/dist/sql-wasm.wasm");
+// Load the wasm binary.
+// At build time, script/build.ts generates server/generated/sql-wasm-loader.ts which
+// embeds the wasm as base64 — this is bundled into dist/index.cjs and works everywhere
+// including Vercel Lambda (no filesystem path lookup needed).
+// In dev (tsx), the generated file may not exist yet — fall back to reading from node_modules.
+async function loadWasmBinary(): Promise<Buffer> {
+  try {
+    // This import is resolved at build time by esbuild (inlined into the CJS bundle)
+    const { wasmBinary } = await import("./generated/sql-wasm-loader");
+    return wasmBinary as Buffer;
+  } catch {
+    // Dev fallback: read from node_modules directly
+    const wasmPath = path.resolve("node_modules/sql.js/dist/sql-wasm.wasm");
+    return fs.readFileSync(wasmPath);
+  }
 }
 
 // Module-level db — set after initStorage() resolves
@@ -264,8 +269,7 @@ const CREATE_TABLES_SQL = `
 `;
 
 export async function initStorage(): Promise<void> {
-  const wasmPath = resolveWasmPath();
-  const wasmBinary = fs.readFileSync(wasmPath);
+  const wasmBinary = await loadWasmBinary();
 
   const SQL = await initSqlJs({ wasmBinary });
 
