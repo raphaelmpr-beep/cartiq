@@ -3,10 +3,7 @@
   "builds": [
     {
       "src": "dist/index.cjs",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": ["node_modules/better-sqlite3/**"]
-      }
+      "use": "@vercel/node"
     },
     {
       "src": "dist/public/**",
