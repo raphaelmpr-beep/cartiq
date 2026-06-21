@@ -26,6 +26,7 @@ export interface PricingInput {
   sellerType?: string | null;
   state?: string | null;
   city?: string | null;
+  lastVerifiedAt?: string | null;
 }
 
 export interface PricingResult {

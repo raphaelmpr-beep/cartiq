@@ -1,26 +1,25 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
-  "installCommand": "npm ci",
-  "outputDirectory": "dist/public",
-  "framework": null,
   "builds": [
     {
-      "src": "server/index.ts",
+      "src": "dist/index.cjs",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["dist/public/**", "dist/index.cjs"]
+        "includeFiles": ["node_modules/better-sqlite3/**"]
       }
+    },
+    {
+      "src": "dist/public/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "server/index.ts"
+      "dest": "dist/index.cjs"
     },
     {
-      "src": "/assets/(.*)",
-      "dest": "dist/public/assets/$1"
+      "handle": "filesystem"
     },
     {
       "src": "/(.*)",
