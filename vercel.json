@@ -3,7 +3,10 @@
   "builds": [
     {
       "src": "dist/index.cjs",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["dist/sql-wasm.wasm"]
+      }
     },
     {
       "src": "dist/public/**",

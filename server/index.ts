@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
+import { initStorage } from "./storage";
 import { createServer } from "node:http";
 
 const app = express();
@@ -77,6 +78,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Initialize sql.js database (pure WASM — no native binary)
+  await initStorage();
+
   // Seed database on startup
   try {
     const { seedDatabase } = await import("./seed");

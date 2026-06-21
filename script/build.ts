@@ -1,6 +1,8 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "node:fs/promises";
+import { rm, readFile, copyFile, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -13,7 +15,7 @@ const allowlist = [
   "date-fns",
   "dotenv",
   "drizzle-orm",
-  "drizzle-orm/better-sqlite3",
+  "drizzle-orm/sql-js",
   "drizzle-zod",
   "express",
   "express-rate-limit",
@@ -27,6 +29,7 @@ const allowlist = [
   "openai",
   "passport",
   "passport-local",
+  "sql.js",
   "stripe",
   "uuid",
   "ws",
@@ -62,6 +65,16 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  // Copy sql-wasm.wasm alongside the bundle so __dirname resolves it at runtime
+  const wasmSrc = resolve("node_modules/sql.js/dist/sql-wasm.wasm");
+  const wasmDest = resolve("dist/sql-wasm.wasm");
+  if (existsSync(wasmSrc)) {
+    await copyFile(wasmSrc, wasmDest);
+    console.log("copied sql-wasm.wasm → dist/sql-wasm.wasm");
+  } else {
+    console.warn("WARNING: sql-wasm.wasm not found at", wasmSrc);
+  }
 }
 
 buildAll().catch((err) => {

@@ -1,19 +1,42 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { eq, and, like, gte, lte, sql, inArray } from "drizzle-orm";
+import initSqlJs from "sql.js";
+import { drizzle } from "drizzle-orm/sql-js";
+import type { SQLJsDatabase } from "drizzle-orm/sql-js";
+import { eq, and } from "drizzle-orm";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import * as schema from "@shared/schema";
 
 // On Vercel (Lambda), the working directory is read-only — use /tmp for SQLite.
 // Locally (pplx.app sandbox), use data.db in CWD so publish_website can snapshot it.
 const DB_PATH = process.env.VERCEL ? "/tmp/data.db" : "data.db";
-const sqlite = new Database(DB_PATH);
-const db = drizzle(sqlite, { schema });
 
-// Enable WAL mode for better performance
-sqlite.pragma("journal_mode = WAL");
+// Resolve the sql-wasm.wasm file path.
+// In production (dist/index.cjs), __dirname is dist/. We copy the wasm there at build time.
+// In dev, it lives in node_modules/sql.js/dist/.
+function resolveWasmPath(): string {
+  // Try alongside the bundle first (production)
+  const bundleDir = __dirname;
+  const bundleWasm = path.join(bundleDir, "sql-wasm.wasm");
+  if (fs.existsSync(bundleWasm)) return bundleWasm;
+  // Fall back to node_modules (dev)
+  return path.resolve("node_modules/sql.js/dist/sql-wasm.wasm");
+}
 
-// Create tables on startup
-sqlite.exec(`
+// Module-level db — set after initStorage() resolves
+let db: SQLJsDatabase<typeof schema>;
+let sqlJsDb: import("sql.js").Database;
+
+// Persist the database back to disk after every write operation
+function persistDb(): void {
+  try {
+    const data = sqlJsDb.export();
+    fs.writeFileSync(DB_PATH, Buffer.from(data));
+  } catch (e) {
+    console.error("[storage] persist error:", e);
+  }
+}
+
+const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL UNIQUE,
@@ -238,7 +261,29 @@ sqlite.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(email, listing_id)
   );
-`);
+`;
+
+export async function initStorage(): Promise<void> {
+  const wasmPath = resolveWasmPath();
+  const wasmBinary = fs.readFileSync(wasmPath);
+
+  const SQL = await initSqlJs({ wasmBinary });
+
+  // Load existing DB file if it exists
+  if (fs.existsSync(DB_PATH)) {
+    const fileData = fs.readFileSync(DB_PATH);
+    sqlJsDb = new SQL.Database(fileData);
+  } else {
+    sqlJsDb = new SQL.Database();
+  }
+
+  // Create all tables
+  sqlJsDb.run(CREATE_TABLES_SQL);
+  persistDb();
+
+  db = drizzle(sqlJsDb, { schema });
+  console.log("[storage] sql.js initialized, DB_PATH:", DB_PATH);
+}
 
 export interface IStorage {
   // Listings
@@ -279,6 +324,22 @@ export interface IStorage {
   hasDealer(slug: string): boolean;
   hasListing(slug: string): boolean;
   hasInventorySource(name: string): boolean;
+
+  // Watches
+  createWatch(data: schema.InsertListingWatch): schema.ListingWatch;
+  getWatchesByEmail(email: string): schema.ListingWatch[];
+  getWatchesForListing(listingId: number): schema.ListingWatch[];
+  getWatchById(id: number): schema.ListingWatch | undefined;
+  isWatching(email: string, listingId: number): boolean;
+  firePriceDropAlerts(listingId: number, newPrice: number): schema.ListingWatch[];
+  dismissWatch(id: number): boolean;
+  deleteWatch(id: number): boolean;
+
+  // Saved Listings
+  saveListing(email: string, listingId: number): schema.SavedListing;
+  unsaveListing(email: string, listingId: number): boolean;
+  isSaved(email: string, listingId: number): boolean;
+  getSavedByEmail(email: string): schema.SavedListing[];
 }
 
 class SQLiteStorage implements IStorage {
@@ -319,16 +380,21 @@ class SQLiteStorage implements IStorage {
   }
 
   createListing(data: schema.InsertListing): schema.Listing {
-    return db.insert(schema.listings).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.Listing;
+    const result = db.insert(schema.listings).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.Listing;
+    persistDb();
+    return result;
   }
 
   updateListing(id: number, data: Partial<schema.InsertListing>): schema.Listing | undefined {
-    return db.update(schema.listings).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.listings.id, id)).returning().get() as schema.Listing | undefined;
+    const result = db.update(schema.listings).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.listings.id, id)).returning().get() as schema.Listing | undefined;
+    persistDb();
+    return result;
   }
 
   deleteListing(id: number): boolean {
     const result = db.delete(schema.listings).where(eq(schema.listings.id, id)).run();
-    return result.changes > 0;
+    persistDb();
+    return (result as any).changes > 0;
   }
 
   createManyListings(data: schema.InsertListing[]): schema.Listing[] {
@@ -344,11 +410,15 @@ class SQLiteStorage implements IStorage {
   }
 
   createDealer(data: schema.InsertDealer): schema.Dealer {
-    return db.insert(schema.dealers).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.Dealer;
+    const result = db.insert(schema.dealers).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.Dealer;
+    persistDb();
+    return result;
   }
 
   updateDealer(id: number, data: Partial<schema.InsertDealer>): schema.Dealer | undefined {
-    return db.update(schema.dealers).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.dealers.id, id)).returning().get() as schema.Dealer | undefined;
+    const result = db.update(schema.dealers).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.dealers.id, id)).returning().get() as schema.Dealer | undefined;
+    persistDb();
+    return result;
   }
 
   getRetailSources(): schema.RetailSource[] {
@@ -360,15 +430,21 @@ class SQLiteStorage implements IStorage {
   }
 
   createRetailSource(data: schema.InsertRetailSource): schema.RetailSource {
-    return db.insert(schema.retailSources).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.RetailSource;
+    const result = db.insert(schema.retailSources).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.RetailSource;
+    persistDb();
+    return result;
   }
 
   updateRetailSource(id: number, data: Partial<schema.InsertRetailSource>): schema.RetailSource | undefined {
-    return db.update(schema.retailSources).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.retailSources.id, id)).returning().get() as schema.RetailSource | undefined;
+    const result = db.update(schema.retailSources).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.retailSources.id, id)).returning().get() as schema.RetailSource | undefined;
+    persistDb();
+    return result;
   }
 
   createDealCheck(data: schema.InsertDealCheck): schema.DealCheck {
-    return db.insert(schema.dealChecks).values({ ...data, createdAt: new Date().toISOString() }).returning().get() as schema.DealCheck;
+    const result = db.insert(schema.dealChecks).values({ ...data, createdAt: new Date().toISOString() }).returning().get() as schema.DealCheck;
+    persistDb();
+    return result;
   }
 
   getDealCheckById(id: number): schema.DealCheck | undefined {
@@ -380,11 +456,15 @@ class SQLiteStorage implements IStorage {
   }
 
   createInventorySource(data: schema.InsertInventorySource): schema.InventorySource {
-    return db.insert(schema.inventorySources).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.InventorySource;
+    const result = db.insert(schema.inventorySources).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.InventorySource;
+    persistDb();
+    return result;
   }
 
   updateInventorySource(id: number, data: Partial<schema.InsertInventorySource>): schema.InventorySource | undefined {
-    return db.update(schema.inventorySources).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.inventorySources.id, id)).returning().get() as schema.InventorySource | undefined;
+    const result = db.update(schema.inventorySources).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.inventorySources.id, id)).returning().get() as schema.InventorySource | undefined;
+    persistDb();
+    return result;
   }
 
   getSeoArticles(): schema.SeoArticle[] {
@@ -396,7 +476,9 @@ class SQLiteStorage implements IStorage {
   }
 
   createSeoArticle(data: schema.InsertSeoArticle): schema.SeoArticle {
-    return db.insert(schema.seoArticles).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.SeoArticle;
+    const result = db.insert(schema.seoArticles).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.SeoArticle;
+    persistDb();
+    return result;
   }
 
   hasSeoArticle(slug: string): boolean {
@@ -418,23 +500,25 @@ class SQLiteStorage implements IStorage {
   // ─── Watches ───────────────────────────────────────────────────────────────
 
   createWatch(data: schema.InsertListingWatch): schema.ListingWatch {
-    return db.insert(schema.listingWatches).values(data).returning().get();
+    const result = db.insert(schema.listingWatches).values(data).returning().get() as schema.ListingWatch;
+    persistDb();
+    return result;
   }
 
   getWatchesByEmail(email: string): schema.ListingWatch[] {
     return db.select().from(schema.listingWatches)
       .where(and(eq(schema.listingWatches.email, email.toLowerCase().trim()), eq(schema.listingWatches.dismissed, false)))
-      .all();
+      .all() as schema.ListingWatch[];
   }
 
   getWatchesForListing(listingId: number): schema.ListingWatch[] {
     return db.select().from(schema.listingWatches)
       .where(and(eq(schema.listingWatches.listingId, listingId), eq(schema.listingWatches.dismissed, false)))
-      .all();
+      .all() as schema.ListingWatch[];
   }
 
   getWatchById(id: number): schema.ListingWatch | undefined {
-    return db.select().from(schema.listingWatches).where(eq(schema.listingWatches.id, id)).get();
+    return db.select().from(schema.listingWatches).where(eq(schema.listingWatches.id, id)).get() as schema.ListingWatch | undefined;
   }
 
   isWatching(email: string, listingId: number): boolean {
@@ -446,23 +530,22 @@ class SQLiteStorage implements IStorage {
       )).get();
   }
 
-  // Fire price-drop alerts: called after a listing price update.
-  // Returns the watches that were newly alerted.
   firePriceDropAlerts(listingId: number, newPrice: number): schema.ListingWatch[] {
     const watches = this.getWatchesForListing(listingId);
     const alerted: schema.ListingWatch[] = [];
     const now = new Date().toISOString();
     for (const w of watches) {
-      if (w.alertedAt) continue; // already alerted
+      if (w.alertedAt) continue;
       if (newPrice < w.priceAtWatch) {
         const pct = ((w.priceAtWatch - newPrice) / w.priceAtWatch) * 100;
         const updated = db.update(schema.listingWatches)
           .set({ alertedAt: now, alertPrice: newPrice, alertPct: Math.round(pct * 10) / 10 })
           .where(eq(schema.listingWatches.id, w.id))
-          .returning().get();
+          .returning().get() as schema.ListingWatch | undefined;
         if (updated) alerted.push(updated);
       }
     }
+    if (alerted.length > 0) persistDb();
     return alerted;
   }
 
@@ -471,11 +554,13 @@ class SQLiteStorage implements IStorage {
       .set({ dismissed: true })
       .where(eq(schema.listingWatches.id, id))
       .returning().get();
+    persistDb();
     return !!result;
   }
 
   deleteWatch(id: number): boolean {
     const result = db.delete(schema.listingWatches).where(eq(schema.listingWatches.id, id)).returning().get();
+    persistDb();
     return !!result;
   }
 
@@ -484,9 +569,11 @@ class SQLiteStorage implements IStorage {
   saveListing(email: string, listingId: number): schema.SavedListing {
     const existing = this.getSavedEntry(email, listingId);
     if (existing) return existing;
-    return db.insert(schema.savedListings)
+    const result = db.insert(schema.savedListings)
       .values({ email: email.toLowerCase().trim(), listingId })
-      .returning().get();
+      .returning().get() as schema.SavedListing;
+    persistDb();
+    return result;
   }
 
   unsaveListing(email: string, listingId: number): boolean {
@@ -495,6 +582,7 @@ class SQLiteStorage implements IStorage {
         eq(schema.savedListings.email, email.toLowerCase().trim()),
         eq(schema.savedListings.listingId, listingId)
       )).returning().get();
+    persistDb();
     return !!result;
   }
 
@@ -507,13 +595,13 @@ class SQLiteStorage implements IStorage {
       .where(and(
         eq(schema.savedListings.email, email.toLowerCase().trim()),
         eq(schema.savedListings.listingId, listingId)
-      )).get();
+      )).get() as schema.SavedListing | undefined;
   }
 
   getSavedByEmail(email: string): schema.SavedListing[] {
     return db.select().from(schema.savedListings)
       .where(eq(schema.savedListings.email, email.toLowerCase().trim()))
-      .all();
+      .all() as schema.SavedListing[];
   }
 }
 
