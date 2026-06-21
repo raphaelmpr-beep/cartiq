@@ -71,12 +71,29 @@ export const wasmBinary = Buffer.from(wasmBase64, "base64");
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
+  // Build 1: pplx.app / local — uses httpServer.listen()
   await esbuild({
     entryPoints: ["server/index.ts"],
     platform: "node",
     bundle: true,
     format: "cjs",
     outfile: "dist/index.cjs",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    minify: true,
+    external: externals,
+    logLevel: "info",
+  });
+
+  // Build 2: Vercel Lambda — exports handler, no listen()
+  console.log("building vercel handler...");
+  await esbuild({
+    entryPoints: ["server/vercel-handler.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/vercel-handler.cjs",
     define: {
       "process.env.NODE_ENV": '"production"',
     },

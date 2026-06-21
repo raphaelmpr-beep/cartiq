@@ -78,18 +78,38 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Initialize sql.js database (pure WASM — no native binary)
-  await initStorage();
+  let initError: Error | null = null;
 
-  // Seed database on startup
   try {
-    const { seedDatabase } = await import("./seed");
-    await seedDatabase();
-  } catch (e) {
-    console.error("Seed error:", e);
-  }
+    // Initialize sql.js database (pure WASM — no native binary)
+    await initStorage();
 
-  await registerRoutes(httpServer, app);
+    // Seed database on startup
+    try {
+      const { seedDatabase } = await import("./seed");
+      await seedDatabase();
+    } catch (e) {
+      console.error("Seed error:", e);
+    }
+
+    await registerRoutes(httpServer, app);
+  } catch (e: any) {
+    initError = e;
+    console.error("[INIT ERROR]", e?.message, e?.stack);
+    // Register a catch-all that surfaces the real error — Lambda won't crash silently
+    app.use((_req: Request, res: Response) => {
+      res.status(500).json({
+        error: "init_failed",
+        message: initError?.message ?? "Unknown init error",
+        stack: initError?.stack?.split("\n").slice(0, 6),
+        env: {
+          VERCEL: process.env.VERCEL,
+          NODE_ENV: process.env.NODE_ENV,
+          cwd: process.cwd(),
+        },
+      });
+    });
+  }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
@@ -107,11 +127,13 @@ app.use((req, res, next) => {
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
-    const { setupVite } = await import("./vite");
-    await setupVite(httpServer, app);
+  if (!initError) {
+    if (process.env.NODE_ENV === "production") {
+      serveStatic(app);
+    } else {
+      const { setupVite } = await import("./vite");
+      await setupVite(httpServer, app);
+    }
   }
 
   // ALWAYS serve the app on the port specified in the environment variable PORT

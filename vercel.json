@@ -2,11 +2,9 @@
   "version": 2,
   "builds": [
     {
-      "src": "dist/index.cjs",
+      "src": "dist/vercel-handler.cjs",
       "use": "@vercel/node",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
+      "config": { "maxLambdaSize": "50mb" }
     },
     {
       "src": "dist/public/**",
@@ -14,17 +12,9 @@
     }
   ],
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "dist/index.cjs"
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "dist/public/index.html"
-    }
+    { "src": "/api/(.*)", "dest": "dist/vercel-handler.cjs" },
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "dist/public/index.html" }
   ],
   "env": {
     "NODE_ENV": "production",
