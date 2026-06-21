@@ -1,5 +1,5 @@
 node_modules/
-dist/
+# dist/ is committed so Vercel gets the pre-built output (better-sqlite3 rebuilt on Lambda)
 .vite/
 
 # SQLite database files — never commit; exposes demo data at rest

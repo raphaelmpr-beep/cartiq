@@ -194,11 +194,11 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
       // FIX: coerce JSON booleans → string for lifted/streetLegalClaimed
       // SQLite text columns throw on raw JS booleans
-      function coerceBoolStr(v: any): string {
+      const coerceBoolStr = (v: any): string => {
         if (v === true || v === "true" || v === "yes") return "yes";
         if (v === false || v === "false" || v === "no") return "no";
         return "unknown";
-      }
+      };
       const liftedStr = coerceBoolStr(data.lifted);
       const streetLegalStr = coerceBoolStr(data.streetLegalClaimed);
 
