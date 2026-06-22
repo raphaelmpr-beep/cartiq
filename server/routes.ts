@@ -617,6 +617,57 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // ── Inline import helper — promotes pending_import → listing without pipeline.js ──
+  async function approvePendingImport(sb: any, id: number): Promise<{ listingId: number; title: string }> {
+    const { data: imp, error: fetchErr } = await sb
+      .from("pending_imports")
+      .select("*")
+      .eq("id", id)
+      .single();
+    if (fetchErr || !imp) throw new Error(fetchErr?.message || `pending_import #${id} not found`);
+
+    const title = imp.raw_title || [imp.year, imp.make, imp.model].filter(Boolean).join(" ") || "Unknown listing";
+
+    const newListing = {
+      title,
+      year:               imp.year        ?? null,
+      brand:              imp.make        ?? null,
+      model:              imp.model       ?? null,
+      condition:          imp.condition   ?? null,
+      asking_price:       imp.price       ?? null,
+      image_url:          imp.image_url   ?? null,
+      image_urls_json:    imp.image_urls_json ?? "[]",
+      city:               imp.location_city  ?? null,
+      state:              imp.location_state ?? null,
+      source_listing_url: imp.source_url  ?? null,
+      source_type:        "dealer_site",
+      sync_source:        imp.dealer_slug ?? null,
+      seller_type:        "dealer",
+      status:             "active",
+      public_listing:     true,
+      price_confidence:   imp.price ? "confirmed" : "unavailable",
+      deal_rating:        "unknown",
+      valuation_confidence: "low",
+      verified_at:        new Date().toISOString(),
+      last_checked_at:    new Date().toISOString(),
+    };
+
+    const { data: inserted, error: insertErr } = await sb
+      .from("listings")
+      .insert(newListing)
+      .select("id")
+      .single();
+    if (insertErr) throw new Error(insertErr.message);
+
+    await sb.from("pending_imports").update({
+      status: "imported",
+      reviewed_at: new Date().toISOString(),
+      imported_listing_id: inserted.id,
+    }).eq("id", id);
+
+    return { listingId: inserted.id, title };
+  }
+
   // PATCH /api/admin/pending-imports/:id — approve/reject a pending import
   app.patch("/api/admin/pending-imports/:id", requireAdmin, async (req, res) => {
     try {
@@ -625,12 +676,13 @@ export function registerRoutes(httpServer: Server, app: Express) {
       const id = parseInt(req.params.id);
       const { action } = req.body; // 'approve' | 'reject'
       if (action === "approve") {
-        const { runSync } = await import("./sync/pipeline.js");
-        const result = await runSync({ mode: "import", import_id: id });
-        return res.json(result);
+        const result = await approvePendingImport(sb, id);
+        return res.json({ ok: true, ...result });
       }
       if (action === "reject") {
-        const { data, error } = await sb.from("pending_imports").update({ status: "rejected", reviewed_at: new Date().toISOString() }).eq("id", id).select().single();
+        const { data, error } = await sb.from("pending_imports")
+          .update({ status: "rejected", reviewed_at: new Date().toISOString() })
+          .eq("id", id).select().single();
         if (error) return res.status(500).json({ error: error.message });
         return res.json(data);
       }
@@ -640,14 +692,13 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  // POST /api/admin/pending-imports/bulk-approve — approve all pending imports for a dealer
+  // POST /api/admin/pending-imports/bulk-approve — approve a set of pending imports
   app.post("/api/admin/pending-imports/bulk-approve", requireAdmin, async (req, res) => {
     try {
       const { createClient } = await import("@supabase/supabase-js");
       const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
       const { dealer_slug, ids } = req.body as { dealer_slug?: string; ids?: number[] };
 
-      // Fetch the pending rows to approve
       let q = sb.from("pending_imports").select("id").eq("status", "pending");
       if (ids && ids.length > 0) {
         q = q.in("id", ids);
@@ -658,17 +709,15 @@ export function registerRoutes(httpServer: Server, app: Express) {
       }
       const { data: rows, error: fetchErr } = await q;
       if (fetchErr) return res.status(500).json({ error: fetchErr.message });
-      if (!rows || rows.length === 0) return res.json({ approved: 0, failed: 0, errors: [] });
+      if (!rows || rows.length === 0) return res.json({ approved: 0, failed: 0, errors: [], total: 0 });
 
-      const { runSync } = await import("./sync/pipeline.js");
       let approved = 0;
       let failed = 0;
       const errors: { id: number; error: string }[] = [];
 
-      // Process sequentially to avoid overwhelming the DB
       for (const row of rows) {
         try {
-          await runSync({ mode: "import", import_id: row.id });
+          await approvePendingImport(sb, row.id);
           approved++;
         } catch (e: any) {
           failed++;
