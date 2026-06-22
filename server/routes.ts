@@ -101,7 +101,6 @@ function enrichListingWithPricing(data: Record<string, any>): Record<string, any
   return {
     ...data,
     cartiq_estimated_value: result.cartiqMarketValue,
-    cartiq_market_value: result.cartiqMarketValue,
     estimated_delivery_cost: sellerOffersDelivery
       ? (result.estimatedDeliveryCost >= 0 ? result.estimatedDeliveryCost : (data.estimated_delivery_cost ?? data.estimatedDeliveryCost))
       : null,
