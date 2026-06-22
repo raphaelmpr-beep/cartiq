@@ -1,39 +1,52 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  RefreshCw, ExternalLink, TriangleAlert, CheckCircle2,
-  AlertCircle, CircleDashed, Activity, Database, Loader2
+  RefreshCw, ExternalLink, TriangleAlert, AlertCircle,
+  Database, Loader2, Info, CheckCircle2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { apiRequest } from "@/lib/queryClient";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type ReconciliationTotals = {
-  mappedDealers: number;
-  dealersWithPublicListings: number;
-  dealersNeverSynced: number;
-  publicActiveListings: number;
-  publicActiveFlGa: number;
-  pendingImports: number;
-  pendingReview: number;
-  importedFromPending: number;
-  rejectedFromPending: number;
+  // Listing counts
+  totalAdminListings: number;
+  activeListingsTotal: number;
+  activePublicAll: number;
+  activePublicFlGa: number;
+  activePublicNullState: number;
+  activePrivate: number;
   inactiveListings: number;
   pendingReviewListings: number;
-  unavailableListings: number;
-  staleListings: number;
-  adapterErrors: number;
-  partialCoverageDealers: number;
+  priceConfirmed: number;
+  priceUnavailable: number;
+  // Pending import counts
+  totalPendingImportRecords: number;
+  pendingAwaitingReview: number;
+  importedFromPending: number;
+  rejectedFromPending: number;
+  duplicateFromPending: number;
+  // Dealer/source counts
+  mappedDealerProfiles: number;
+  totalAuditSources: number;
+  sourcesWithPublicListings: number;
+  sourcesNeverSynced: number;
+  sourcesWithAdapterErrors: number;
+  sourcesPartialCoverage: number;
+  sourcesWithPendingImports: number;
+  // Gap summary
   gapSummary: {
-    publicSearch: number;
-    pendingNotPublished: number;
-    rejectedImports: number;
+    searchPageListings: number;
+    apiListingsCount: number;
+    activePublicNullStateGap: number;
     inactiveHidden: number;
     pendingReviewHidden: number;
-    notSyncedDealers: number;
-    partialDealers: number;
+    importedNullState: number;
+    pendingImportAwaitingReview: number;
+    rejectedImports: number;
+    notSyncedSources: number;
+    partialSources: number;
   };
 };
 
@@ -44,22 +57,26 @@ type DealerRow = {
   city?: string;
   inventoryUrl?: string;
   publicActiveCount: number;
+  publicActiveNullState: number;
   publicInactiveCount: number;
-  pendingImportCount: number;
+  pendingReviewListingCount: number;
+  unavailableCount: number;
+  totalImportRecords: number;
   pendingReviewCount: number;
+  importedCount: number;
   rejectedPendingCount: number;
   duplicatePendingCount: number;
-  importedCount: number;
   lastSyncAt?: string;
   lastSyncStatus?: string;
   lastDiscoveredCount?: number;
   lastInsertedPendingCount?: number;
   coverageStatus: string;
   actionNeeded: string;
+  valuationReviewNeeded: boolean;
   notes?: string;
 };
 
-// ── Status meta ───────────────────────────────────────────────────────────────
+// ── Status + action meta ───────────────────────────────────────────────────────
 
 const COVERAGE_META: Record<string, { label: string; color: string }> = {
   verified_full_inventory:  { label: "Verified Full",         color: "bg-green-100 text-green-800 border-green-200"   },
@@ -82,8 +99,7 @@ const ACTION_META: Record<string, { label: string; color: string }> = {
   handle_load_more:         { label: "Handle Load-More",      color: "text-purple-700" },
   split_location_inventory: { label: "Split Locations",       color: "text-blue-700"   },
   verify_public_listings:   { label: "Verify Listings",       color: "text-amber-700"  },
-  mark_inactive:            { label: "Mark Inactive",         color: "text-gray-600"   },
-  request_dealer_feed:      { label: "Request Feed",          color: "text-gray-600"   },
+  valuation_review:         { label: "Valuation Review",      color: "text-orange-700" },
   none:                     { label: "—",                     color: "text-muted-foreground" },
 };
 
@@ -98,47 +114,163 @@ function CoverageBadge({ status }: { status: string }) {
 
 // ── Summary card ──────────────────────────────────────────────────────────────
 
-function SummaryCard({ label, value, sub, color = "text-foreground", warn = false }: {
-  label: string; value: number | string; sub?: string; color?: string; warn?: boolean;
+function StatCard({ label, value, sub, color = "text-foreground", warn = false, tip }: {
+  label: string; value: number | string; sub?: string; color?: string; warn?: boolean; tip?: string;
 }) {
   return (
-    <div className={`bg-white border rounded-lg p-4 ${warn && Number(value) > 0 ? "border-amber-300 bg-amber-50" : "border-border"}`}>
-      <p className={`text-2xl font-bold ${color}`}>{value}</p>
-      <p className="text-xs font-medium text-foreground mt-0.5">{label}</p>
+    <div className={`bg-white border rounded-lg p-3 ${warn && Number(value) > 0 ? "border-amber-300 bg-amber-50" : "border-border"}`}
+         title={tip}>
+      <p className={`text-xl font-bold tabular-nums ${color}`}>{value}</p>
+      <p className="text-xs font-medium text-foreground mt-0.5 leading-tight">{label}</p>
       {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
     </div>
   );
 }
 
-// ── Gap analysis panel ────────────────────────────────────────────────────────
+// ── Count reconciliation explainer ───────────────────────────────────────────
 
-function GapPanel({ gap }: { gap: ReconciliationTotals["gapSummary"] }) {
-  const items = [
-    { label: "In public search",          value: gap.publicSearch,         color: "text-green-700",  note: "active + public" },
-    { label: "Pending (not yet published)", value: gap.pendingNotPublished, color: "text-amber-600",  note: "awaiting review" },
-    { label: "Rejected imports",           value: gap.rejectedImports,     color: "text-gray-500",   note: "skipped by admin" },
-    { label: "Inactive (hidden)",          value: gap.inactiveHidden,      color: "text-gray-500",   note: "status=inactive" },
-    { label: "Pending review listings",    value: gap.pendingReviewHidden, color: "text-amber-600",  note: "status=pending_review" },
-    { label: "Dealers never synced",       value: gap.notSyncedDealers,    color: "text-red-600",    note: "no adapter run yet" },
-    { label: "Partial coverage dealers",   value: gap.partialDealers,      color: "text-orange-600", note: "browser_required / partial" },
-  ];
+function ReconciliationExplainer({ totals }: { totals: ReconciliationTotals }) {
+  const g = totals.gapSummary;
+  const searchMatchesApi = g.searchPageListings === g.apiListingsCount;
 
   return (
-    <div className="bg-muted/40 border border-border rounded-lg p-4">
-      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-        <Database className="h-4 w-4" /> Inventory Gap Analysis
+    <div className="bg-muted/40 border border-border rounded-lg p-4 space-y-3">
+      <h3 className="text-sm font-semibold flex items-center gap-2">
+        <Database className="h-4 w-4" /> Count Reconciliation — Why Numbers Differ
       </h3>
-      <div className="space-y-2">
-        {items.map(item => (
-          <div key={item.label} className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">{item.label}</span>
-            <div className="flex items-center gap-2">
-              <span className={`font-bold ${item.color}`}>{item.value}</span>
-              <span className="text-xs text-muted-foreground">({item.note})</span>
-            </div>
+
+      {/* The 3 headline counts explained */}
+      <div className="space-y-2 text-sm">
+        <div className="flex items-start gap-2 p-2 bg-white rounded border border-border">
+          <span className="font-bold text-green-700 tabular-nums w-8 shrink-0">{g.searchPageListings}</span>
+          <div>
+            <p className="font-medium">Public search listings (FL + GA only)</p>
+            <p className="text-xs text-muted-foreground">status=active, public_listing=true, state IN (FL, GA). What users see on /search.</p>
           </div>
-        ))}
+        </div>
+        <div className="flex items-start gap-2 p-2 bg-white rounded border border-border">
+          <span className="font-bold text-blue-700 tabular-nums w-8 shrink-0">{g.apiListingsCount}</span>
+          <div>
+            <p className="font-medium">All active public listings (all states)</p>
+            <p className="text-xs text-muted-foreground">status=active, public_listing=true, no state filter. What Listings tab and /api/listings returns.</p>
+            {g.activePublicNullStateGap > 0 && (
+              <p className="text-xs text-amber-700 mt-0.5 font-medium">
+                ↳ {g.activePublicNullStateGap} listing{g.activePublicNullStateGap !== 1 ? "s" : ""} have state=NULL — visible in Listings tab but hidden from Search page.
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-start gap-2 p-2 bg-white rounded border border-border">
+          <span className="font-bold text-foreground tabular-nums w-8 shrink-0">{totals.totalAdminListings}</span>
+          <div>
+            <p className="font-medium">Admin listing records (all statuses)</p>
+            <p className="text-xs text-muted-foreground">
+              {totals.activeListingsTotal} active + {totals.inactiveListings} inactive + {totals.pendingReviewListings} pending_review = {totals.totalAdminListings} total rows in listings table.
+            </p>
+          </div>
+        </div>
       </div>
+
+      {/* Hidden listings breakdown */}
+      <div className="space-y-1">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Hidden from public search</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[
+            { label: "state=NULL (no location)", value: g.activePublicNullStateGap, color: "text-amber-700" },
+            { label: "Inactive listings", value: g.inactiveHidden, color: "text-gray-600" },
+            { label: "Pending review listings", value: g.pendingReviewHidden, color: "text-amber-600" },
+            { label: "Import records rejected", value: g.rejectedImports, color: "text-gray-500" },
+          ].map(item => (
+            <div key={item.label} className="bg-white border border-border rounded p-2">
+              <p className={`text-base font-bold tabular-nums ${item.color}`}>{item.value}</p>
+              <p className="text-xs text-muted-foreground">{item.label}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Mismatch warning */}
+      {!searchMatchesApi && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded p-2">
+          <TriangleAlert className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+          <p className="text-xs text-amber-800">
+            <strong>Count mismatch:</strong> Search page shows {g.searchPageListings} but /api/listings returns {g.apiListingsCount}.
+            Gap of {g.apiListingsCount - g.searchPageListings}: {g.activePublicNullStateGap} listings have state=NULL and are excluded by the Search page state filter.
+            Fix: set state="FL" or "GA" on these {g.activePublicNullStateGap} jax listings.
+          </p>
+        </div>
+      )}
+      {searchMatchesApi && (
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded p-2">
+          <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+          <p className="text-xs text-green-800">Search page count matches /api/listings — no hidden filter mismatch.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Mobile dealer card ─────────────────────────────────────────────────────────
+
+function DealerCard({ row }: { row: DealerRow }) {
+  const action = ACTION_META[row.actionNeeded] || ACTION_META["none"];
+  const isNeverSynced = row.coverageStatus === "not_synced";
+  return (
+    <div className={`border border-border rounded-lg p-3 bg-white space-y-2 ${isNeverSynced ? "opacity-60" : ""}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-medium text-sm truncate">{row.dealerName}</p>
+          <p className="text-xs text-muted-foreground">{row.dealerSlug}</p>
+          <p className="text-xs text-muted-foreground">{[row.city, row.state].filter(Boolean).join(", ") || "—"}</p>
+        </div>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <CoverageBadge status={row.coverageStatus} />
+          {row.actionNeeded !== "none" && (
+            <span className={`text-xs font-medium ${action.color}`}>→ {action.label}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-4 gap-1 text-xs">
+        <div className="bg-muted rounded p-1.5 text-center">
+          <p className={`font-bold ${row.publicActiveCount > 0 ? "text-green-700" : "text-muted-foreground"}`}>{row.publicActiveCount}</p>
+          <p className="text-muted-foreground leading-tight">Live</p>
+        </div>
+        <div className="bg-muted rounded p-1.5 text-center">
+          <p className={`font-bold ${row.pendingReviewCount > 0 ? "text-amber-600" : "text-muted-foreground"}`}>{row.pendingReviewCount}</p>
+          <p className="text-muted-foreground leading-tight">Pending</p>
+        </div>
+        <div className="bg-muted rounded p-1.5 text-center">
+          <p className="font-bold text-muted-foreground">{row.rejectedPendingCount}</p>
+          <p className="text-muted-foreground leading-tight">Rejected</p>
+        </div>
+        <div className="bg-muted rounded p-1.5 text-center">
+          <p className="font-bold text-muted-foreground">{row.importedCount}</p>
+          <p className="text-muted-foreground leading-tight">Imported</p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>
+          {row.lastSyncAt
+            ? `Last sync: ${new Date(row.lastSyncAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+            : "Never synced"}
+        </span>
+        {row.inventoryUrl && (
+          <a href={row.inventoryUrl} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1 text-blue-600 hover:underline">
+            <ExternalLink className="h-3 w-3" /> Inventory
+          </a>
+        )}
+      </div>
+      {row.publicActiveNullState > 0 && (
+        <p className="text-xs text-amber-700 font-medium">
+          ⚠ {row.publicActiveNullState} listing{row.publicActiveNullState !== 1 ? "s" : ""} have state=NULL (hidden from Search)
+        </p>
+      )}
+      {row.notes && (
+        <p className="text-xs text-muted-foreground truncate" title={row.notes}>{row.notes}</p>
+      )}
     </div>
   );
 }
@@ -169,10 +301,6 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
     return (
       <div className="py-8">
         <p className="text-sm text-red-600 mb-2">Failed to load reconciliation data.</p>
-        <p className="text-xs text-muted-foreground">
-          If this is the first time running, the <code>adapter_run_log</code> table may not exist yet.
-          Run the DDL migration first.
-        </p>
         <Button variant="outline" size="sm" onClick={() => refetch()} className="mt-3 gap-1.5">
           <RefreshCw className="h-3.5 w-3.5" /> Retry
         </Button>
@@ -180,153 +308,175 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
     );
   }
 
+  const neverSynced = byDealer.filter(r => r.coverageStatus === "not_synced");
+  const hasSynced = byDealer.filter(r => r.coverageStatus !== "not_synced");
+
   return (
     <div className="space-y-6">
 
-      {/* Top summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <SummaryCard label="Mapped Dealers"         value={totals.mappedDealers}             color="text-foreground" />
-        <SummaryCard label="Public Active"          value={totals.publicActiveFlGa}          color="text-green-700" />
-        <SummaryCard label="Pending Imports"        value={totals.pendingReview}             color={totals.pendingReview > 0 ? "text-amber-600" : "text-muted-foreground"} warn={totals.pendingReview > 0} sub="awaiting review" />
-        <SummaryCard label="Never Synced"           value={totals.dealersNeverSynced}        color={totals.dealersNeverSynced > 0 ? "text-red-600" : "text-muted-foreground"} warn={totals.dealersNeverSynced > 0} />
-        <SummaryCard label="Partial Coverage"       value={totals.partialCoverageDealers}    color={totals.partialCoverageDealers > 0 ? "text-orange-600" : "text-muted-foreground"} warn />
-        <SummaryCard label="Adapter Errors"         value={totals.adapterErrors}             color={totals.adapterErrors > 0 ? "text-red-600" : "text-muted-foreground"} warn={totals.adapterErrors > 0} />
-      </div>
-
-      {/* Pending imports banner */}
-      {totals.pendingReview > 0 && (
-        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
-          <TriangleAlert className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-          <p className="text-sm text-amber-800">
-            <strong>{totals.pendingReview} pending imports</strong> are waiting for admin review.
-            They are <strong>not published</strong> to public search. Go to the Pending Imports tab to approve or reject them.
-          </p>
+      {/* ── Section 1: Listing counts ─────────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Listing Records</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          <StatCard label="Admin listing records" value={totals.totalAdminListings}
+            sub="all statuses" color="text-foreground"
+            tip="Total rows in listings table regardless of status or public flag" />
+          <StatCard label="All active listings" value={totals.activePublicAll}
+            sub="active + public" color="text-blue-700"
+            tip="status=active, public_listing=true. What /api/listings returns." />
+          <StatCard label="Public search listings" value={totals.activePublicFlGa}
+            sub="FL + GA only" color="text-green-700"
+            tip="status=active, public_listing=true, state IN (FL,GA). What users see." />
+          <StatCard label="Missing state (no location)" value={totals.activePublicNullState}
+            sub="active but state=NULL" color={totals.activePublicNullState > 0 ? "text-amber-700" : "text-muted-foreground"}
+            warn={totals.activePublicNullState > 0}
+            tip="Active+public but state is NULL. In /api/listings but NOT in Search page." />
+          <StatCard label="Inactive listings" value={totals.inactiveListings}
+            sub="status=inactive" color="text-gray-500"
+            tip="Removed from public view. Includes 3guys parts/accessories." />
+          <StatCard label="Pending review listings" value={totals.pendingReviewListings}
+            sub="status=pending_review" color={totals.pendingReviewListings > 0 ? "text-amber-600" : "text-muted-foreground"}
+            warn={totals.pendingReviewListings > 0}
+            tip="Manually entered but not yet approved for public search." />
         </div>
-      )}
-
-      {/* Gap analysis */}
-      <GapPanel gap={totals.gapSummary} />
-
-      {/* Secondary counts */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-        {[
-          { label: "Inactive listings",         value: totals.inactiveListings,       note: "status=inactive" },
-          { label: "Pending review listings",   value: totals.pendingReviewListings,  note: "status=pending_review" },
-          { label: "Total pending imports",     value: totals.pendingImports,         note: "all statuses" },
-          { label: "Rejected imports (total)",  value: totals.rejectedFromPending,    note: "skipped" },
-        ].map(item => (
-          <div key={item.label} className="bg-muted rounded p-3">
-            <p className="text-lg font-bold">{item.value}</p>
-            <p className="text-xs font-medium">{item.label}</p>
-            <p className="text-xs text-muted-foreground">{item.note}</p>
-          </div>
-        ))}
       </div>
 
-      {/* Dealer audit table */}
+      {/* ── Section 2: Price confidence ───────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Price Confidence (active + public)</p>
+        <div className="grid grid-cols-2 sm:grid-cols-2 gap-2">
+          <StatCard label="Price confirmed" value={totals.priceConfirmed}
+            sub="asking_price present" color="text-green-700"
+            tip="Active+public listings where price was scraped and confirmed." />
+          <StatCard label="Price unavailable" value={totals.priceUnavailable}
+            sub="no price found" color={totals.priceUnavailable > 0 ? "text-amber-600" : "text-muted-foreground"}
+            warn={totals.priceUnavailable > 0}
+            tip="Active+public listings where price could not be found (e.g. jax listings)." />
+        </div>
+      </div>
+
+      {/* ── Section 3: Import records ─────────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Import Pipeline Records (pending_imports table)</p>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <StatCard label="Total import records" value={totals.totalPendingImportRecords}
+            sub="all statuses" color="text-foreground"
+            tip="All rows ever written to pending_imports table." />
+          <StatCard label="Awaiting review" value={totals.pendingAwaitingReview}
+            sub="status=pending" color={totals.pendingAwaitingReview > 0 ? "text-amber-600" : "text-green-700"}
+            warn={totals.pendingAwaitingReview > 0}
+            tip="Discovered but not yet approved or rejected." />
+          <StatCard label="Imported (approved)" value={totals.importedFromPending}
+            sub="status=imported" color="text-green-700"
+            tip="Approved and promoted to active listings." />
+          <StatCard label="Rejected" value={totals.rejectedFromPending}
+            sub="status=rejected" color="text-gray-500"
+            tip="Rejected by adapter dedup logic or admin action. Not published." />
+          <StatCard label="Duplicates" value={totals.duplicateFromPending}
+            sub="status=duplicate" color="text-gray-400"
+            tip="Found but already existed in listings table." />
+        </div>
+      </div>
+
+      {/* ── Section 4: Dealer / source counts ────────────────────────────── */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Dealer & Source Coverage</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <StatCard label="Dealer profiles (FL+GA)" value={totals.mappedDealerProfiles}
+            sub="rows in dealers table" color="text-foreground"
+            tip="Dealer records in the dealers table for FL and GA." />
+          <StatCard label="Total audit sources" value={totals.totalAuditSources}
+            sub="dealer profiles + sync slugs" color="text-foreground"
+            tip="Union of dealer profiles + sync_source slugs that have any import/listing activity. Some sync_source slugs don't have a matching dealer profile row." />
+          <StatCard label="Sources with live listings" value={totals.sourcesWithPublicListings}
+            sub="have active+public listings" color="text-green-700" />
+          <StatCard label="Never synced" value={totals.sourcesNeverSynced}
+            sub="no adapter run yet" color={totals.sourcesNeverSynced > 0 ? "text-red-600" : "text-muted-foreground"}
+            warn={totals.sourcesNeverSynced > 0}
+            tip="Dealer profiles in the dealers table with no listing or import activity." />
+        </div>
+      </div>
+
+      {/* ── Count reconciliation explainer ────────────────────────────────── */}
+      <ReconciliationExplainer totals={totals} />
+
+      {/* ── Active sources dealer table ───────────────────────────────────── */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold">Dealer Audit ({byDealer.length} sources)</h3>
+          <h3 className="text-sm font-semibold">
+            Active Sources ({hasSynced.length})
+            <span className="text-xs font-normal text-muted-foreground ml-2">— have listings or import activity</span>
+          </h3>
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} className="gap-1.5">
             {isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Refresh
           </Button>
         </div>
 
-        {/* Mobile: card view */}
+        {/* Mobile cards */}
         <div className="sm:hidden space-y-3">
-          {byDealer.map(row => (
-            <Card key={row.dealerSlug} className={`${row.coverageStatus === "not_synced" ? "opacity-60" : ""}`}>
-              <CardContent className="p-3 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-medium text-sm">{row.dealerName}</p>
-                    <p className="text-xs text-muted-foreground">{[row.city, row.state].filter(Boolean).join(", ")}</p>
-                  </div>
-                  <CoverageBadge status={row.coverageStatus} />
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div><span className="text-muted-foreground">Live</span><br /><strong className="text-green-700">{row.publicActiveCount}</strong></div>
-                  <div><span className="text-muted-foreground">Pending</span><br /><strong className={row.pendingReviewCount > 0 ? "text-amber-600" : ""}>{row.pendingReviewCount}</strong></div>
-                  <div><span className="text-muted-foreground">Discovered</span><br /><strong>{row.lastDiscoveredCount ?? "—"}</strong></div>
-                </div>
-                {row.actionNeeded !== "none" && (
-                  <p className={`text-xs font-medium ${ACTION_META[row.actionNeeded]?.color || ""}`}>
-                    → {ACTION_META[row.actionNeeded]?.label || row.actionNeeded}
-                  </p>
-                )}
-                {row.inventoryUrl && (
-                  <a href={row.inventoryUrl} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-xs text-blue-600 hover:underline">
-                    <ExternalLink className="h-3 w-3" /> Inventory
-                  </a>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+          {hasSynced.map(row => <DealerCard key={row.dealerSlug} row={row} />)}
+          {hasSynced.length === 0 && (
+            <p className="text-sm text-muted-foreground py-4 text-center">No active sources.</p>
+          )}
         </div>
 
-        {/* Desktop: table view */}
+        {/* Desktop table */}
         <div className="hidden sm:block overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-sm border-collapse min-w-[1100px]">
+          <table className="w-full text-xs border-collapse" style={{ minWidth: 1000 }}>
             <thead>
-              <tr className="bg-muted text-left text-xs">
-                {["Dealer", "State/City", "Inventory URL", "Live", "Inactive", "Pending", "Rejected",
-                  "Last Discovered", "Last Sync", "Coverage Status", "Action Needed"].map(h => (
+              <tr className="bg-muted text-left">
+                {["Source / Dealer", "State", "Live", "No State", "Inactive", "Pending Review", "Imported", "Rejected", "Discovered", "Last Sync", "Coverage", "Action Needed"].map(h => (
                   <th key={h} className="p-2 border border-border font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {byDealer.map(row => {
-                const isNeverSynced = row.coverageStatus === "not_synced";
+              {hasSynced.map(row => {
+                const action = ACTION_META[row.actionNeeded] || ACTION_META["none"];
                 return (
-                  <tr key={row.dealerSlug}
-                    className={`odd:bg-white even:bg-gray-50 hover:bg-muted/40 transition-colors text-xs ${isNeverSynced ? "opacity-50" : ""}`}>
-
+                  <tr key={row.dealerSlug} className="odd:bg-white even:bg-gray-50 hover:bg-muted/40 transition-colors">
                     <td className="p-2 border border-border">
                       <p className="font-medium whitespace-nowrap">{row.dealerName}</p>
                       <p className="text-muted-foreground">{row.dealerSlug}</p>
+                      {row.inventoryUrl && (
+                        <a href={row.inventoryUrl} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-0.5 text-blue-600 hover:underline mt-0.5">
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                          <span className="truncate max-w-[120px] block">{row.inventoryUrl.replace(/^https?:\/\//, "")}</span>
+                        </a>
+                      )}
                     </td>
-
-                    <td className="p-2 border border-border whitespace-nowrap">
+                    <td className="p-2 border border-border whitespace-nowrap text-muted-foreground">
                       {[row.city, row.state].filter(Boolean).join(", ") || "—"}
                     </td>
-
-                    <td className="p-2 border border-border max-w-[160px]">
-                      {row.inventoryUrl ? (
-                        <a href={row.inventoryUrl} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-blue-600 hover:underline">
-                          <ExternalLink className="h-3 w-3 shrink-0" />
-                          <span className="truncate max-w-[130px] block">{row.inventoryUrl.replace(/^https?:\/\//, "")}</span>
-                        </a>
-                      ) : <span className="text-muted-foreground">—</span>}
-                    </td>
-
                     <td className="p-2 border border-border text-center">
                       <span className={row.publicActiveCount > 0 ? "font-semibold text-green-700" : "text-muted-foreground"}>
                         {row.publicActiveCount || "—"}
                       </span>
                     </td>
-
+                    <td className="p-2 border border-border text-center">
+                      <span className={row.publicActiveNullState > 0 ? "font-semibold text-amber-700" : "text-muted-foreground"}>
+                        {row.publicActiveNullState || "—"}
+                      </span>
+                    </td>
                     <td className="p-2 border border-border text-center text-muted-foreground">
                       {row.publicInactiveCount || "—"}
                     </td>
-
                     <td className="p-2 border border-border text-center">
-                      <span className={row.pendingReviewCount > 0 ? "font-semibold text-amber-600" : "text-muted-foreground"}>
-                        {row.pendingReviewCount || "—"}
+                      <span className={row.pendingReviewListingCount > 0 ? "font-semibold text-amber-600" : "text-muted-foreground"}>
+                        {row.pendingReviewListingCount || "—"}
                       </span>
                     </td>
-
+                    <td className="p-2 border border-border text-center text-green-700 font-medium">
+                      {row.importedCount || "—"}
+                    </td>
                     <td className="p-2 border border-border text-center text-muted-foreground">
                       {row.rejectedPendingCount || "—"}
                     </td>
-
                     <td className="p-2 border border-border text-center">
                       {row.lastDiscoveredCount != null ? row.lastDiscoveredCount : <span className="text-muted-foreground">—</span>}
                     </td>
-
                     <td className="p-2 border border-border whitespace-nowrap">
                       {row.lastSyncAt ? (
                         <div>
@@ -338,28 +488,77 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
                         </div>
                       ) : <span className="text-muted-foreground italic">never</span>}
                     </td>
-
                     <td className="p-2 border border-border">
                       <CoverageBadge status={row.coverageStatus} />
+                      {row.valuationReviewNeeded && (
+                        <span className="block mt-0.5 text-orange-600 font-medium text-xs">⚠ valuation</span>
+                      )}
                     </td>
-
                     <td className="p-2 border border-border">
-                      <span className={`font-medium ${ACTION_META[row.actionNeeded]?.color || ""}`}>
-                        {ACTION_META[row.actionNeeded]?.label || row.actionNeeded}
-                      </span>
+                      <span className={`font-medium ${action.color}`}>{action.label}</span>
+                      {row.notes && (
+                        <p className="text-muted-foreground mt-0.5 max-w-[160px] truncate" title={row.notes}>{row.notes}</p>
+                      )}
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {byDealer.length === 0 && (
-            <p className="text-center text-sm text-muted-foreground py-8">
-              No data yet. Run the DDL migration and ensure dealer records exist.
-            </p>
+          {hasSynced.length === 0 && (
+            <p className="text-center text-sm text-muted-foreground py-8">No active sources found.</p>
           )}
         </div>
       </div>
+
+      {/* ── Never-synced dealers ──────────────────────────────────────────── */}
+      <div>
+        <h3 className="text-sm font-semibold mb-2">
+          Never Synced Dealers ({neverSynced.length})
+          <span className="text-xs font-normal text-muted-foreground ml-2">— in dealers table but no adapter run</span>
+        </h3>
+
+        {/* Mobile: simple list */}
+        <div className="sm:hidden space-y-2">
+          {neverSynced.map(row => (
+            <div key={row.dealerSlug} className="flex items-center justify-between border border-border rounded p-2 bg-white opacity-70">
+              <div>
+                <p className="text-sm font-medium">{row.dealerName}</p>
+                <p className="text-xs text-muted-foreground">{[row.city, row.state].filter(Boolean).join(", ")}</p>
+              </div>
+              <span className="text-xs text-blue-700 font-medium">Run Discovery</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop: compact table */}
+        <div className="hidden sm:block overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-xs border-collapse" style={{ minWidth: 600 }}>
+            <thead>
+              <tr className="bg-muted text-left">
+                {["Dealer", "Slug", "State", "City", "Action"].map(h => (
+                  <th key={h} className="p-2 border border-border font-semibold">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {neverSynced.map((row, i) => (
+                <tr key={row.dealerSlug} className={`${i % 2 === 0 ? "bg-white" : "bg-gray-50"} opacity-70`}>
+                  <td className="p-2 border border-border font-medium">{row.dealerName}</td>
+                  <td className="p-2 border border-border text-muted-foreground">{row.dealerSlug}</td>
+                  <td className="p-2 border border-border">{row.state || "—"}</td>
+                  <td className="p-2 border border-border">{row.city || "—"}</td>
+                  <td className="p-2 border border-border text-blue-700 font-medium">Run Discovery</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {neverSynced.length === 0 && (
+            <p className="text-center text-sm text-muted-foreground py-6">All dealers have been synced.</p>
+          )}
+        </div>
+      </div>
+
     </div>
   );
 }

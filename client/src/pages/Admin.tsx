@@ -894,8 +894,8 @@ export default function Admin() {
         </div>
 
         <Tabs defaultValue="listings">
-          <TabsList className="mb-6">
-            <TabsTrigger value="listings" data-testid="tab-listings">Listings ({listings.length})</TabsTrigger>
+          <TabsList className="mb-6 flex overflow-x-auto whitespace-nowrap w-full">
+            <TabsTrigger value="listings" data-testid="tab-listings">All Listings ({listings.length})</TabsTrigger>
             <TabsTrigger value="csv" data-testid="tab-csv">CSV Import</TabsTrigger>
             <TabsTrigger value="dealers" data-testid="tab-dealers">Dealers ({dealers.length})</TabsTrigger>
             <TabsTrigger value="sources" data-testid="tab-sources">Inventory Sources</TabsTrigger>

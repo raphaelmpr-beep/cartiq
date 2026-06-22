@@ -846,75 +846,95 @@ export function registerRoutes(httpServer: Server, app: Express) {
       ]);
       const adapterRuns = (adapterRunsResult as any).data || [];
 
-      // Listings breakdown by sync_source
-      type ListingBucket = { active: number; inactive: number; pending_review: number; unavailable: number };
+      const L = allListings || [];
+      const P = allPending || [];
+      const D = allDealers || [];
+
+      // ── Listing breakdowns ──────────────────────────────────────────────────
+      // All admin records (what Listings tab shows)
+      const totalAdminListings      = L.length;
+      const activeListings          = L.filter((l: any) => l.status === "active");
+      const inactiveListings        = L.filter((l: any) => l.status === "inactive");
+      const pendingReviewListings   = L.filter((l: any) => l.status === "pending_review");
+      // Active public = what /api/listings returns (no state filter)
+      const activePublicAll         = activeListings.filter((l: any) => l.public_listing);
+      // Active public FL/GA = what Search page actually shows (state filter)
+      const activePublicFlGa        = activeListings.filter((l: any) => l.public_listing && (l.state === "FL" || l.state === "GA"));
+      // Active public with null state — these appear in /api/listings but NOT in search when state filtered
+      const activePublicNullState   = activeListings.filter((l: any) => l.public_listing && !l.state);
+      // Active private (public_listing=false)
+      const activePrivate           = activeListings.filter((l: any) => !l.public_listing);
+      // price_confidence breakdown
+      const priceConfirmed          = activePublicAll.filter((l: any) => l.price_confidence === "confirmed");
+      const priceUnavailable        = activePublicAll.filter((l: any) => l.price_confidence === "unavailable");
+
+      // ── Listings by sync_source ─────────────────────────────────────────────
+      type ListingBucket = { active: number; inactive: number; pending_review: number; unavailable: number; nullState: number };
       const listingsBySource: Record<string, ListingBucket> = {};
-      for (const l of (allListings || [])) {
-        const k = l.sync_source || "__manual__";
-        if (!listingsBySource[k]) listingsBySource[k] = { active: 0, inactive: 0, pending_review: 0, unavailable: 0 };
-        if (l.status === "active" && l.public_listing) listingsBySource[k].active++;
-        else if (l.status === "inactive") listingsBySource[k].inactive++;
-        else if (l.status === "pending_review") listingsBySource[k].pending_review++;
-        if (l.price_confidence === "unavailable") listingsBySource[k].unavailable++;
+      for (const l of L) {
+        const k = (l as any).sync_source || "__manual__";
+        if (!listingsBySource[k]) listingsBySource[k] = { active: 0, inactive: 0, pending_review: 0, unavailable: 0, nullState: 0 };
+        if ((l as any).status === "active" && (l as any).public_listing) {
+          listingsBySource[k].active++;
+          if (!(l as any).state) listingsBySource[k].nullState++;
+        } else if ((l as any).status === "inactive") listingsBySource[k].inactive++;
+        else if ((l as any).status === "pending_review") listingsBySource[k].pending_review++;
+        if ((l as any).price_confidence === "unavailable") listingsBySource[k].unavailable++;
       }
 
-      // Pending imports by dealer
+      // ── Pending imports breakdown ───────────────────────────────────────────
       type PendingBucket = { pending: number; imported: number; rejected: number; duplicate: number };
       const pendingByDealer: Record<string, PendingBucket> = {};
-      for (const p of (allPending || [])) {
-        const k = p.dealer_slug;
+      for (const p of P) {
+        const k = (p as any).dealer_slug;
         if (!pendingByDealer[k]) pendingByDealer[k] = { pending: 0, imported: 0, rejected: 0, duplicate: 0 };
-        if (p.status === "pending") pendingByDealer[k].pending++;
-        else if (p.status === "imported") pendingByDealer[k].imported++;
-        else if (p.status === "rejected") pendingByDealer[k].rejected++;
-        else if (p.status === "duplicate") pendingByDealer[k].duplicate++;
+        if ((p as any).status === "pending") pendingByDealer[k].pending++;
+        else if ((p as any).status === "imported") pendingByDealer[k].imported++;
+        else if ((p as any).status === "rejected") pendingByDealer[k].rejected++;
+        else if ((p as any).status === "duplicate") pendingByDealer[k].duplicate++;
       }
 
-      // Last sync_log per dealer
+      // ── Lookups ─────────────────────────────────────────────────────────────
       const lastSyncByDealer: Record<string, any> = {};
       for (const s of (syncLogs || [])) {
-        if (!lastSyncByDealer[s.dealer_slug]) lastSyncByDealer[s.dealer_slug] = s;
+        if (!lastSyncByDealer[(s as any).dealer_slug]) lastSyncByDealer[(s as any).dealer_slug] = s;
       }
-
-      // Last adapter_run per dealer
       const lastAdapterRun: Record<string, any> = {};
       for (const r of adapterRuns) {
         if (!lastAdapterRun[r.dealer_slug]) lastAdapterRun[r.dealer_slug] = r;
       }
-
-      // Last coverage_log per dealer
       const lastCoverage: Record<string, any> = {};
       for (const r of (coverageLogs || [])) {
-        if (!lastCoverage[r.dealer_slug]) lastCoverage[r.dealer_slug] = r;
+        if (!lastCoverage[(r as any).dealer_slug]) lastCoverage[(r as any).dealer_slug] = r;
       }
-
-      // Dealer lookup
       const dealerBySlug: Record<string, any> = {};
-      for (const d of (allDealers || [])) dealerBySlug[d.slug] = d;
+      for (const d of D) dealerBySlug[(d as any).slug] = d;
 
-      // Union of all known source slugs
-      const allSlugs = new Set([
+      // ── Build byDealer union ────────────────────────────────────────────────
+      // Union: sync_source slugs with any activity + all FL/GA dealer profiles
+      const allSlugs = new Set<string>([
         ...Object.keys(listingsBySource).filter(k => k !== "__manual__"),
         ...Object.keys(pendingByDealer),
         ...Object.keys(lastSyncByDealer),
         ...Object.keys(lastAdapterRun),
+        ...D.filter((d: any) => d.state === "FL" || d.state === "GA").map((d: any) => d.slug),
       ]);
 
       const byDealer: any[] = [];
-      const seenSlugs = new Set<string>();
 
       for (const slug of Array.from(allSlugs).sort()) {
-        seenSlugs.add(slug);
         const dealer = dealerBySlug[slug];
-        const listings = listingsBySource[slug] || { active: 0, inactive: 0, pending_review: 0, unavailable: 0 };
+        const listings = listingsBySource[slug] || { active: 0, inactive: 0, pending_review: 0, unavailable: 0, nullState: 0 };
         const pending = pendingByDealer[slug] || { pending: 0, imported: 0, rejected: 0, duplicate: 0 };
         const lastSync = lastSyncByDealer[slug];
         const lastRun = lastAdapterRun[slug];
         const coverage = lastCoverage[slug];
 
+        // Coverage status: prefer coverage_log, then adapter_run_log, then infer
         let coverageStatus: string = coverage?.coverage_status || lastRun?.coverage_status || "not_synced";
         if (listings.active > 0 && coverageStatus === "not_synced") coverageStatus = "needs_manual_review";
 
+        // Action needed — specific, not vague
         let actionNeeded = "none";
         if (coverageStatus === "not_synced") actionNeeded = "run_discovery";
         else if (coverageStatus === "partial_inventory") actionNeeded = "run_discovery";
@@ -925,10 +945,10 @@ export function registerRoutes(httpServer: Server, app: Express) {
         else if (coverageStatus === "featured_only") actionNeeded = "run_discovery";
         else if (coverageStatus === "needs_manual_review" && listings.active === 0) actionNeeded = "run_discovery";
         else if (pending.pending > 0) actionNeeded = "review_pending_imports";
+        else if (coverage?.valuation_review_needed) actionNeeded = "valuation_review";
         else if (listings.inactive > 0) actionNeeded = "verify_public_listings";
 
-        let notes: string | null = coverage?.adapter_notes || lastRun?.notes || null;
-        if (coverage?.valuation_review_needed) notes = "[valuation_review_needed] " + (notes || "");
+        const notes: string | null = coverage?.adapter_notes || lastRun?.notes || null;
 
         byDealer.push({
           dealerSlug: slug,
@@ -937,81 +957,81 @@ export function registerRoutes(httpServer: Server, app: Express) {
           city: dealer?.city || null,
           inventoryUrl: coverage?.inventory_url || null,
           publicActiveCount: listings.active,
+          publicActiveNullState: listings.nullState,
           publicInactiveCount: listings.inactive,
           pendingReviewListingCount: listings.pending_review,
-          pendingImportCount: pending.pending + pending.imported + pending.rejected + pending.duplicate,
+          unavailableCount: listings.unavailable,
+          totalImportRecords: pending.pending + pending.imported + pending.rejected + pending.duplicate,
           pendingReviewCount: pending.pending,
+          importedCount: pending.imported,
           rejectedPendingCount: pending.rejected,
           duplicatePendingCount: pending.duplicate,
-          importedCount: pending.imported,
           lastSyncAt: lastSync?.synced_at || lastRun?.started_at || null,
           lastSyncStatus: lastSync?.status || lastRun?.status || null,
           lastDiscoveredCount: lastRun?.discovered_count ?? coverage?.discovered_count ?? null,
           lastInsertedPendingCount: lastRun?.inserted_pending_count ?? coverage?.pending_imports_count ?? null,
           lastDuplicateCount: lastRun?.duplicate_count ?? coverage?.duplicate_count ?? null,
           lastSkippedCount: lastRun?.skipped_count ?? null,
+          valuationReviewNeeded: coverage?.valuation_review_needed || false,
           coverageStatus,
           actionNeeded,
           notes,
         });
       }
 
-      // Dealers mapped in DB but never appeared in any activity
-      const flGaDealers = (allDealers || []).filter((d: any) => d.state === "FL" || d.state === "GA");
-      for (const dealer of flGaDealers) {
-        if (seenSlugs.has(dealer.slug)) continue;
-        byDealer.push({
-          dealerSlug: dealer.slug,
-          dealerName: dealer.name,
-          state: dealer.state,
-          city: dealer.city,
-          inventoryUrl: null,
-          publicActiveCount: 0,
-          publicInactiveCount: 0,
-          pendingReviewListingCount: 0,
-          pendingImportCount: 0,
-          pendingReviewCount: 0,
-          rejectedPendingCount: 0,
-          duplicatePendingCount: 0,
-          importedCount: 0,
-          lastSyncAt: null,
-          lastSyncStatus: null,
-          lastDiscoveredCount: null,
-          lastInsertedPendingCount: null,
-          lastDuplicateCount: null,
-          lastSkippedCount: null,
-          coverageStatus: "not_synced",
-          actionNeeded: "run_discovery",
-          notes: null,
-        });
-      }
-
       byDealer.sort((a: any, b: any) => b.publicActiveCount - a.publicActiveCount || a.dealerSlug.localeCompare(b.dealerSlug));
 
+      const flGaDealers = D.filter((d: any) => d.state === "FL" || d.state === "GA");
+
       const totals = {
-        mappedDealers:             flGaDealers.length,
-        dealersWithPublicListings: byDealer.filter((d: any) => d.publicActiveCount > 0).length,
-        dealersNeverSynced:        byDealer.filter((d: any) => d.coverageStatus === "not_synced").length,
-        publicActiveListings:      (allListings || []).filter((l: any) => l.status === "active" && l.public_listing).length,
-        publicActiveFlGa:          (allListings || []).filter((l: any) => l.status === "active" && l.public_listing && (l.state === "FL" || l.state === "GA")).length,
-        pendingImports:            (allPending || []).length,
-        pendingReview:             (allPending || []).filter((p: any) => p.status === "pending").length,
-        importedFromPending:       (allPending || []).filter((p: any) => p.status === "imported").length,
-        rejectedFromPending:       (allPending || []).filter((p: any) => p.status === "rejected").length,
-        inactiveListings:          (allListings || []).filter((l: any) => l.status === "inactive").length,
-        pendingReviewListings:     (allListings || []).filter((l: any) => l.status === "pending_review").length,
-        unavailableListings:       (allListings || []).filter((l: any) => l.price_confidence === "unavailable").length,
-        staleListings:             (allListings || []).filter((l: any) => l.price_confidence === "stale").length,
-        adapterErrors:             byDealer.filter((d: any) => d.coverageStatus === "adapter_error" || d.coverageStatus === "blocked").length,
-        partialCoverageDealers:    byDealer.filter((d: any) => ["partial_inventory","featured_only","pagination_incomplete","location_filter_needed","browser_required"].includes(d.coverageStatus)).length,
+        // ── Listing counts ───────────────────────────────
+        totalAdminListings,                          // What Listings tab shows
+        activeListingsTotal:      activeListings.length,
+        activePublicAll:          activePublicAll.length,    // /api/listings count
+        activePublicFlGa:         activePublicFlGa.length,   // Search page count (state=FL|GA)
+        activePublicNullState:    activePublicNullState.length, // Active+public but state=NULL (in /api/listings but not search)
+        activePrivate:            activePrivate.length,
+        inactiveListings:         inactiveListings.length,
+        pendingReviewListings:    pendingReviewListings.length,
+        // price_confidence on active+public listings
+        priceConfirmed:           priceConfirmed.length,
+        priceUnavailable:         priceUnavailable.length,
+
+        // ── Pending import counts ─────────────────────────
+        totalPendingImportRecords: P.length,
+        pendingAwaitingReview:    P.filter((p: any) => p.status === "pending").length,
+        importedFromPending:      P.filter((p: any) => p.status === "imported").length,
+        rejectedFromPending:      P.filter((p: any) => p.status === "rejected").length,
+        duplicateFromPending:     P.filter((p: any) => p.status === "duplicate").length,
+
+        // ── Dealer / source counts ────────────────────────
+        mappedDealerProfiles:     flGaDealers.length,         // Rows in dealers table (FL+GA)
+        totalAuditSources:        byDealer.length,            // Union of dealer profiles + sync_source slugs
+        sourcesWithPublicListings: byDealer.filter((d: any) => d.publicActiveCount > 0).length,
+        sourcesNeverSynced:       byDealer.filter((d: any) => d.coverageStatus === "not_synced").length,
+        sourcesWithAdapterErrors: byDealer.filter((d: any) => d.coverageStatus === "adapter_error" || d.coverageStatus === "blocked").length,
+        sourcesPartialCoverage:   byDealer.filter((d: any) => ["partial_inventory","featured_only","pagination_incomplete","location_filter_needed","browser_required"].includes(d.coverageStatus)).length,
+        sourcesWithPendingImports: byDealer.filter((d: any) => d.pendingReviewCount > 0).length,
+
+        // ── Gap summary (why counts differ) ───────────────
         gapSummary: {
-          publicSearch:              (allListings || []).filter((l: any) => l.status === "active" && l.public_listing).length,
-          pendingNotPublished:       (allPending || []).filter((p: any) => p.status === "pending").length,
-          rejectedImports:           (allPending || []).filter((p: any) => p.status === "rejected").length,
-          inactiveHidden:            (allListings || []).filter((l: any) => l.status === "inactive").length,
-          pendingReviewHidden:       (allListings || []).filter((l: any) => l.status === "pending_review").length,
-          notSyncedDealers:          byDealer.filter((d: any) => d.coverageStatus === "not_synced").length,
-          partialDealers:            byDealer.filter((d: any) => ["partial_inventory","browser_required","featured_only","pagination_incomplete"].includes(d.coverageStatus)).length,
+          // 134: active + public + state=FL|GA  (what Search shows)
+          searchPageListings:        activePublicFlGa.length,
+          // 158: active + public (all states)  (what /api/listings returns, what Listings tab shows)
+          apiListingsCount:          activePublicAll.length,
+          // Gap: listings in /api/listings but not in Search page (state=NULL)
+          activePublicNullStateGap:  activePublicNullState.length,
+          // Inactive (hidden from everything)
+          inactiveHidden:            inactiveListings.length,
+          // pending_review listings (in DB, public=true, but status blocks search)
+          pendingReviewHidden:       pendingReviewListings.length,
+          // Import records with no state — these imported but have null state
+          importedNullState:         activePublicNullState.length,
+          // Pending review in imports
+          pendingImportAwaitingReview: P.filter((p: any) => p.status === "pending").length,
+          rejectedImports:           P.filter((p: any) => p.status === "rejected").length,
+          notSyncedSources:          byDealer.filter((d: any) => d.coverageStatus === "not_synced").length,
+          partialSources:            byDealer.filter((d: any) => ["partial_inventory","browser_required","featured_only","pagination_incomplete"].includes(d.coverageStatus)).length,
         },
       };
 
