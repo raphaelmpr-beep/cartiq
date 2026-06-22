@@ -579,39 +579,19 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ─── Sync Pipeline ───────────────────────────────────────────────────────────
-  // POST /api/admin/sync — run verification or discovery pipeline
-  // Spawns pipeline as a child process to avoid bundling Playwright into esbuild
+  // POST /api/admin/sync — run verification or discovery pipeline (Lambda-safe)
   app.post("/api/admin/sync", requireAdmin, async (req, res) => {
     try {
-      const { spawn } = await import("child_process");
-      const { resolve } = await import("path");
+      const { runLambdaSync } = await import("./sync/pipeline-lambda.js");
       const opts = {
-        mode: req.body.mode || "verify",
+        mode: (req.body.mode || "discover_sitemap") as "discover_sitemap" | "import" | "status",
         dealer: req.body.dealer || "all",
         limit: parseInt(req.body.limit) || 10,
         import_id: req.body.import_id,
         dry_run: req.body.dry_run === true,
       };
-      const scriptPath = resolve(__dirname, "../server/sync/run-pipeline.ts");
-      const child = spawn("npx", ["tsx", scriptPath, JSON.stringify(opts)], {
-        env: { ...process.env },
-        timeout: 5 * 60 * 1000, // 5 min max
-      });
-      let stdout = "";
-      let stderr = "";
-      child.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
-      child.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-      child.on("close", (code: number) => {
-        try {
-          const result = JSON.parse(stdout);
-          res.json(result);
-        } catch {
-          res.status(500).json({ error: "Pipeline failed", stderr: stderr.slice(0, 1000), code });
-        }
-      });
-      child.on("error", (err: Error) => {
-        res.status(500).json({ error: err.message });
-      });
+      const result = await runLambdaSync(opts);
+      res.json(result);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
