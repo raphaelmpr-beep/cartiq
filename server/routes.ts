@@ -578,5 +578,97 @@ export function registerRoutes(httpServer: Server, app: Express) {
     res.json(normList(await storage.getListings({}) as any[]));
   });
 
+  // ─── Sync Pipeline ───────────────────────────────────────────────────────────
+  // POST /api/admin/sync — run verification or discovery pipeline
+  // Spawns pipeline as a child process to avoid bundling Playwright into esbuild
+  app.post("/api/admin/sync", requireAdmin, async (req, res) => {
+    try {
+      const { spawn } = await import("child_process");
+      const { resolve } = await import("path");
+      const opts = {
+        mode: req.body.mode || "verify",
+        dealer: req.body.dealer || "all",
+        limit: parseInt(req.body.limit) || 10,
+        import_id: req.body.import_id,
+        dry_run: req.body.dry_run === true,
+      };
+      const scriptPath = resolve(__dirname, "../server/sync/run-pipeline.ts");
+      const child = spawn("npx", ["tsx", scriptPath, JSON.stringify(opts)], {
+        env: { ...process.env },
+        timeout: 5 * 60 * 1000, // 5 min max
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
+      child.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+      child.on("close", (code: number) => {
+        try {
+          const result = JSON.parse(stdout);
+          res.json(result);
+        } catch {
+          res.status(500).json({ error: "Pipeline failed", stderr: stderr.slice(0, 1000), code });
+        }
+      });
+      child.on("error", (err: Error) => {
+        res.status(500).json({ error: err.message });
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/admin/pending-imports — list queued listings awaiting review
+  app.get("/api/admin/pending-imports", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const status = (req.query.status as string) || "pending";
+      const dealer = req.query.dealer as string | undefined;
+      let q = sb.from("pending_imports").select("*").eq("status", status).order("found_at", { ascending: false }).limit(50);
+      if (dealer) q = q.eq("dealer_slug", dealer);
+      const { data, error } = await q;
+      if (error) return res.status(500).json({ error: error.message });
+      res.json(data || []);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PATCH /api/admin/pending-imports/:id — approve/reject a pending import
+  app.patch("/api/admin/pending-imports/:id", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const id = parseInt(req.params.id);
+      const { action } = req.body; // 'approve' | 'reject'
+      if (action === "approve") {
+        const { runSync } = await import("./sync/pipeline.js");
+        const result = await runSync({ mode: "import", import_id: id });
+        return res.json(result);
+      }
+      if (action === "reject") {
+        const { data, error } = await sb.from("pending_imports").update({ status: "rejected", reviewed_at: new Date().toISOString() }).eq("id", id).select().single();
+        if (error) return res.status(500).json({ error: error.message });
+        return res.json(data);
+      }
+      return res.status(400).json({ error: "action must be 'approve' or 'reject'" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/admin/sync-log — recent sync activity
+  app.get("/api/admin/sync-log", requireAdmin, async (_req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { data, error } = await sb.from("sync_log").select("*, listings(title)").order("synced_at", { ascending: false }).limit(100);
+      if (error) return res.status(500).json({ error: error.message });
+      res.json(data || []);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   return httpServer;
 }

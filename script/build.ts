@@ -69,7 +69,16 @@ export const wasmBinary = Buffer.from(wasmBase64, "base64");
     ...Object.keys(pkg.dependencies || {}),
     ...Object.keys(pkg.devDependencies || {}),
   ];
-  const externals = allDeps.filter((dep) => !allowlist.includes(dep));
+  // Always treat these as external — they have native binaries or can't be bundled
+  const forceExternal = [
+    'playwright', 'playwright-core', 'playwright-chromium',
+    'chromium-bidi', '@playwright/test',
+    'better-sqlite3', 'pg', 'bcryptjs',
+  ];
+  const externals = [
+    ...forceExternal,
+    ...allDeps.filter((dep) => !allowlist.includes(dep)),
+  ].filter((v, i, a) => a.indexOf(v) === i);
 
   // Build 1: pplx.app / local — uses httpServer.listen()
   await esbuild({
