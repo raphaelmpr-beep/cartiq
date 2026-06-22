@@ -201,6 +201,16 @@ async function runDiscoverSitemap(dealer: string, limit: number, dry_run: boolea
   }
 }
 
+// ─── Slug generator ──────────────────────────────────────────────────────────
+function makeSlug(title: string, city: string | null, suffix: number): string {
+  const base = [title, city].filter(Boolean).join(' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return `${base}-${suffix}`;
+}
+
 // ─── IMPORT: promote a pending_import into a real listing ────────────────────
 
 async function runImport(import_id: number, dry_run: boolean, result: SyncResult) {
@@ -214,8 +224,10 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
   }
 
   const title = imp.raw_title || `${imp.year || ''} ${imp.make || ''} ${imp.model || ''}`.trim();
+  const slug = makeSlug(title, imp.location_city, Date.now() % 1000000);
   const newListing = {
     title,
+    slug,
     year: imp.year,
     brand: imp.make,
     model: imp.model,
@@ -232,6 +244,7 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
     price_confidence: imp.price ? 'confirmed' : 'estimated',
     status: 'active',
     public_listing: true,
+    seller_type: 'dealer',
   };
 
   result.processed++;
