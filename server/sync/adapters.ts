@@ -23,6 +23,57 @@ export interface ListingData {
   specs: Record<string, string>;
 }
 
+// ── Shared utilities ─────────────────────────────────────────────────────────
+
+/**
+ * Strip HTML whitespace artifacts: \r, \n, \t and collapse runs of spaces.
+ * Needed for dealers whose pages have multi-line text nodes.
+ */
+export function cleanHtmlWhitespace(s: string | null | undefined): string | null {
+  if (!s) return null;
+  const cleaned = s.replace(/[\r\n\t]+/g, ' ').replace(/ {2,}/g, ' ').trim();
+  return cleaned || null;
+}
+
+/**
+ * Return true if a URL looks like a nav/category/sitemap page rather than
+ * an individual listing. Used to filter sitemap contamination.
+ */
+export function isNavPage(url: string): boolean {
+  const NAV_PATTERNS = [
+    /\/sitemap/i,
+    /\.xml$/i,
+    /\/inventory\/?$/i,
+    /\/new-inventory\/?$/i,
+    /\/used-inventory\/?$/i,
+    /\/all-inventory\/?$/i,
+    /\/shop-our-inventory\/?$/i,
+    /\/shop-brp\/?$/i,
+    /\/about/i,
+    /\/contact/i,
+    /\/privacy/i,
+    /\/ccpa/i,
+    /\/accessibility/i,
+    /\/financing/i,
+    /\/finance-application/i,
+    /\/promotions/i,
+    /\/parts-accessories/i,
+    /\/registration/i,
+    /\/request-a-model/i,
+    /\/compare/i,
+    /\/brands/i,
+    /\/locations?\/?$/i,
+    /\/avon-park\/?$/i,
+    /\/fort-meade\/?$/i,
+    /\/showroom\/?$/i,
+    /\/cricket-carts\/?$/i,
+    /\/special\//i,
+    /\/model-details\/?$/i,
+    /\/terms\/?$/i,
+  ];
+  return NAV_PATTERNS.some(p => p.test(url));
+}
+
 // ── Sitemap / inventory index fetchers ────────────────────────────────────────
 
 export async function getBoteroListingUrls(flGaOnly = true): Promise<string[]> {
@@ -66,6 +117,86 @@ export async function getJaxListingUrls(): Promise<string[]> {
   const xml = await res.text();
   const matches = [...xml.matchAll(/<loc>(https:\/\/golfcartsjacksonville\.com\/listing\/[^<]+)<\/loc>/g)];
   return matches.map(m => m[1].trim());
+}
+
+/**
+ * Generic GCR-platform sitemap fetcher.
+ * GCR dealers (Jenkins, Golf Rider, Golf Cars of Woodstock, Shiver Carts,
+ * Fat Boys, Woodstock, Mike's GA) all use the same WordPress/GCR pattern:
+ *   - Sitemap at /auto-listing-sitemap.xml
+ *   - Individual listing URLs contain /Golf-Carts- or /Golf-Cart-
+ *
+ * Filters out:
+ *   - Nav / category pages (isNavPage)
+ *   - Sitemap index XML files
+ *   - Non-golf-cart product URLs for multi-line stores (Lawn-Mowers, etc.)
+ *
+ * @param domain     Base domain, e.g. 'www.jenkinsmotorsports.com'
+ * @param sitemapPath  Path to the listing sitemap (default '/auto-listing-sitemap.xml')
+ * @param golfCartOnly  If true, only return URLs containing 'Golf-Cart' or 'Golf-Carts' path segment
+ */
+export async function getGcrSitemapUrls(
+  domain: string,
+  sitemapPath = '/auto-listing-sitemap.xml',
+  golfCartOnly = true
+): Promise<string[]> {
+  const sitemapUrl = `https://${domain}${sitemapPath}`;
+  try {
+    const res = await fetch(sitemapUrl, {
+      headers: { 'User-Agent': 'CartIQ-Sync/1.0' },
+      signal: AbortSignal.timeout ? AbortSignal.timeout(12000) : undefined,
+    });
+    if (!res.ok) return [];
+    const xml = await res.text();
+
+    // Extract all <loc> URLs
+    const allMatches = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)]
+      .map(m => m[1].trim())
+      .filter(u => u.startsWith('http'));
+
+    return allMatches.filter(u => {
+      // Drop sitemap index files, XML files, nav pages
+      if (isNavPage(u)) return false;
+      // For multi-product dealers, only keep golf cart URLs
+      if (golfCartOnly && !/\/Golf-Cart/i.test(u)) return false;
+      return true;
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function getJenkinsListingUrls(): Promise<string[]> {
+  return getGcrSitemapUrls('www.jenkinsmotorsports.com', '/auto-listing-sitemap.xml', true);
+}
+
+export async function getGolfRiderListingUrls(): Promise<string[]> {
+  return getGcrSitemapUrls('www.golfrider.com', '/auto-listing-sitemap.xml', true);
+}
+
+export async function getGolfCarsWoodstockListingUrls(): Promise<string[]> {
+  return getGcrSitemapUrls('www.golfcarsofwoodstock.com', '/auto-listing-sitemap.xml', true);
+}
+
+export async function getShiverCartsListingUrls(): Promise<string[]> {
+  return getGcrSitemapUrls('www.shivercarts.com', '/auto-listing-sitemap.xml', true);
+}
+
+export async function getFatBoysListingUrls(): Promise<string[]> {
+  return getGcrSitemapUrls('www.fatboyscarts.com', '/auto-listing-sitemap.xml', true);
+}
+
+export async function getMikesGaListingUrls(): Promise<string[]> {
+  // Mike's GA is a multi-product dealer — filter to Golf-Cart URLs only
+  return getGcrSitemapUrls('www.mikesgolfcartsga.com', '/auto-listing-sitemap.xml', true);
+}
+
+/**
+ * Woodstock Golf Carts (different from Golf Cars of Woodstock).
+ * woodstockgolfcarts.com — same GCR platform.
+ */
+export async function getWoodstockListingUrls(): Promise<string[]> {
+  return getGcrSitemapUrls('woodstockgolfcarts.com', '/auto-listing-sitemap.xml', true);
 }
 
 /**
@@ -408,13 +539,18 @@ function normalizeListing(raw: any, url: string, dealer_slug: string): ListingDa
 
   const year = raw.year ? parseInt(raw.year) : null;
 
+  // Always clean HTML whitespace artifacts from title, make, model
+  const cleanTitle = cleanHtmlWhitespace(raw.title) || '';
+  const cleanMake  = cleanHtmlWhitespace(raw.make);
+  const cleanModel = cleanHtmlWhitespace(raw.model);
+
   return {
     source_url: url,
     dealer_slug,
-    raw_title: raw.title || '',
+    raw_title: cleanTitle,
     year,
-    make: raw.make?.trim() || null,
-    model: raw.model?.trim() || null,
+    make: cleanMake || null,
+    model: cleanModel || null,
     condition,
     price,
     image_url: images[0] || null,

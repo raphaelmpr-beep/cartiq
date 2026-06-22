@@ -12,6 +12,11 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import {
+  getGcrSitemapUrls,
+  isNavPage,
+  cleanHtmlWhitespace,
+} from './adapters.js';
 
 function getSupabase() {
   return createClient(
@@ -87,9 +92,17 @@ function parseSlug(url: string, dealer: string): { year: number | null; make: st
 
 // ─── Main sync entry point (Lambda-safe) ─────────────────────────────────────
 
+// All supported dealer slugs for sitemap discovery
+export const DISCOVERABLE_DEALERS = [
+  'botero', 'jax',
+  'jenkins', 'golf_rider', 'golf_cars_woodstock',
+  'shiver_carts', 'fat_boys', 'mikes_ga', 'woodstock',
+] as const;
+export type DiscoverableDealer = typeof DISCOVERABLE_DEALERS[number];
+
 export interface SyncOptions {
   mode: 'discover_sitemap' | 'import' | 'status';
-  dealer?: 'botero' | 'jax' | 'all';
+  dealer?: DiscoverableDealer | 'all';
   limit?: number;
   import_id?: number;
   dry_run?: boolean;
@@ -122,7 +135,9 @@ export async function runLambdaSync(opts: SyncOptions): Promise<SyncResult> {
   if (opts.mode === 'import' && opts.import_id) {
     await runImport(opts.import_id, opts.dry_run || false, result);
   } else if (opts.mode === 'discover_sitemap') {
-    const dealers = opts.dealer === 'all' ? ['botero', 'jax'] : [opts.dealer || 'botero'];
+    const dealers = opts.dealer === 'all'
+      ? [...DISCOVERABLE_DEALERS]
+      : [opts.dealer || 'botero'];
     for (const dealer of dealers) {
       await runDiscoverSitemap(dealer, opts.limit || 50, opts.dry_run || false, result);
     }
@@ -136,13 +151,31 @@ export async function runLambdaSync(opts: SyncOptions): Promise<SyncResult> {
 
 // ─── DISCOVER_SITEMAP: diff sitemap vs DB, queue new URL stubs ────────────────
 
+// GCR dealer config: domain + whether to filter golf-cart URLs only
+const GCR_DEALERS: Record<string, { domain: string; golfCartOnly: boolean }> = {
+  jenkins:             { domain: 'www.jenkinsmotorsports.com', golfCartOnly: true },
+  golf_rider:          { domain: 'www.golfrider.com',           golfCartOnly: true },
+  golf_cars_woodstock: { domain: 'www.golfcarsofwoodstock.com', golfCartOnly: true },
+  shiver_carts:        { domain: 'www.shivercarts.com',         golfCartOnly: true },
+  fat_boys:            { domain: 'www.fatboyscarts.com',        golfCartOnly: true },
+  mikes_ga:            { domain: 'www.mikesgolfcartsga.com',    golfCartOnly: true },
+  woodstock:           { domain: 'woodstockgolfcarts.com',      golfCartOnly: true },
+};
+
 async function runDiscoverSitemap(dealer: string, limit: number, dry_run: boolean, result: SyncResult) {
   const supabase = getSupabase();
 
   // Get all URLs from sitemap
   let sitemapUrls: string[] = [];
   if (dealer === 'botero') sitemapUrls = await getBoteroSitemapUrls(true);
-  if (dealer === 'jax') sitemapUrls = await getJaxSitemapUrls();
+  else if (dealer === 'jax') sitemapUrls = await getJaxSitemapUrls();
+  else if (GCR_DEALERS[dealer]) {
+    const cfg = GCR_DEALERS[dealer];
+    sitemapUrls = await getGcrSitemapUrls(cfg.domain, '/auto-listing-sitemap.xml', cfg.golfCartOnly);
+  } else {
+    result.summary.push(`[${dealer}] Unknown dealer — no sitemap adapter configured`);
+    return;
+  }
 
   if (!sitemapUrls.length) {
     result.summary.push(`[${dealer}] Sitemap returned 0 URLs`);
