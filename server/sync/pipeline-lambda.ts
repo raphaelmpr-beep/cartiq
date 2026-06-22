@@ -201,6 +201,48 @@ async function runDiscoverSitemap(dealer: string, limit: number, dry_run: boolea
   }
 }
 
+// ─── Text cleaner: strip HTML whitespace artifacts ─────────────────────────
+function cleanText(s: string | null | undefined): string | null {
+  if (!s) return null;
+  const cleaned = s.replace(/[\r\n\t]+/g, ' ').replace(/ {2,}/g, ' ').trim();
+  return cleaned || null;
+}
+
+// Strip marketing noise from model names
+function cleanModel(model: string | null | undefined, brand: string | null | undefined, year: number | null | undefined): string | null {
+  if (!model) return null;
+  let m = cleanText(model) || '';
+  if (year && m.startsWith(String(year))) m = m.slice(4).trim();
+  if (brand && m.toLowerCase().startsWith(brand.toLowerCase())) m = m.slice(brand.length).trim();
+  m = m.replace(/^(new\s+\*[^*]*\*\s*|now available\s*[–\-]+\s*|just in\s*[–\-]+\s*|all new\s+|now in-stock\s*[–\-]+\s*|new arrival\s*[–\-]+\s*|new\s+\d{4}\s+)/i, '')
+       .replace(/\*[^*]+\*/g, '').replace(/\*\*/g, '')
+       .replace(/\s*[–—]\s*$/, '').replace(/!$/, '')
+       .trim();
+  return m || null;
+}
+
+// ─── Deal rating ──────────────────────────────────────────────────────────────
+const MARKET_MEDIANS: Record<string, number> = {
+  'Club Car': 9500, 'E-Z-GO': 9000, 'Yamaha': 8500, 'ICON': 11000,
+  'Bintelli': 10500, 'Advanced EV': 11500, 'Star EV': 10000, 'MadJax': 8000,
+  'Tara': 12000, 'DACH': 13000, 'Teko EV': 11000, 'Epic': 10000,
+  'Evolution': 9500, 'Cushman': 14000, 'GEM': 12000, 'Navitas': 8500,
+  'Sivo': 9000, 'HP': 8000,
+};
+
+function computeDealRating(price: number | null | undefined, brand: string | null | undefined, condition: string | null | undefined): string | null {
+  if (!price || !brand) return null;
+  const median = MARKET_MEDIANS[brand];
+  if (!median) return null;
+  const adj = (condition === 'used' || condition === 'demo') ? median * 0.6 : median;
+  const diff = (price - adj) / adj;
+  if (diff <= -0.15) return 'great_deal';
+  if (diff <= -0.05) return 'good_deal';
+  if (diff <= 0.05)  return 'fair_price';
+  if (diff <= 0.15)  return 'slightly_high';
+  return 'over_market';
+}
+
 // ─── Slug generator ──────────────────────────────────────────────────────────
 function makeSlug(title: string, city: string | null, suffix: number): string {
   const base = [title, city].filter(Boolean).join(' ')
@@ -223,18 +265,29 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
     return;
   }
 
-  const title = imp.raw_title || `${imp.year || ''} ${imp.make || ''} ${imp.model || ''}`.trim();
-  const slug = makeSlug(title, imp.location_city, Date.now() % 1000000);
+  // Clean all text fields before inserting
+  const brand     = cleanText(imp.make);
+  const model     = cleanModel(imp.model, imp.make, imp.year);
+  const city      = cleanText(imp.location_city);
+  const rawTitle  = cleanText(imp.raw_title);
+
+  // Build canonical title: "YEAR BRAND MODEL"
+  const titleParts = [imp.year, brand, model].filter(Boolean);
+  const title = titleParts.length > 0 ? titleParts.join(' ') : (rawTitle || `${imp.dealer_slug} listing`);
+
+  const dealRating = computeDealRating(imp.price, brand, imp.condition);
+  const slug = makeSlug(title, city, Date.now() % 1000000);
+
   const newListing = {
     title,
     slug,
     year: imp.year,
-    brand: imp.make,
-    model: imp.model,
+    brand,
+    model,
     condition: imp.condition,
     asking_price: imp.price,
     image_url: imp.image_url,
-    city: imp.location_city,
+    city,
     state: imp.location_state,
     source_listing_url: imp.source_url,
     source_type: 'dealer_site',
@@ -242,6 +295,7 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
     verified_at: imp.price ? new Date().toISOString() : null,
     last_checked_at: new Date().toISOString(),
     price_confidence: imp.price ? 'confirmed' : 'estimated',
+    deal_rating: dealRating,
     status: 'active',
     public_listing: true,
     seller_type: 'dealer',
