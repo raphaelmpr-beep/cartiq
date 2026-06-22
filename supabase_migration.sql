@@ -249,4 +249,16 @@ CREATE POLICY IF NOT EXISTS "deal_checks_insert" ON deal_checks FOR INSERT WITH 
 CREATE POLICY IF NOT EXISTS "saved_listings_all" ON saved_listings FOR ALL USING (TRUE) WITH CHECK (TRUE);
 CREATE POLICY IF NOT EXISTS "listing_watches_all" ON listing_watches FOR ALL USING (TRUE) WITH CHECK (TRUE);
 
+-- Allow anon to read back their own deal_check after insert (needed for RETURNING clause)
+CREATE POLICY IF NOT EXISTS "deal_checks_select" ON deal_checks FOR SELECT USING (TRUE);
+
+-- Dealers and listings write access (added after initial migration)
+CREATE POLICY IF NOT EXISTS "dealers_insert" ON dealers FOR INSERT WITH CHECK (TRUE);
+CREATE POLICY IF NOT EXISTS "dealers_update" ON dealers FOR UPDATE USING (TRUE) WITH CHECK (TRUE);
+CREATE POLICY IF NOT EXISTS "listings_insert" ON listings FOR INSERT WITH CHECK (TRUE);
+CREATE POLICY IF NOT EXISTS "listings_update" ON listings FOR UPDATE USING (TRUE) WITH CHECK (TRUE);
+
+-- Admin listings read (bypasses public_listing=TRUE filter for admin panel)
+CREATE POLICY IF NOT EXISTS "listings_admin_read" ON listings FOR SELECT USING (TRUE);
+
 -- Admin full access (bypass RLS via service_role — handled server-side)
