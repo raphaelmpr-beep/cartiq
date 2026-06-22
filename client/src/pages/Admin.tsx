@@ -17,7 +17,7 @@ import type { Listing, Dealer, InventorySource } from "@/lib/types";
 
 // The admin token is whatever the user typed — never a compiled constant.
 // The server validates it; the client just forwards it.
-const CORRECT_HASH = "b3fab09e4bb9d12c"; // sha-256 prefix of "cartiq2024" for UI gating only
+const CORRECT_HASH = "0dcb739de87d7278"; // sha-256 prefix of "cartiq2024" for UI gating only
 async function hashToken(s: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
