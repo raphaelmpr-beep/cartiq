@@ -157,37 +157,37 @@ export async function seedDatabase() {
   // ─── Dealers ─────────────────────────────────────────────────────────────
   // New dealers added: Botero Carts, Discovery Golf Cars, Coastal Golf Carts Port Orange, Coastal Carts Fort Myers
   if (!storage.hasDealer("botero-carts-jacksonville")) {
-    storage.createDealer({ name: "Botero Carts Jacksonville", phone: "(904) 544-9344", email: "jay@boterocarts.com", website: "https://boterocarts.com", city: "Jacksonville", state: "FL", zip: "32205", address: "624 Beauty Rest Ave, Jacksonville, FL 32205", logoUrl: null });
+    storage.createDealer({ slug: "botero-carts-jacksonville", name: "Botero Carts Jacksonville", phone: "(904) 544-9344", email: "jay@boterocarts.com", website: "https://boterocarts.com", city: "Jacksonville", state: "FL", zip: "32205", address: "624 Beauty Rest Ave, Jacksonville, FL 32205", logoUrl: null });
   }
   if (!storage.hasDealer("botero-carts-ocala")) {
-    storage.createDealer({ name: "Botero Carts Ocala", phone: "(352) 615-8882", email: "ocala@boterocarts.com", website: "https://boterocarts.com", city: "Ocala", state: "FL", zip: "34471", address: "2855 S Pine Ave, Ocala, FL 34471", logoUrl: null });
+    storage.createDealer({ slug: "botero-carts-ocala", name: "Botero Carts Ocala", phone: "(352) 615-8882", email: "ocala@boterocarts.com", website: "https://boterocarts.com", city: "Ocala", state: "FL", zip: "34471", address: "2855 S Pine Ave, Ocala, FL 34471", logoUrl: null });
   }
   if (!storage.hasDealer("botero-carts-clearwater")) {
-    storage.createDealer({ name: "Botero Carts Clearwater", phone: "(727) 255-8233", email: "clearwater@boterocarts.com", website: "https://boterocarts.com", city: "Clearwater", state: "FL", zip: "33760", address: "5300 Ulmerton Rd, Clearwater, FL 33760", logoUrl: null });
+    storage.createDealer({ slug: "botero-carts-clearwater", name: "Botero Carts Clearwater", phone: "(727) 255-8233", email: "clearwater@boterocarts.com", website: "https://boterocarts.com", city: "Clearwater", state: "FL", zip: "33760", address: "5300 Ulmerton Rd, Clearwater, FL 33760", logoUrl: null });
   }
   if (!storage.hasDealer("botero-carts-pensacola")) {
-    storage.createDealer({ name: "Botero Carts Pensacola", phone: "(850) 359-8180", email: "pensacola@boterocarts.com", website: "https://boterocarts.com", city: "Pensacola", state: "FL", zip: "32502", address: "1810 Barrancas Ave, Pensacola, FL 32502", logoUrl: null });
+    storage.createDealer({ slug: "botero-carts-pensacola", name: "Botero Carts Pensacola", phone: "(850) 359-8180", email: "pensacola@boterocarts.com", website: "https://boterocarts.com", city: "Pensacola", state: "FL", zip: "32502", address: "1810 Barrancas Ave, Pensacola, FL 32502", logoUrl: null });
   }
   if (!storage.hasDealer("botero-carts-peachtree-city")) {
-    storage.createDealer({ name: "Botero Carts Peachtree City", phone: "(470) 585-3993", email: "peachtreecity@boterocarts.com", website: "https://boterocarts.com", city: "Peachtree City", state: "GA", zip: "30269", address: "Peachtree City, GA 30269", logoUrl: null });
+    storage.createDealer({ slug: "botero-carts-peachtree-city", name: "Botero Carts Peachtree City", phone: "(470) 585-3993", email: "peachtreecity@boterocarts.com", website: "https://boterocarts.com", city: "Peachtree City", state: "GA", zip: "30269", address: "Peachtree City, GA 30269", logoUrl: null });
   }
   if (!storage.hasDealer("discovery-golf-cars-clearwater")) {
-    storage.createDealer({ name: "Discovery Golf Cars Clearwater", phone: "(727) 333-7556", email: "clearwater@discoverygolfcars.com", website: "https://www.discoverygolfcarsclearwater.com", city: "Clearwater", state: "FL", zip: "33764", address: "16117 US Hwy 19 North, Clearwater, FL 33764", logoUrl: null });
+    storage.createDealer({ slug: "discovery-golf-cars-clearwater", name: "Discovery Golf Cars Clearwater", phone: "(727) 333-7556", email: "clearwater@discoverygolfcars.com", website: "https://www.discoverygolfcarsclearwater.com", city: "Clearwater", state: "FL", zip: "33764", address: "16117 US Hwy 19 North, Clearwater, FL 33764", logoUrl: null });
   }
   if (!storage.hasDealer("discovery-golf-cars-land-o-lakes")) {
-    storage.createDealer({ name: "Discovery Golf Cars Land O'Lakes", phone: "(813) 996-5522", email: "landolakes@discoverygolfcars.com", website: "https://www.discoverygolfcars.com", city: "Land O' Lakes", state: "FL", zip: "34639", address: "3904 Land O' Lakes Blvd, Land O' Lakes, FL 34639", logoUrl: null });
+    storage.createDealer({ slug: "discovery-golf-cars-land-o-lakes", name: "Discovery Golf Cars Land O'Lakes", phone: "(813) 996-5522", email: "landolakes@discoverygolfcars.com", website: "https://www.discoverygolfcars.com", city: "Land O' Lakes", state: "FL", zip: "34639", address: "3904 Land O' Lakes Blvd, Land O' Lakes, FL 34639", logoUrl: null });
   }
   if (!storage.hasDealer("discovery-golf-cars-hudson")) {
-    storage.createDealer({ name: "Discovery Golf Cars Hudson", phone: "(727) 857-6002", email: "hudson@discoverygolfcars.com", website: "https://www.hudsondiscoverygolfcars.com", city: "Hudson", state: "FL", zip: "34667", address: "12905 US Hwy 19, Hudson, FL 34667", logoUrl: null });
+    storage.createDealer({ slug: "discovery-golf-cars-hudson", name: "Discovery Golf Cars Hudson", phone: "(727) 857-6002", email: "hudson@discoverygolfcars.com", website: "https://www.hudsondiscoverygolfcars.com", city: "Hudson", state: "FL", zip: "34667", address: "12905 US Hwy 19, Hudson, FL 34667", logoUrl: null });
   }
   if (!storage.hasDealer("coastal-golf-carts-port-orange")) {
-    storage.createDealer({ name: "Coastal Golf Carts Port Orange", phone: "(386) 405-2808", email: "coastalgolfcartsllc@gmail.com", website: "https://www.coastalgolfcartsfl.com", city: "Port Orange", state: "FL", zip: "32127", address: "5840 S Ridgewood Ave, Port Orange, FL 32127", logoUrl: null });
+    storage.createDealer({ slug: "coastal-golf-carts-port-orange", name: "Coastal Golf Carts Port Orange", phone: "(386) 405-2808", email: "coastalgolfcartsllc@gmail.com", website: "https://www.coastalgolfcartsfl.com", city: "Port Orange", state: "FL", zip: "32127", address: "5840 S Ridgewood Ave, Port Orange, FL 32127", logoUrl: null });
   }
   if (!storage.hasDealer("coastal-carts-fort-myers")) {
-    storage.createDealer({ name: "Coastal Carts Fort Myers", phone: "(239) 936-5676", email: "sales@coastalcartsfl.com", website: "https://coastalcartsfl.com", city: "Fort Myers", state: "FL", zip: "33908", address: "16611 S Tamiami Trail, Fort Myers, FL 33908", logoUrl: null });
+    storage.createDealer({ slug: "coastal-carts-fort-myers", name: "Coastal Carts Fort Myers", phone: "(239) 936-5676", email: "sales@coastalcartsfl.com", website: "https://coastalcartsfl.com", city: "Fort Myers", state: "FL", zip: "33908", address: "16611 S Tamiami Trail, Fort Myers, FL 33908", logoUrl: null });
   }
   if (!storage.hasDealer("jenkins-motorsports-lakeland")) {
-    storage.createDealer({ name: "Jenkins Motorsports", phone: "(863) 225-4316", email: "sales@jenkinsmotorsports.com", website: "https://www.jenkinsmotorsports.com", city: "Lakeland", state: "FL", zip: "33801", address: "Lakeland, FL 33801", logoUrl: null });
+    storage.createDealer({ slug: "jenkins-motorsports-lakeland", name: "Jenkins Motorsports", phone: "(863) 225-4316", email: "sales@jenkinsmotorsports.com", website: "https://www.jenkinsmotorsports.com", city: "Lakeland", state: "FL", zip: "33801", address: "Lakeland, FL 33801", logoUrl: null });
   }
   if (!storage.hasDealer("sunshine-golf-carts-jacksonville")) {
     storage.createDealer({
