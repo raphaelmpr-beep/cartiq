@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { MapPin, Users, Phone, Store } from "lucide-react";
+import { MapPin, Users, Phone, Store, ExternalLink } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DealBadge, SourceBadge, BuyerScoreBadge, WarrantyBadge, DeliveryCostBadge, BatteryRiskBadge, DealDeltaBadge, StreetLegalBadge, RetailSourceBadge } from "./Badges";
@@ -30,13 +30,15 @@ export function ListingCard({ listing, compact }: ListingCardProps) {
               const t = e.currentTarget;
               t.onerror = null;
               t.style.display = "none";
-              const fallback = t.nextElementSibling as HTMLElement | null;
+              // Show the fallback sibling regardless of initial state
+              const parent = t.parentElement;
+              const fallback = parent?.querySelector<HTMLElement>(".img-fallback");
               if (fallback) fallback.style.display = "flex";
             }}
           />
         ) : null}
         <div
-          className="w-full h-full items-center justify-center bg-muted text-muted-foreground text-sm"
+          className="img-fallback w-full h-full items-center justify-center bg-muted text-muted-foreground text-sm"
           style={{ display: listing.imageUrl ? "none" : "flex" }}
         >
           No Image
@@ -138,11 +140,27 @@ export function ListingCard({ listing, compact }: ListingCardProps) {
           />
         )}
 
-        <Link href={`/listing/${listing.slug || listing.id}`} className="block w-full mt-1">
-          <Button className="w-full" size="sm" data-testid={`btn-view-deal-${listing.id}`}>
-            {listing.sellerType === "retail" ? "View Retailer" : "View Deal"}
-          </Button>
-        </Link>
+        <div className="flex gap-2 mt-1">
+          <Link href={`/listing/${listing.slug || listing.id}`} className="flex-1">
+            <Button className="w-full" size="sm" data-testid={`btn-view-deal-${listing.id}`}>
+              {listing.sellerType === "retail" ? "View Retailer" : "View Deal"}
+            </Button>
+          </Link>
+          {listing.sourceUrl && (
+            <a
+              href={listing.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title="View on dealer site"
+              data-testid={`btn-source-link-${listing.id}`}
+            >
+              <Button variant="outline" size="sm" className="px-2.5">
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Button>
+            </a>
+          )}
+        </div>
       </div>
     </Card>
   );
