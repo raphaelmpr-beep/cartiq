@@ -823,6 +823,67 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // POST /api/admin/coverage-baseline — write a baseline dealer_coverage_log row
+  // for a dealer that has active listings but no log entry yet.
+  // Sets coverage_status = 'partial_inventory' (has real data, not yet fully audited).
+  app.post("/api/admin/coverage-baseline", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { dealer_slug } = req.body;
+      if (!dealer_slug) return res.status(400).json({ error: "dealer_slug required" });
+
+      // Count active listings for this dealer
+      const { count: activeCount } = await sb
+        .from("listings")
+        .select("*", { count: "exact", head: true })
+        .eq("sync_source", dealer_slug)
+        .eq("status", "active")
+        .eq("public_listing", true);
+
+      // Count pending imports
+      const { count: pendingCount } = await sb
+        .from("pending_imports")
+        .select("*", { count: "exact", head: true })
+        .eq("dealer_slug", dealer_slug)
+        .eq("status", "pending");
+
+      // Check for existing log entry
+      const { data: existing } = await sb
+        .from("dealer_coverage_log")
+        .select("id")
+        .eq("dealer_slug", dealer_slug)
+        .order("scanned_at", { ascending: false })
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        return res.json({ ok: true, message: `Coverage log already exists for ${dealer_slug}`, skipped: true });
+      }
+
+      // Insert baseline row
+      const { error: insErr } = await sb.from("dealer_coverage_log").insert({
+        dealer_slug,
+        coverage_status:        "partial_inventory",
+        source_page_type:       "sitemap",
+        discovered_count:       (activeCount || 0) + (pendingCount || 0),
+        pending_imports_count:  pendingCount || 0,
+        pagination_detected:    false,
+        pages_visited:          1,
+        load_more_detected:     false,
+        scroll_required:        false,
+        detail_pages_visited:   0,
+        valuation_review_needed: false,
+        adapter_notes:          `Baseline auto-generated from existing listings. Active: ${activeCount || 0}, Pending: ${pendingCount || 0}. Full audit pending.`,
+        scanned_at:             new Date().toISOString(),
+      });
+
+      if (insErr) return res.status(500).json({ error: insErr.message });
+      res.json({ ok: true, dealer_slug, activeCount, pendingCount, message: `Baseline set: partial_inventory` });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GET /api/admin/inventory-reconciliation — full inventory gap audit
   app.get("/api/admin/inventory-reconciliation", requireAdmin, async (_req, res) => {
     try {

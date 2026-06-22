@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   RefreshCw, ExternalLink, TriangleAlert, AlertCircle,
-  Database, Loader2, Info, CheckCircle2
+  Database, Loader2, Info, CheckCircle2, Play
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -212,9 +213,14 @@ function ReconciliationExplainer({ totals }: { totals: ReconciliationTotals }) {
 
 // ── Mobile dealer card ─────────────────────────────────────────────────────────
 
-function DealerCard({ row }: { row: DealerRow }) {
+function DealerCard({ row, onSetBaseline, baselineState }: {
+  row: DealerRow;
+  onSetBaseline?: (slug: string) => void;
+  baselineState?: Record<string, string>;
+}) {
   const action = ACTION_META[row.actionNeeded] || ACTION_META["none"];
   const isNeverSynced = row.coverageStatus === "not_synced";
+  const bs = baselineState?.[row.dealerSlug] || "idle";
   return (
     <div className={`border border-border rounded-lg p-3 bg-white space-y-2 ${isNeverSynced ? "opacity-60" : ""}`}>
       <div className="flex items-start justify-between gap-2">
@@ -227,6 +233,16 @@ function DealerCard({ row }: { row: DealerRow }) {
           <CoverageBadge status={row.coverageStatus} />
           {row.actionNeeded !== "none" && (
             <span className={`text-xs font-medium ${action.color}`}>→ {action.label}</span>
+          )}
+          {row.coverageStatus === "needs_manual_review" && onSetBaseline && (
+            <Button
+              size="sm" variant="outline"
+              className="text-xs h-6 px-2 text-gray-600 border-gray-300 hover:bg-gray-50"
+              disabled={bs === "running" || bs === "done"}
+              onClick={() => onSetBaseline(row.dealerSlug)}
+            >
+              {bs === "done" ? "✓ Done" : bs === "running" ? <Loader2 className="h-3 w-3 animate-spin" /> : "Set Baseline"}
+            </Button>
           )}
         </div>
       </div>
@@ -280,6 +296,51 @@ function DealerCard({ row }: { row: DealerRow }) {
 export default function InventoryCoverage({ adminToken }: { adminToken: string }) {
   const ADMIN_HEADERS = { "x-admin-token": adminToken };
   const qc = useQueryClient();
+
+  // Per-dealer run-discovery state: slug -> "idle" | "running" | "done" | "error"
+  const [discoverState, setDiscoverState] = useState<Record<string, "idle" | "running" | "done" | "error">>({});
+  const [discoverResult, setDiscoverResult] = useState<Record<string, string>>({});
+
+  // Per-dealer baseline state
+  const [baselineState, setBaselineState] = useState<Record<string, "idle" | "running" | "done" | "error">>({});
+
+  async function handleSetBaseline(dealerSlug: string) {
+    setBaselineState(s => ({ ...s, [dealerSlug]: "running" }));
+    try {
+      const resp = await apiRequest("POST", "/api/admin/coverage-baseline",
+        { dealer_slug: dealerSlug }, ADMIN_HEADERS);
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || "Baseline failed");
+      setBaselineState(s => ({ ...s, [dealerSlug]: "done" }));
+      setTimeout(() => refetch(), 800);
+    } catch {
+      setBaselineState(s => ({ ...s, [dealerSlug]: "error" }));
+    }
+  }
+
+  async function handleRunDiscovery(dealerSlug: string) {
+    setDiscoverState(s => ({ ...s, [dealerSlug]: "running" }));
+    setDiscoverResult(s => ({ ...s, [dealerSlug]: "" }));
+    try {
+      const resp = await apiRequest("POST", "/api/admin/sync", {
+        mode: "discover_sitemap",
+        dealer: dealerSlug,
+        limit: 100,
+        dry_run: false,
+      }, ADMIN_HEADERS);
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || "Sync failed");
+      const queued = result.new_queued ?? 0;
+      const summary = Array.isArray(result.summary) ? result.summary.join(" | ") : "";
+      setDiscoverState(s => ({ ...s, [dealerSlug]: "done" }));
+      setDiscoverResult(s => ({ ...s, [dealerSlug]: `${queued} new queued${summary ? " — " + summary.slice(0, 120) : ""}` }));
+      // Refresh the table after a short delay
+      setTimeout(() => refetch(), 1500);
+    } catch (e: any) {
+      setDiscoverState(s => ({ ...s, [dealerSlug]: "error" }));
+      setDiscoverResult(s => ({ ...s, [dealerSlug]: e.message || "Unknown error" }));
+    }
+  }
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<{ totals: ReconciliationTotals; byDealer: DealerRow[] }>({
     queryKey: ["/api/admin/inventory-reconciliation"],
@@ -415,7 +476,14 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
 
         {/* Mobile cards */}
         <div className="sm:hidden space-y-3">
-          {hasSynced.map(row => <DealerCard key={row.dealerSlug} row={row} />)}
+          {hasSynced.map(row => (
+            <DealerCard
+              key={row.dealerSlug}
+              row={row}
+              onSetBaseline={handleSetBaseline}
+              baselineState={baselineState}
+            />
+          ))}
           {hasSynced.length === 0 && (
             <p className="text-sm text-muted-foreground py-4 text-center">No active sources.</p>
           )}
@@ -496,6 +564,19 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
                     </td>
                     <td className="p-2 border border-border">
                       <span className={`font-medium ${action.color}`}>{action.label}</span>
+                      {row.coverageStatus === "needs_manual_review" && (
+                        <Button
+                          size="sm" variant="outline"
+                          className="mt-1 text-xs h-6 px-2 gap-1 text-gray-600 border-gray-300 hover:bg-gray-50 block"
+                          disabled={baselineState[row.dealerSlug] === "running" || baselineState[row.dealerSlug] === "done"}
+                          onClick={() => handleSetBaseline(row.dealerSlug)}
+                        >
+                          {baselineState[row.dealerSlug] === "running" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                          {baselineState[row.dealerSlug] === "done" ? "✓ Baseline set" :
+                           baselineState[row.dealerSlug] === "running" ? "Setting…" :
+                           "Set Baseline"}
+                        </Button>
+                      )}
                       {row.notes && (
                         <p className="text-muted-foreground mt-0.5 max-w-[160px] truncate" title={row.notes}>{row.notes}</p>
                       )}
@@ -520,37 +601,71 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
 
         {/* Mobile: simple list */}
         <div className="sm:hidden space-y-2">
-          {neverSynced.map(row => (
-            <div key={row.dealerSlug} className="flex items-center justify-between border border-border rounded p-2 bg-white opacity-70">
-              <div>
-                <p className="text-sm font-medium">{row.dealerName}</p>
-                <p className="text-xs text-muted-foreground">{[row.city, row.state].filter(Boolean).join(", ")}</p>
+          {neverSynced.map(row => {
+            const ds = discoverState[row.dealerSlug] || "idle";
+            const dr = discoverResult[row.dealerSlug] || "";
+            return (
+              <div key={row.dealerSlug} className="border border-border rounded p-2 bg-white">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">{row.dealerName}</p>
+                    <p className="text-xs text-muted-foreground">{[row.city, row.state].filter(Boolean).join(", ")}</p>
+                  </div>
+                  <Button
+                    size="sm" variant="outline"
+                    className="text-xs h-7 px-2 gap-1 text-blue-700 border-blue-200 hover:bg-blue-50"
+                    disabled={ds === "running"}
+                    onClick={() => handleRunDiscovery(row.dealerSlug)}
+                  >
+                    {ds === "running" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                    {ds === "running" ? "Running…" : ds === "done" ? "✓ Done" : "Run Discovery"}
+                  </Button>
+                </div>
+                {dr && (
+                  <p className={`text-xs mt-1 ${ds === "error" ? "text-red-600" : "text-green-700"}`}>{dr}</p>
+                )}
               </div>
-              <span className="text-xs text-blue-700 font-medium">Run Discovery</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Desktop: compact table */}
         <div className="hidden sm:block overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-xs border-collapse" style={{ minWidth: 600 }}>
+          <table className="w-full text-xs border-collapse" style={{ minWidth: 640 }}>
             <thead>
               <tr className="bg-muted text-left">
-                {["Dealer", "Slug", "State", "City", "Action"].map(h => (
+                {["Dealer", "Slug", "State", "City", "Action", "Result"].map(h => (
                   <th key={h} className="p-2 border border-border font-semibold">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {neverSynced.map((row, i) => (
-                <tr key={row.dealerSlug} className={`${i % 2 === 0 ? "bg-white" : "bg-gray-50"} opacity-70`}>
-                  <td className="p-2 border border-border font-medium">{row.dealerName}</td>
-                  <td className="p-2 border border-border text-muted-foreground">{row.dealerSlug}</td>
-                  <td className="p-2 border border-border">{row.state || "—"}</td>
-                  <td className="p-2 border border-border">{row.city || "—"}</td>
-                  <td className="p-2 border border-border text-blue-700 font-medium">Run Discovery</td>
-                </tr>
-              ))}
+              {neverSynced.map((row, i) => {
+                const ds = discoverState[row.dealerSlug] || "idle";
+                const dr = discoverResult[row.dealerSlug] || "";
+                return (
+                  <tr key={row.dealerSlug} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                    <td className="p-2 border border-border font-medium">{row.dealerName}</td>
+                    <td className="p-2 border border-border text-muted-foreground">{row.dealerSlug}</td>
+                    <td className="p-2 border border-border">{row.state || "—"}</td>
+                    <td className="p-2 border border-border">{row.city || "—"}</td>
+                    <td className="p-2 border border-border">
+                      <Button
+                        size="sm" variant="outline"
+                        className="text-xs h-6 px-2 gap-1 text-blue-700 border-blue-200 hover:bg-blue-50"
+                        disabled={ds === "running"}
+                        onClick={() => handleRunDiscovery(row.dealerSlug)}
+                      >
+                        {ds === "running" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                        {ds === "running" ? "Running…" : ds === "done" ? "✓ Done" : "Run Discovery"}
+                      </Button>
+                    </td>
+                    <td className={`p-2 border border-border text-xs max-w-xs truncate ${ds === "error" ? "text-red-600" : "text-green-700"}`}>
+                      {dr || "—"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {neverSynced.length === 0 && (
