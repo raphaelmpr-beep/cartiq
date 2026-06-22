@@ -443,8 +443,8 @@ export default function DealChecker() {
               <CardContent className="space-y-3 text-sm">
                 {[
                   ["Asking Price", formatPrice(result.askingPrice)],
-                  ["CartIQ Estimated Value", formatPrice(result.cartiqEstimatedValue)],
-                  ["Total Delivered Cost", result.totalDeliveredCost ? formatPrice(result.totalDeliveredCost) : "Delivery unknown"],
+                  ["CartIQ Market Value", formatPrice(result.cartiqMarketValue ?? result.cartiqEstimatedValue)],
+                  ["Total Delivered Cost", result.totalDeliveredCost ? formatPrice(result.totalDeliveredCost) : "Delivery cost unknown"],
                 ].map(([label, value]) => (
                   <div key={label} className="flex justify-between">
                     <span className="text-muted-foreground">{label}</span>
@@ -454,9 +454,40 @@ export default function DealChecker() {
                 <div className="border-t pt-2">
                   <DealDeltaBadge delta={result.dealDelta} />
                 </div>
-                <div className="text-xs text-muted-foreground border-t pt-2">
-                  Suggested negotiation range: <strong>{formatPrice(result.negotiationLow)} – {formatPrice(result.negotiationHigh)}</strong>
-                </div>
+
+                {/* Negotiation guidance — shown for Fair Price and better */}
+                {result.negotiationLow != null && result.negotiationHigh != null &&
+                  (!result.priceToImprove?.toFairPrice) && (
+                  <div className="text-xs text-muted-foreground border-t pt-2">
+                    Suggested negotiation range:{" "}
+                    <strong>{formatPrice(result.negotiationLow)} – {formatPrice(result.negotiationHigh)}</strong>
+                  </div>
+                )}
+
+                {/* Price to Improve Rating — shown only when above market */}
+                {result.priceToImprove && result.priceToImprove.toFairPrice != null && (
+                  <div className="border-t pt-3 space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Negotiation Guidance</p>
+                    <p className="text-xs text-muted-foreground">Based on total delivered cost of {result.totalDeliveredCost ? formatPrice(result.totalDeliveredCost) : "the listed price"}:</p>
+                    <div className="space-y-1.5">
+                      {result.priceToImprove.toFairPrice != null && (
+                        <div className="flex items-center justify-between bg-yellow-50 rounded px-3 py-2">
+                          <span className="text-xs text-yellow-800">Reduce by <strong>{formatPrice(result.priceToImprove.toFairPrice)}</strong> to reach Fair Price</span>
+                        </div>
+                      )}
+                      {result.priceToImprove.toGoodDeal != null && (
+                        <div className="flex items-center justify-between bg-blue-50 rounded px-3 py-2">
+                          <span className="text-xs text-blue-800">Reduce by <strong>{formatPrice(result.priceToImprove.toGoodDeal)}</strong> to reach Good Deal</span>
+                        </div>
+                      )}
+                      {result.priceToImprove.toGreatDeal != null && (
+                        <div className="flex items-center justify-between bg-green-50 rounded px-3 py-2">
+                          <span className="text-xs text-green-800">Reduce by <strong>{formatPrice(result.priceToImprove.toGreatDeal)}</strong> to reach Great Deal</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

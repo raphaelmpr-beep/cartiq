@@ -16,7 +16,34 @@ function toCamel(obj: Record<string, any>): Record<string, any> {
   }
   return out;
 }
-function normList(rows: any[]): any[] { return rows.map(toCamel); }
+function normList(rows: any[]): any[] { return rows.map(r => norm(r)); }
+
+// For deal-check objects: enrich camelCase output with derived fields
+// that are computed on the fly (not stored in DB) so the frontend always
+// has current values without a schema migration.
+function normDealCheck(row: any): any {
+  const base = toCamel(row);
+  const cmv = base.cartiqEstimatedValue ?? base.cartiqMarketValue ?? null;
+  const tdc = base.totalDeliveredCost ?? null;
+  if (cmv && tdc) {
+    const fairCeil  = Math.round(cmv * 1.05);
+    const goodCeil  = Math.round(cmv * 0.95);
+    const greatCeil = Math.round(cmv * 0.85);
+    base.cartiqMarketValue = cmv;
+    base.dealDeltaPercent  = (tdc - cmv) / cmv;
+    base.priceToImprove = {
+      toFairPrice:  tdc > fairCeil  ? tdc - fairCeil  : null,
+      toGoodDeal:   tdc > goodCeil  ? tdc - goodCeil  : null,
+      toGreatDeal:  tdc > greatCeil ? tdc - greatCeil : null,
+    };
+  } else {
+    base.cartiqMarketValue = cmv;
+    base.dealDeltaPercent  = null;
+    base.priceToImprove    = { toFairPrice: null, toGoodDeal: null, toGreatDeal: null };
+  }
+  return base;
+}
+
 function norm(row: any): any { return toCamel(row); }
 
 import { getMetaConnectorStatus } from "./connectors/metaMarketplace";
@@ -73,7 +100,8 @@ function enrichListingWithPricing(data: Record<string, any>): Record<string, any
 
   return {
     ...data,
-    cartiq_estimated_value: result.cartiqEstimatedValue,
+    cartiq_estimated_value: result.cartiqMarketValue,
+    cartiq_market_value: result.cartiqMarketValue,
     estimated_delivery_cost: sellerOffersDelivery
       ? (result.estimatedDeliveryCost >= 0 ? result.estimatedDeliveryCost : (data.estimated_delivery_cost ?? data.estimatedDeliveryCost))
       : null,
@@ -283,7 +311,15 @@ export function registerRoutes(httpServer: Server, app: Express) {
         user_id: null,
       });
 
-      res.status(201).json({ ...norm(dealCheck as any), pilotWarning });
+      const enrichedCheck = {
+        ...normDealCheck(dealCheck as any),
+        // Include live pricing fields not stored in DB
+        dealDeltaPercent: pricing.dealDeltaPercent,
+        priceToImprove: pricing.priceToImprove,
+        cartiqMarketValue: pricing.cartiqMarketValue,
+        pilotWarning,
+      };
+      res.status(201).json(enrichedCheck);
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }

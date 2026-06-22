@@ -90,6 +90,14 @@ export interface DealCheck {
   questionsToAsk?: string; // JSON
   negotiationLow?: number;
   negotiationHigh?: number;
+  /** CartIQ Market Value — preferred alias over cartiqEstimatedValue */
+  cartiqMarketValue?: number;
+  dealDeltaPercent?: number;
+  priceToImprove?: {
+    toFairPrice: number | null;
+    toGoodDeal: number | null;
+    toGreatDeal: number | null;
+  };
   pilotWarning?: string;
   createdAt: string;
 }
