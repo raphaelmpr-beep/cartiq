@@ -606,11 +606,17 @@ export function registerRoutes(httpServer: Server, app: Express) {
       const { createClient } = await import("@supabase/supabase-js");
       const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
       const status = (req.query.status as string) || "pending";
-      const dealer = req.query.dealer as string | undefined;
-      let q = sb.from("pending_imports").select("*").eq("status", status).order("found_at", { ascending: false }).limit(50);
+      const dealer   = req.query.dealer as string | undefined;
+      const reqLimit = Math.min(parseInt(req.query.limit as string) || 500, 1000);
+      const reqOffset = parseInt(req.query.offset as string) || 0;
+      let q = sb.from("pending_imports").select("*", { count: "exact" })
+        .eq("status", status)
+        .order("found_at", { ascending: false })
+        .range(reqOffset, reqOffset + reqLimit - 1);
       if (dealer) q = q.eq("dealer_slug", dealer);
-      const { data, error } = await q;
+      const { data, error, count } = await q;
       if (error) return res.status(500).json({ error: error.message });
+      res.setHeader("X-Total-Count", String(count ?? 0));
       res.json(data || []);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -691,6 +697,41 @@ export function registerRoutes(httpServer: Server, app: Express) {
         return res.json(data);
       }
       return res.status(400).json({ error: "action must be 'approve' or 'reject'" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/admin/pending-imports/bulk-approve-all — approve ALL pending, optionally filtered by dealer_slug
+  app.post("/api/admin/pending-imports/bulk-approve-all", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { dealer_slug } = req.body as { dealer_slug?: string };
+
+      // Fetch all pending IDs (paginate to handle 1000+)
+      let allIds: number[] = [];
+      let from = 0;
+      const PAGE = 500;
+      while (true) {
+        let q = sb.from("pending_imports").select("id").eq("status", "pending").range(from, from + PAGE - 1);
+        if (dealer_slug) q = q.eq("dealer_slug", dealer_slug);
+        const { data, error } = await q;
+        if (error) return res.status(500).json({ error: error.message });
+        allIds = allIds.concat((data || []).map((r: any) => r.id));
+        if (!data || data.length < PAGE) break;
+        from += PAGE;
+      }
+
+      if (allIds.length === 0) return res.json({ approved: 0, failed: 0, errors: [], total: 0 });
+
+      let approved = 0, failed = 0;
+      const errors: { id: number; error: string }[] = [];
+      for (const id of allIds) {
+        try { await approvePendingImport(sb, id); approved++; }
+        catch (e: any) { failed++; errors.push({ id, error: e.message }); }
+      }
+      res.json({ approved, failed, errors: errors.slice(0, 20), total: allIds.length });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

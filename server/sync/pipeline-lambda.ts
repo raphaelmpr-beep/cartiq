@@ -182,15 +182,20 @@ async function runDiscoverSitemap(dealer: string, limit: number, dry_run: boolea
     return;
   }
 
-  // Get known URLs from both tables
-  const [{ data: existing }, { data: pending }] = await Promise.all([
-    supabase.from('listings').select('source_listing_url').not('source_listing_url', 'is', null),
-    supabase.from('pending_imports').select('source_url'),
+  // Get known URLs scoped to this dealer only (fast — avoids full-table scan)
+  const [{ data: existing }, { data: pendingKnown }] = await Promise.all([
+    supabase.from('listings')
+      .select('source_listing_url')
+      .eq('sync_source', dealer)
+      .not('source_listing_url', 'is', null),
+    supabase.from('pending_imports')
+      .select('source_url')
+      .eq('dealer_slug', dealer),
   ]);
 
   const knownUrls = new Set([
     ...(existing || []).map((r: any) => r.source_listing_url),
-    ...(pending || []).map((r: any) => r.source_url),
+    ...(pendingKnown || []).map((r: any) => r.source_url),
   ]);
 
   const newUrls = sitemapUrls.filter(u => !knownUrls.has(u));

@@ -590,14 +590,26 @@ function PendingImports({ adminToken }: { adminToken: string }) {
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ approved: number; failed: number; total: number } | null>(null);
   const [filterDealer, setFilterDealer] = useState<string>("all");
+  const [totalCount, setTotalCount] = useState<number | null>(null);
 
   const { data: rows = [], isLoading, error, refetch, isFetching } = useQuery<PendingImport[]>({
     queryKey: ["/api/admin/pending-imports"],
-    queryFn: () => apiRequest("GET", "/api/admin/pending-imports?status=pending&limit=200", undefined, ADMIN_HEADERS).then(r => r.json()),
+    queryFn: async () => {
+      const r = await apiRequest("GET", "/api/admin/pending-imports?status=pending&limit=1000", undefined, ADMIN_HEADERS);
+      const total = r.headers.get("x-total-count");
+      if (total) setTotalCount(parseInt(total));
+      return r.json();
+    },
   });
 
   const dealers = Array.from(new Set(rows.map(r => r.dealer_slug))).sort();
+  // Count per dealer from rows (may be partial if totalCount > 1000)
+  const dealerCounts = dealers.reduce((acc, d) => {
+    acc[d] = rows.filter(r => r.dealer_slug === d).length;
+    return acc;
+  }, {} as Record<string, number>);
   const filtered = filterDealer === "all" ? rows : rows.filter(r => r.dealer_slug === filterDealer);
+  const displayTotal = totalCount ?? rows.length;
 
   async function handleAction(id: number, action: "approve" | "reject") {
     setProcessingIds(prev => new Set(prev).add(id));
@@ -611,18 +623,19 @@ function PendingImports({ adminToken }: { adminToken: string }) {
     }
   }
 
+  // Calls bulk-approve-all — server-side paginates, no ID list needed
   async function handleBulkApprove() {
-    const targetIds = filtered.map(r => r.id);
-    if (targetIds.length === 0) return;
     setBulkRunning(true);
     setBulkResult(null);
     try {
+      const payload = filterDealer === "all" ? {} : { dealer_slug: filterDealer };
       const res = await apiRequest(
-        "POST", "/api/admin/pending-imports/bulk-approve",
-        { ids: targetIds }, ADMIN_HEADERS
+        "POST", "/api/admin/pending-imports/bulk-approve-all",
+        payload, ADMIN_HEADERS
       );
       const result = await res.json();
       setBulkResult(result);
+      setTotalCount(null);
       qc.invalidateQueries({ queryKey: ["/api/admin/pending-imports"] });
       qc.invalidateQueries({ queryKey: ["/api/admin/inventory-reconciliation"] });
       qc.invalidateQueries({ queryKey: ["/api/admin/listings"] });
@@ -650,9 +663,9 @@ function PendingImports({ adminToken }: { adminToken: string }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <p className="text-sm text-muted-foreground">
-            {rows.length === 0
+            {displayTotal === 0
               ? "No pending imports."
-              : <><strong>{rows.length}</strong> listing{rows.length !== 1 ? "s" : ""} awaiting review</>}
+              : <><strong>{displayTotal}</strong> listing{displayTotal !== 1 ? "s" : ""} awaiting review</>}
           </p>
           {dealers.length > 1 && (
             <select
@@ -660,9 +673,9 @@ function PendingImports({ adminToken }: { adminToken: string }) {
               onChange={e => setFilterDealer(e.target.value)}
               className="text-xs border border-border rounded px-2 py-1 bg-background"
             >
-              <option value="all">All dealers</option>
+              <option value="all">All dealers ({displayTotal})</option>
               {dealers.map(d => (
-                <option key={d} value={d}>{d} ({rows.filter(r => r.dealer_slug === d).length})</option>
+                <option key={d} value={d}>{d} ({dealerCounts[d]})</option>
               ))}
             </select>
           )}
@@ -672,7 +685,7 @@ function PendingImports({ adminToken }: { adminToken: string }) {
             {isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Refresh
           </Button>
-          {filtered.length > 0 && (
+          {displayTotal > 0 && (
             <Button
               size="sm"
               onClick={handleBulkApprove}
@@ -682,7 +695,7 @@ function PendingImports({ adminToken }: { adminToken: string }) {
             >
               {bulkRunning
                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Approving…</>
-                : <><CheckCheck className="h-3.5 w-3.5" /> Approve All ({filtered.length})</>
+                : <><CheckCheck className="h-3.5 w-3.5" /> Approve {filterDealer === "all" ? `All ${displayTotal}` : `${dealerCounts[filterDealer] ?? 0} (${filterDealer})`}</>
               }
             </Button>
           )}
