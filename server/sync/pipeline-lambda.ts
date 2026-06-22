@@ -173,8 +173,43 @@ async function runDiscoverSitemap(dealer: string, limit: number, dry_run: boolea
     const cfg = GCR_DEALERS[dealer];
     sitemapUrls = await getGcrSitemapUrls(cfg.domain, '/auto-listing-sitemap.xml', cfg.golfCartOnly);
   } else {
-    result.summary.push(`[${dealer}] Unknown dealer — no sitemap adapter configured`);
-    return;
+    // Auto-detect: look up website_url from dealers table, try GCR sitemap
+    const { data: dealerRow } = await supabase
+      .from('dealers')
+      .select('website_url, name')
+      .eq('slug', dealer)
+      .maybeSingle();
+
+    if (!dealerRow?.website_url) {
+      result.summary.push(`[${dealer}] No website URL configured in dealers table — add one to enable discovery`);
+      return;
+    }
+
+    // Extract domain from website_url
+    let domain: string;
+    try {
+      domain = new URL(dealerRow.website_url).hostname.replace(/^www\./, '');
+    } catch {
+      result.summary.push(`[${dealer}] Invalid website URL: ${dealerRow.website_url}`);
+      return;
+    }
+
+    // Try GCR-standard sitemap path
+    const attempted = await getGcrSitemapUrls(domain, '/auto-listing-sitemap.xml', true);
+    if (attempted.length > 0) {
+      sitemapUrls = attempted;
+      result.summary.push(`[${dealer}] Auto-detected GCR sitemap on ${domain} — found ${attempted.length} cart URLs`);
+    } else {
+      // Try without golf-cart filter (maybe different URL pattern)
+      const broader = await getGcrSitemapUrls(domain, '/auto-listing-sitemap.xml', false);
+      if (broader.length > 0) {
+        sitemapUrls = broader;
+        result.summary.push(`[${dealer}] Auto-detected GCR sitemap on ${domain} (broad) — found ${broader.length} URLs`);
+      } else {
+        result.summary.push(`[${dealer}] No GCR sitemap found at ${domain}/auto-listing-sitemap.xml — site may need a custom adapter`);
+        return;
+      }
+    }
   }
 
   if (!sitemapUrls.length) {

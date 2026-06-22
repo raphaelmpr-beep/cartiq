@@ -331,11 +331,20 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
       const result = await resp.json();
       if (!resp.ok) throw new Error(result.error || "Sync failed");
       const queued = result.new_queued ?? 0;
-      const summary = Array.isArray(result.summary) ? result.summary.join(" | ") : "";
-      setDiscoverState(s => ({ ...s, [dealerSlug]: "done" }));
-      setDiscoverResult(s => ({ ...s, [dealerSlug]: `${queued} new queued${summary ? " — " + summary.slice(0, 120) : ""}` }));
+      const summaryArr: string[] = Array.isArray(result.summary) ? result.summary : [];
+      const noAdapter = summaryArr.some(s => s.includes("no sitemap") || s.includes("No GCR sitemap") || s.includes("No website URL") || s.includes("custom adapter"));
+      const autoDetected = summaryArr.some(s => s.includes("Auto-detected"));
+      let msg = queued > 0
+        ? `✓ ${queued} new listing${queued !== 1 ? "s" : ""} queued`
+        : noAdapter
+          ? `No adapter — ${summaryArr[0]?.split(" — ")[1] ?? "site needs custom adapter"}`
+          : autoDetected
+            ? `Auto-detected — ${queued} new (already up to date)`
+            : `Up to date (${result.already_known ?? 0} known)`;
+      setDiscoverState(s => ({ ...s, [dealerSlug]: noAdapter ? "error" : "done" }));
+      setDiscoverResult(s => ({ ...s, [dealerSlug]: msg }));
       // Refresh the table after a short delay
-      setTimeout(() => refetch(), 1500);
+      if (!noAdapter) setTimeout(() => refetch(), 1500);
     } catch (e: any) {
       setDiscoverState(s => ({ ...s, [dealerSlug]: "error" }));
       setDiscoverResult(s => ({ ...s, [dealerSlug]: e.message || "Unknown error" }));
@@ -660,8 +669,12 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
                         {ds === "running" ? "Running…" : ds === "done" ? "✓ Done" : "Run Discovery"}
                       </Button>
                     </td>
-                    <td className={`p-2 border border-border text-xs max-w-xs truncate ${ds === "error" ? "text-red-600" : "text-green-700"}`}>
-                      {dr || "—"}
+                    <td className={`p-2 border border-border text-xs max-w-[200px] ${
+                      ds === "error" ? "text-red-600" :
+                      ds === "done" ? "text-green-700" :
+                      "text-muted-foreground"
+                    }`} title={dr}>
+                      {dr ? (dr.length > 60 ? dr.slice(0, 58) + "…" : dr) : "—"}
                     </td>
                   </tr>
                 );
