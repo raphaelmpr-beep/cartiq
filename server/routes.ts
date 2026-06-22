@@ -940,7 +940,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
         adapterRunsResult,
       ] = await Promise.all([
         sb.from("listings").select("id,sync_source,source_type,dealer_id,status,public_listing,price_confidence,state").limit(2000),
-        sb.from("dealers").select("id,slug,name,state,city").limit(500),
+        sb.from("dealers").select("id,slug,name,state,city,website_url,adapter_key,platform_type,discovery_strategy,inventory_source_url,browser_required,last_discovery_status,last_discovery_message").limit(500),
         sb.from("pending_imports").select("dealer_slug,status").limit(2000),
         sb.from("sync_log").select("dealer_slug,status,synced_at,notes").order("synced_at", { ascending: false }).limit(500),
         sb.from("dealer_coverage_log").select("dealer_slug,coverage_status,source_page_type,pagination_detected,pages_visited,load_more_detected,discovered_count,pending_imports_count,duplicate_count,scanned_at,adapter_notes,valuation_review_needed,inventory_url").order("scanned_at", { ascending: false }).limit(500),
@@ -1057,7 +1057,15 @@ export function registerRoutes(httpServer: Server, app: Express) {
           dealerName: dealer?.name || slug,
           state: dealer?.state || null,
           city: dealer?.city || null,
-          inventoryUrl: coverage?.inventory_url || null,
+          websiteUrl: dealer?.website_url || null,
+          adapterKey: dealer?.adapter_key || null,
+          platformType: dealer?.platform_type || null,
+          discoveryStrategy: dealer?.discovery_strategy || null,
+          inventorySourceUrl: dealer?.inventory_source_url || null,
+          browserRequired: dealer?.browser_required || false,
+          lastDiscoveryStatus: dealer?.last_discovery_status || null,
+          lastDiscoveryMessage: dealer?.last_discovery_message || null,
+          inventoryUrl: coverage?.inventory_url || dealer?.inventory_source_url || null,
           publicActiveCount: listings.active,
           publicActiveNullState: listings.nullState,
           publicInactiveCount: listings.inactive,
@@ -1138,6 +1146,51 @@ export function registerRoutes(httpServer: Server, app: Express) {
       };
 
       res.json({ totals, byDealer });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/admin/run-migration — execute DDL using service-role key
+  app.post("/api/admin/run-migration", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { query } = req.body;
+      if (!query || typeof query !== "string") return res.status(400).json({ error: "query required" });
+      // Only allow DDL (ALTER, CREATE, CREATE INDEX, COMMENT)
+      const allowed = /^\s*(ALTER|CREATE|COMMENT|DROP INDEX|DO \$\$)/i.test(query);
+      if (!allowed) return res.status(403).json({ error: "Only DDL statements allowed" });
+      const { error } = await sb.rpc("exec_ddl", { ddl: query }).single();
+      if (error) {
+        // Supabase anon key can't run DDL via RPC — use raw pg via supabase-js query builder workaround
+        // Fall back to reporting the SQL for manual application
+        return res.status(500).json({ error: error.message, hint: "Apply this SQL manually in Supabase SQL editor", sql: query });
+      }
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PATCH /api/admin/dealers/:slug/source-registry — update source registry fields
+  app.patch("/api/admin/dealers/:slug/source-registry", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { slug } = req.params;
+      const allowed = [
+        "adapter_key", "platform_type", "discovery_strategy",
+        "inventory_source_url", "canonical_domain", "domain_aliases",
+        "browser_required", "sync_enabled",
+        "last_discovery_status", "last_discovery_message", "last_discovery_at",
+      ];
+      const update: Record<string, any> = {};
+      for (const k of allowed) { if (req.body[k] !== undefined) update[k] = req.body[k]; }
+      if (Object.keys(update).length === 0) return res.status(400).json({ error: "No valid fields" });
+      const { error } = await sb.from("dealers").update(update).eq("slug", slug);
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ ok: true, slug, updated: update });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

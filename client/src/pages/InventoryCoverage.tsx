@@ -1,8 +1,9 @@
+import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   RefreshCw, ExternalLink, TriangleAlert, AlertCircle,
-  Database, Loader2, Info, CheckCircle2, Play
+  Database, Loader2, Info, CheckCircle2, Play, Settings, Zap, ChevronDown, ChevronRight
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +57,14 @@ type DealerRow = {
   dealerName: string;
   state?: string;
   city?: string;
+  websiteUrl?: string | null;
+  adapterKey?: string | null;
+  platformType?: string | null;
+  discoveryStrategy?: string | null;
+  inventorySourceUrl?: string | null;
+  browserRequired?: boolean;
+  lastDiscoveryStatus?: string | null;
+  lastDiscoveryMessage?: string | null;
   inventoryUrl?: string;
   publicActiveCount: number;
   publicActiveNullState: number;
@@ -103,6 +112,90 @@ const ACTION_META: Record<string, { label: string; color: string }> = {
   valuation_review:         { label: "Valuation Review",      color: "text-orange-700" },
   none:                     { label: "—",                     color: "text-muted-foreground" },
 };
+
+// ── 3-state discovery button ─────────────────────────────────────────────────
+// State 1: adapter_key set           → Run Discovery (blue)
+// State 2: website_url but no adapter → Detect Source (neutral/gray)
+// State 3: no website_url + no inv_url → Needs Setup (muted, disabled)
+
+type DiscoveryBtnState = "idle" | "running" | "done" | "error";
+
+function DiscoveryButton({ row, btnState, onRun }: {
+  row: DealerRow;
+  btnState: DiscoveryBtnState;
+  onRun: (slug: string) => void;
+}) {
+  const running = btnState === "running";
+
+  if (row.adapterKey) {
+    // State 1: adapter configured — Run Discovery (blue)
+    return (
+      <Button
+        size="sm" variant="outline"
+        className="text-xs h-6 px-2 gap-1 text-blue-700 border-blue-300 hover:bg-blue-50"
+        disabled={running}
+        onClick={() => onRun(row.dealerSlug)}
+      >
+        {running ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+        {running ? "Running…" : btnState === "done" ? "✓ Done" : "Run Discovery"}
+      </Button>
+    );
+  }
+
+  if (row.websiteUrl || row.inventorySourceUrl) {
+    // State 2: has URL but no adapter — Detect Source (neutral)
+    return (
+      <Button
+        size="sm" variant="outline"
+        className="text-xs h-6 px-2 gap-1 text-gray-700 border-gray-300 hover:bg-gray-50"
+        disabled={running}
+        onClick={() => onRun(row.dealerSlug)}
+      >
+        {running ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+        {running ? "Detecting…" : btnState === "done" ? "✓ Done" : "Detect Source"}
+      </Button>
+    );
+  }
+
+  // State 3: no URL at all — Needs Setup (disabled)
+  return (
+    <Button
+      size="sm" variant="outline"
+      className="text-xs h-6 px-2 gap-1 text-gray-400 border-gray-200 cursor-not-allowed"
+      disabled
+    >
+      <Settings className="h-3 w-3" />
+      Needs Setup
+    </Button>
+  );
+}
+
+// ── Diagnostic panel (per dealer) ─────────────────────────────────────────────
+
+function DiagnosticPanel({ row }: { row: DealerRow }) {
+  const fields: { label: string; value: string | null | undefined; mono?: boolean }[] = [
+    { label: "dealer_slug",           value: row.dealerSlug,            mono: true  },
+    { label: "adapter_key",           value: row.adapterKey || "—",     mono: true  },
+    { label: "platform_type",         value: row.platformType || "—",   mono: true  },
+    { label: "discovery_strategy",    value: row.discoveryStrategy || "—", mono: true },
+    { label: "website_url",           value: row.websiteUrl || "—",     mono: false },
+    { label: "inventory_source_url",  value: row.inventorySourceUrl || row.inventoryUrl || "—", mono: false },
+    { label: "browser_required",      value: row.browserRequired ? "true" : "false", mono: true },
+    { label: "last_discovery_status", value: row.lastDiscoveryStatus || "—", mono: true },
+    { label: "last_discovery_message",value: row.lastDiscoveryMessage || "—", mono: false },
+  ];
+  return (
+    <div className="mt-1 bg-gray-50 border border-gray-200 rounded p-2 text-xs space-y-0.5">
+      <p className="font-semibold text-gray-500 uppercase tracking-wide text-xs mb-1">Adapter Diagnostic</p>
+      {fields.map(f => (
+        <div key={f.label} className="flex gap-2">
+          <span className="text-gray-400 shrink-0 w-40">{f.label}</span>
+          <span className={`text-gray-700 truncate ${f.mono ? "font-mono" : ""}`} title={f.value ?? undefined}>{f.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function CoverageBadge({ status }: { status: string }) {
   const m = COVERAGE_META[status] || COVERAGE_META["needs_manual_review"];
@@ -298,11 +391,15 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
   const qc = useQueryClient();
 
   // Per-dealer run-discovery state: slug -> "idle" | "running" | "done" | "error"
-  const [discoverState, setDiscoverState] = useState<Record<string, "idle" | "running" | "done" | "error">>({});
+  const [discoverState, setDiscoverState] = useState<Record<string, DiscoveryBtnState>>({});
   const [discoverResult, setDiscoverResult] = useState<Record<string, string>>({});
 
   // Per-dealer baseline state
   const [baselineState, setBaselineState] = useState<Record<string, "idle" | "running" | "done" | "error">>({});
+
+  // Per-dealer diagnostic panel expanded state
+  const [diagExpanded, setDiagExpanded] = useState<Record<string, boolean>>({});
+  const toggleDiag = (slug: string) => setDiagExpanded(s => ({ ...s, [slug]: !s[slug] }));
 
   async function handleSetBaseline(dealerSlug: string) {
     setBaselineState(s => ({ ...s, [dealerSlug]: "running" }));
@@ -608,11 +705,12 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
           <span className="text-xs font-normal text-muted-foreground ml-2">— in dealers table but no adapter run</span>
         </h3>
 
-        {/* Mobile: simple list */}
+        {/* Mobile: card list */}
         <div className="sm:hidden space-y-2">
           {neverSynced.map(row => {
             const ds = discoverState[row.dealerSlug] || "idle";
             const dr = discoverResult[row.dealerSlug] || "";
+            const diagOpen = diagExpanded[row.dealerSlug] || false;
             return (
               <div key={row.dealerSlug} className="border border-border rounded p-2 bg-white">
                 <div className="flex items-center justify-between">
@@ -620,19 +718,21 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
                     <p className="text-sm font-medium">{row.dealerName}</p>
                     <p className="text-xs text-muted-foreground">{[row.city, row.state].filter(Boolean).join(", ")}</p>
                   </div>
-                  <Button
-                    size="sm" variant="outline"
-                    className="text-xs h-7 px-2 gap-1 text-blue-700 border-blue-200 hover:bg-blue-50"
-                    disabled={ds === "running"}
-                    onClick={() => handleRunDiscovery(row.dealerSlug)}
-                  >
-                    {ds === "running" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-                    {ds === "running" ? "Running…" : ds === "done" ? "✓ Done" : "Run Discovery"}
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <DiscoveryButton row={row} btnState={ds} onRun={handleRunDiscovery} />
+                    <button
+                      onClick={() => toggleDiag(row.dealerSlug)}
+                      className="p-1 text-gray-400 hover:text-gray-600"
+                      title="Adapter diagnostic"
+                    >
+                      {diagOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                    </button>
+                  </div>
                 </div>
                 {dr && (
                   <p className={`text-xs mt-1 ${ds === "error" ? "text-red-600" : "text-green-700"}`}>{dr}</p>
                 )}
+                {diagOpen && <DiagnosticPanel row={row} />}
               </div>
             );
           })}
@@ -640,10 +740,10 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
 
         {/* Desktop: compact table */}
         <div className="hidden sm:block overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-xs border-collapse" style={{ minWidth: 640 }}>
+          <table className="w-full text-xs border-collapse" style={{ minWidth: 700 }}>
             <thead>
               <tr className="bg-muted text-left">
-                {["Dealer", "Slug", "State", "City", "Action", "Result"].map(h => (
+                {["Dealer", "Slug", "State", "City", "Adapter Key", "Action", "Result"].map(h => (
                   <th key={h} className="p-2 border border-border font-semibold">{h}</th>
                 ))}
               </tr>
@@ -652,31 +752,47 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
               {neverSynced.map((row, i) => {
                 const ds = discoverState[row.dealerSlug] || "idle";
                 const dr = discoverResult[row.dealerSlug] || "";
+                const diagOpen = diagExpanded[row.dealerSlug] || false;
                 return (
-                  <tr key={row.dealerSlug} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                    <td className="p-2 border border-border font-medium">{row.dealerName}</td>
-                    <td className="p-2 border border-border text-muted-foreground">{row.dealerSlug}</td>
-                    <td className="p-2 border border-border">{row.state || "—"}</td>
-                    <td className="p-2 border border-border">{row.city || "—"}</td>
-                    <td className="p-2 border border-border">
-                      <Button
-                        size="sm" variant="outline"
-                        className="text-xs h-6 px-2 gap-1 text-blue-700 border-blue-200 hover:bg-blue-50"
-                        disabled={ds === "running"}
-                        onClick={() => handleRunDiscovery(row.dealerSlug)}
-                      >
-                        {ds === "running" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-                        {ds === "running" ? "Running…" : ds === "done" ? "✓ Done" : "Run Discovery"}
-                      </Button>
-                    </td>
-                    <td className={`p-2 border border-border text-xs max-w-[200px] ${
-                      ds === "error" ? "text-red-600" :
-                      ds === "done" ? "text-green-700" :
-                      "text-muted-foreground"
-                    }`} title={dr}>
-                      {dr ? (dr.length > 60 ? dr.slice(0, 58) + "…" : dr) : "—"}
-                    </td>
-                  </tr>
+                  <React.Fragment key={row.dealerSlug}>
+                    <tr className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                      <td className="p-2 border border-border font-medium">{row.dealerName}</td>
+                      <td className="p-2 border border-border text-muted-foreground">{row.dealerSlug}</td>
+                      <td className="p-2 border border-border">{row.state || "—"}</td>
+                      <td className="p-2 border border-border">{row.city || "—"}</td>
+                      <td className="p-2 border border-border">
+                        {row.adapterKey
+                          ? <span className="font-mono text-blue-700 bg-blue-50 px-1 rounded">{row.adapterKey}</span>
+                          : <span className="text-gray-400 italic">not set</span>}
+                      </td>
+                      <td className="p-2 border border-border">
+                        <div className="flex items-center gap-1">
+                          <DiscoveryButton row={row} btnState={ds} onRun={handleRunDiscovery} />
+                          <button
+                            onClick={() => toggleDiag(row.dealerSlug)}
+                            className="p-0.5 text-gray-400 hover:text-gray-600"
+                            title="Adapter diagnostic"
+                          >
+                            {diagOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                          </button>
+                        </div>
+                      </td>
+                      <td className={`p-2 border border-border text-xs max-w-[200px] ${
+                        ds === "error" ? "text-red-600" :
+                        ds === "done" ? "text-green-700" :
+                        "text-muted-foreground"
+                      }`} title={dr}>
+                        {dr ? (dr.length > 60 ? dr.slice(0, 58) + "…" : dr) : "—"}
+                      </td>
+                    </tr>
+                    {diagOpen && (
+                      <tr key={`${row.dealerSlug}-diag`} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                        <td colSpan={7} className="p-0 border border-border">
+                          <DiagnosticPanel row={row} />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </tbody>

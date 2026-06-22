@@ -92,20 +92,26 @@ function parseSlug(url: string, dealer: string): { year: number | null; make: st
 
 // ─── Main sync entry point (Lambda-safe) ─────────────────────────────────────
 
-// All supported dealer slugs for sitemap discovery
-export const DISCOVERABLE_DEALERS = [
-  'botero', 'jax',
-  'jenkins', 'golf_rider', 'golf_cars_woodstock',
-  'shiver_carts', 'fat_boys', 'mikes_ga', 'woodstock',
-] as const;
-export type DiscoverableDealer = typeof DISCOVERABLE_DEALERS[number];
-
 export interface SyncOptions {
   mode: 'discover_sitemap' | 'import' | 'status';
-  dealer?: DiscoverableDealer | 'all';
+  dealer?: string;
   limit?: number;
   import_id?: number;
   dry_run?: boolean;
+}
+
+// ── Source-registry dealer record (from dealers table) ────────────────────────
+interface DealerSourceRecord {
+  slug: string;
+  name: string | null;
+  website_url: string | null;
+  adapter_key: string | null;
+  platform_type: string | null;
+  discovery_strategy: string | null;
+  inventory_source_url: string | null;
+  canonical_domain: string | null;
+  browser_required: boolean;
+  sync_enabled: boolean;
 }
 
 export interface SyncResult {
@@ -135,11 +141,55 @@ export async function runLambdaSync(opts: SyncOptions): Promise<SyncResult> {
   if (opts.mode === 'import' && opts.import_id) {
     await runImport(opts.import_id, opts.dry_run || false, result);
   } else if (opts.mode === 'discover_sitemap') {
-    const dealers = opts.dealer === 'all'
-      ? [...DISCOVERABLE_DEALERS]
-      : [opts.dealer || 'botero'];
-    for (const dealer of dealers) {
-      await runDiscoverSitemap(dealer, opts.limit || 50, opts.dry_run || false, result);
+    const supabase = getSupabase();
+
+    if (opts.dealer === 'all') {
+      // Run all sync_enabled dealers that have an adapter_key
+      const { data: allDealers } = await supabase
+        .from('dealers')
+        .select('slug,name,website_url,adapter_key,platform_type,discovery_strategy,inventory_source_url,canonical_domain,browser_required,sync_enabled')
+        .eq('sync_enabled', true)
+        .not('adapter_key', 'is', null);
+
+      // Dedupe by adapter_key so shared-sitemap dealers (e.g. 5 Jenkins locations) run once
+      const seen = new Set<string>();
+      for (const d of (allDealers || []) as DealerSourceRecord[]) {
+        const key = d.adapter_key!;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        await runDiscoverSitemap(d, opts.limit || 100, opts.dry_run || false, result);
+      }
+    } else {
+      const dealerSlug = opts.dealer || 'botero';
+
+      // Look up by slug first
+      let { data: rec } = await supabase
+        .from('dealers')
+        .select('slug,name,website_url,adapter_key,platform_type,discovery_strategy,inventory_source_url,canonical_domain,browser_required,sync_enabled')
+        .eq('slug', dealerSlug)
+        .maybeSingle();
+
+      // Fallback: match by adapter_key (e.g. slug='jenkins' matches jenkins-* records)
+      if (!rec) {
+        const { data: byKey } = await supabase
+          .from('dealers')
+          .select('slug,name,website_url,adapter_key,platform_type,discovery_strategy,inventory_source_url,canonical_domain,browser_required,sync_enabled')
+          .eq('adapter_key', dealerSlug)
+          .limit(1);
+        rec = byKey?.[0] || null;
+      }
+
+      // Synthesize minimal record for dealers not yet in registry
+      if (!rec) {
+        rec = {
+          slug: dealerSlug, name: dealerSlug, website_url: null,
+          adapter_key: null, platform_type: null, discovery_strategy: null,
+          inventory_source_url: null, canonical_domain: null,
+          browser_required: false, sync_enabled: true,
+        };
+      }
+
+      await runDiscoverSitemap(rec as DealerSourceRecord, opts.limit || 100, opts.dry_run || false, result);
     }
   } else if (opts.mode === 'status') {
     await getStatus(result);
@@ -149,71 +199,190 @@ export async function runLambdaSync(opts: SyncOptions): Promise<SyncResult> {
   return result;
 }
 
-// ─── DISCOVER_SITEMAP: diff sitemap vs DB, queue new URL stubs ────────────────
+// ─── DISCOVER_SITEMAP: route via source registry ─────────────────────────────
 
-// GCR dealer config: domain + whether to filter golf-cart URLs only
-const GCR_DEALERS: Record<string, { domain: string; golfCartOnly: boolean }> = {
-  jenkins:             { domain: 'www.jenkinsmotorsports.com', golfCartOnly: true },
-  golf_rider:          { domain: 'www.golfrider.com',           golfCartOnly: true },
-  golf_cars_woodstock: { domain: 'www.golfcarsofwoodstock.com', golfCartOnly: true },
-  shiver_carts:        { domain: 'www.shivercarts.com',         golfCartOnly: true },
-  fat_boys:            { domain: 'www.fatboyscarts.com',        golfCartOnly: true },
-  mikes_ga:            { domain: 'www.mikesgolfcartsga.com',    golfCartOnly: true },
-  woodstock:           { domain: 'woodstockgolfcarts.com',      golfCartOnly: true },
+// Hardcoded overrides for adapter_keys needing special logic (multi-sitemap, filters)
+const ADAPTER_OVERRIDES: Record<string, () => Promise<string[]>> = {
+  botero: () => getBoteroSitemapUrls(true),
+  jax:    () => getJaxSitemapUrls(),
 };
 
-async function runDiscoverSitemap(dealer: string, limit: number, dry_run: boolean, result: SyncResult) {
-  const supabase = getSupabase();
+/** Write discovery status back to dealers.last_discovery_* */
+async function writeDiscoveryStatus(
+  supabase: ReturnType<typeof getSupabase>,
+  slug: string,
+  status: string,
+  message: string
+) {
+  try {
+    await supabase.from('dealers').update({
+      last_discovery_status:  status,
+      last_discovery_message: message,
+      last_discovery_at:      new Date().toISOString(),
+    }).eq('slug', slug);
+  } catch { /* non-fatal */ }
+}
 
-  // Get all URLs from sitemap
-  let sitemapUrls: string[] = [];
-  if (dealer === 'botero') sitemapUrls = await getBoteroSitemapUrls(true);
-  else if (dealer === 'jax') sitemapUrls = await getJaxSitemapUrls();
-  else if (GCR_DEALERS[dealer]) {
-    const cfg = GCR_DEALERS[dealer];
-    sitemapUrls = await getGcrSitemapUrls(cfg.domain, '/auto-listing-sitemap.xml', cfg.golfCartOnly);
-  } else {
-    // Auto-detect: look up website_url from dealers table, try GCR sitemap
-    const { data: dealerRow } = await supabase
-      .from('dealers')
-      .select('website_url, name')
-      .eq('slug', dealer)
-      .maybeSingle();
+/** Auto-detect inventory sitemap for dealers not yet in source registry */
+async function autoDetectSitemapUrls(
+  dealer: DealerSourceRecord,
+  supabase: ReturnType<typeof getSupabase>
+): Promise<string[]> {
+  const slug = dealer.slug;
 
-    if (!dealerRow?.website_url) {
-      result.summary.push(`[${dealer}] No website URL configured in dealers table — add one to enable discovery`);
-      return;
-    }
-
-    // Extract domain from website_url
-    let domain: string;
+  // Build list of domains to try (canonical first, then bare, then www variant)
+  const domains: string[] = [];
+  if (dealer.canonical_domain) domains.push(dealer.canonical_domain);
+  if (dealer.website_url) {
     try {
-      domain = new URL(dealerRow.website_url).hostname.replace(/^www\./, '');
-    } catch {
-      result.summary.push(`[${dealer}] Invalid website URL: ${dealerRow.website_url}`);
-      return;
-    }
+      const host = new URL(dealer.website_url).hostname;
+      const bare = host.replace(/^www\./, '');
+      if (!domains.includes(host)) domains.push(host);
+      if (!domains.includes(`www.${bare}`)) domains.push(`www.${bare}`);
+      if (!domains.includes(bare)) domains.push(bare);
+    } catch { /* invalid URL */ }
+  }
 
-    // Try GCR-standard sitemap path
-    const attempted = await getGcrSitemapUrls(domain, '/auto-listing-sitemap.xml', true);
-    if (attempted.length > 0) {
-      sitemapUrls = attempted;
-      result.summary.push(`[${dealer}] Auto-detected GCR sitemap on ${domain} — found ${attempted.length} cart URLs`);
-    } else {
-      // Try without golf-cart filter (maybe different URL pattern)
-      const broader = await getGcrSitemapUrls(domain, '/auto-listing-sitemap.xml', false);
-      if (broader.length > 0) {
-        sitemapUrls = broader;
-        result.summary.push(`[${dealer}] Auto-detected GCR sitemap on ${domain} (broad) — found ${broader.length} URLs`);
-      } else {
-        result.summary.push(`[${dealer}] No GCR sitemap found at ${domain}/auto-listing-sitemap.xml — site may need a custom adapter`);
-        return;
-      }
+  if (!domains.length) return [];
+
+  const SITEMAP_PATHS = [
+    '/auto-listing-sitemap.xml',
+    '/glc_listing-sitemap.xml',
+    '/sitemap.xml',
+    '/sitemap_index.xml',
+    '/page-sitemap.xml',
+    '/wp-sitemap.xml',
+  ];
+
+  for (const domain of domains) {
+    for (const path of SITEMAP_PATHS) {
+      try {
+        const res = await fetch(`https://${domain}${path}`, {
+          headers: { 'User-Agent': 'CartIQ-Sync/1.0' },
+          signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+        });
+        if (!res.ok) continue;
+        const xml = await res.text();
+        const allLocs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
+        if (!allLocs.length) continue;
+
+        // Sitemap index — follow listing-related sub-sitemaps
+        if (xml.includes('<sitemap>') || xml.toLowerCase().includes('sitemap-index')) {
+          const subSitemaps = allLocs.filter(u =>
+            /listing|inventory|product|golf/i.test(u)
+          ).slice(0, 3);
+          for (const sub of subSitemaps) {
+            try {
+              const sr = await fetch(sub, { headers: { 'User-Agent': 'CartIQ-Sync/1.0' }, signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined });
+              if (!sr.ok) continue;
+              const sxml = await sr.text();
+              const subLocs = [...sxml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
+              const cartLocs = subLocs.filter(u => !isNavPage(u));
+              if (cartLocs.length > 5) {
+                // Register discovery for next time
+                await supabase.from('dealers').update({
+                  platform_type:        'gcr_wordpress',
+                  discovery_strategy:   'gcr_sitemap',
+                  canonical_domain:     domain,
+                  inventory_source_url: sub,
+                  last_discovery_status:  'ok',
+                  last_discovery_message: `Auto-detected via ${sub} — ${cartLocs.length} URLs`,
+                  last_discovery_at:      new Date().toISOString(),
+                }).eq('slug', slug);
+                return cartLocs;
+              }
+            } catch { continue; }
+          }
+          continue;
+        }
+
+        // Direct listing URLs
+        const cartLocs = allLocs.filter(u => /\/Golf-Cart|\/listing\//i.test(u) && !isNavPage(u));
+        if (cartLocs.length > 0) {
+          await supabase.from('dealers').update({
+            platform_type:        'gcr_wordpress',
+            discovery_strategy:   'gcr_sitemap',
+            canonical_domain:     domain,
+            inventory_source_url: `https://${domain}${path}`,
+            last_discovery_status:  'ok',
+            last_discovery_message: `Auto-detected ${cartLocs.length} cart URLs at ${path}`,
+            last_discovery_at:      new Date().toISOString(),
+          }).eq('slug', slug);
+          return cartLocs;
+        }
+
+        // General inventory-like URLs (non-GCR platforms)
+        const invLocs = allLocs.filter(u =>
+          /\/inventory|\/shop|\/collections\/all|\/default\.asp/i.test(u) && !isNavPage(u)
+        );
+        if (invLocs.length > 2) {
+          await supabase.from('dealers').update({
+            platform_type:        'unknown',
+            discovery_strategy:   'not_configured',
+            canonical_domain:     domain,
+            inventory_source_url: `https://${domain}${path}`,
+            last_discovery_status:  'not_configured',
+            last_discovery_message: `Found ${invLocs.length} inventory-like URLs but no GCR adapter. Needs custom adapter.`,
+            last_discovery_at:      new Date().toISOString(),
+          }).eq('slug', slug);
+          return [];  // don't queue — needs review first
+        }
+      } catch { continue; }
+    }
+  }
+  return [];
+}
+
+async function runDiscoverSitemap(
+  dealer: DealerSourceRecord,
+  limit: number,
+  dry_run: boolean,
+  result: SyncResult
+) {
+  const supabase = getSupabase();
+  const slug     = dealer.slug;
+  const adapterKey = dealer.adapter_key;
+  const strategy   = dealer.discovery_strategy;
+
+  // ── Requires browser — cannot run serverless ─────────────────────────────
+  if (dealer.browser_required) {
+    const msg = `[${slug}] Needs browser (${adapterKey || strategy || 'no adapter'}) — schedule via cron on pplx.app`;
+    result.summary.push(msg);
+    await writeDiscoveryStatus(supabase, slug, 'needs_browser', msg);
+    return;
+  }
+
+  // ── Resolve listing URLs ──────────────────────────────────────────────────
+  let sitemapUrls: string[] = [];
+
+  if (adapterKey && ADAPTER_OVERRIDES[adapterKey]) {
+    // Hardcoded override (botero, jax)
+    sitemapUrls = await ADAPTER_OVERRIDES[adapterKey]();
+  } else if (strategy === 'gcr_sitemap' && dealer.inventory_source_url) {
+    // GCR sitemap via registered inventory_source_url
+    const parsed = (() => { try { return new URL(dealer.inventory_source_url!); } catch { return null; } })();
+    const domain = dealer.canonical_domain || parsed?.hostname || '';
+    const path   = parsed?.pathname || '/auto-listing-sitemap.xml';
+    sitemapUrls  = await getGcrSitemapUrls(domain, path, true);
+    if (!sitemapUrls.length) sitemapUrls = await getGcrSitemapUrls(domain, path, false);
+  } else {
+    // No adapter configured — attempt auto-detection
+    sitemapUrls = await autoDetectSitemapUrls(dealer, supabase);
+    if (!sitemapUrls.length) {
+      const hasUrl = dealer.website_url || dealer.inventory_source_url;
+      const msg = hasUrl
+        ? `[${slug}] No GCR/listing sitemap found at ${dealer.canonical_domain || dealer.website_url} — site may need a custom adapter or browser_required=true`
+        : `[${slug}] Discovery not configured — add inventory_source_url or assign adapter_key in dealers table`;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, 'not_configured', msg);
+      return;
     }
   }
 
   if (!sitemapUrls.length) {
-    result.summary.push(`[${dealer}] Sitemap returned 0 URLs`);
+    const msg = `[${slug}] Sitemap returned 0 URLs (adapter=${adapterKey}, strategy=${strategy})`;
+    result.summary.push(msg);
+    await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
     return;
   }
 
@@ -221,11 +390,11 @@ async function runDiscoverSitemap(dealer: string, limit: number, dry_run: boolea
   const [{ data: existing }, { data: pendingKnown }] = await Promise.all([
     supabase.from('listings')
       .select('source_listing_url')
-      .eq('sync_source', dealer)
+      .eq('sync_source', slug)
       .not('source_listing_url', 'is', null),
     supabase.from('pending_imports')
       .select('source_url')
-      .eq('dealer_slug', dealer),
+      .eq('dealer_slug', slug),
   ]);
 
   const knownUrls = new Set([
@@ -235,7 +404,7 @@ async function runDiscoverSitemap(dealer: string, limit: number, dry_run: boolea
 
   const newUrls = sitemapUrls.filter(u => !knownUrls.has(u));
   result.already_known = sitemapUrls.length - newUrls.length;
-  result.summary.push(`[${dealer}] ${sitemapUrls.length} in sitemap | ${result.already_known} known | ${newUrls.length} new`);
+  result.summary.push(`[${slug}] ${sitemapUrls.length} in sitemap | ${result.already_known} known | ${newUrls.length} new`);
 
   // Process up to limit new URLs — parse metadata from slug only (no page fetch)
   const toProcess = newUrls.slice(0, limit);
@@ -243,9 +412,9 @@ async function runDiscoverSitemap(dealer: string, limit: number, dry_run: boolea
 
   for (const url of toProcess) {
     result.processed++;
-    const meta = parseSlug(url, dealer);
+    const meta = parseSlug(url, slug);
     rows.push({
-      dealer_slug: dealer,
+      dealer_slug: slug,
       source_url: url,
       raw_title: `${meta.year || ''} ${meta.make || ''} ${meta.model || ''}`.trim() || url.split('/').pop(),
       year: meta.year,
