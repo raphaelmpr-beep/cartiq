@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Upload, CheckCircle, XCircle, AlertCircle, RefreshCw, ExternalLink, TriangleAlert, ShieldCheck, CircleDashed, CircleAlert, Activity } from "lucide-react";
+import { Plus, Pencil, Trash2, Upload, CheckCircle, XCircle, AlertCircle, RefreshCw, ExternalLink, TriangleAlert, ShieldCheck, CircleDashed, CircleAlert, Activity, CheckCheck, Loader2, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -558,6 +558,276 @@ function CoverageAudit({ adminToken }: { adminToken: string }) {
   );
 }
 
+// ── Pending Imports Tab ───────────────────────────────────────────────────────
+
+type PendingImport = {
+  id: number;
+  dealer_slug: string;
+  title: string;
+  brand: string | null;
+  model: string | null;
+  year: number | null;
+  asking_price: number | null;
+  city: string | null;
+  state: string | null;
+  condition: string | null;
+  image_url: string | null;
+  source_url: string | null;
+  status: string;
+  found_at: string | null;
+  notes: string | null;
+};
+
+function formatPendingPrice(p: number | null) {
+  if (!p) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(p);
+}
+
+function PendingImports({ adminToken }: { adminToken: string }) {
+  const ADMIN_HEADERS = { "x-admin-token": adminToken };
+  const qc = useQueryClient();
+  const [processingIds, setProcessingIds] = useState<Set<number>>(new Set());
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ approved: number; failed: number; total: number } | null>(null);
+  const [filterDealer, setFilterDealer] = useState<string>("all");
+
+  const { data: rows = [], isLoading, error, refetch, isFetching } = useQuery<PendingImport[]>({
+    queryKey: ["/api/admin/pending-imports"],
+    queryFn: () => apiRequest("GET", "/api/admin/pending-imports?status=pending&limit=200", undefined, ADMIN_HEADERS).then(r => r.json()),
+  });
+
+  const dealers = Array.from(new Set(rows.map(r => r.dealer_slug))).sort();
+  const filtered = filterDealer === "all" ? rows : rows.filter(r => r.dealer_slug === filterDealer);
+
+  async function handleAction(id: number, action: "approve" | "reject") {
+    setProcessingIds(prev => new Set(prev).add(id));
+    try {
+      await apiRequest("PATCH", `/api/admin/pending-imports/${id}`, { action }, ADMIN_HEADERS);
+      qc.invalidateQueries({ queryKey: ["/api/admin/pending-imports"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/inventory-reconciliation"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/listings"] });
+    } finally {
+      setProcessingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+    }
+  }
+
+  async function handleBulkApprove() {
+    const targetIds = filtered.map(r => r.id);
+    if (targetIds.length === 0) return;
+    setBulkRunning(true);
+    setBulkResult(null);
+    try {
+      const res = await apiRequest(
+        "POST", "/api/admin/pending-imports/bulk-approve",
+        { ids: targetIds }, ADMIN_HEADERS
+      );
+      const result = await res.json();
+      setBulkResult(result);
+      qc.invalidateQueries({ queryKey: ["/api/admin/pending-imports"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/inventory-reconciliation"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/listings"] });
+    } finally {
+      setBulkRunning(false);
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading pending imports…
+      </div>
+    );
+  }
+
+  if (error) {
+    return <p className="text-sm text-red-600 py-4">Failed to load pending imports.</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+
+      {/* Header row */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <p className="text-sm text-muted-foreground">
+            {rows.length === 0
+              ? "No pending imports."
+              : <><strong>{rows.length}</strong> listing{rows.length !== 1 ? "s" : ""} awaiting review</>}
+          </p>
+          {dealers.length > 1 && (
+            <select
+              value={filterDealer}
+              onChange={e => setFilterDealer(e.target.value)}
+              className="text-xs border border-border rounded px-2 py-1 bg-background"
+            >
+              <option value="all">All dealers</option>
+              {dealers.map(d => (
+                <option key={d} value={d}>{d} ({rows.filter(r => r.dealer_slug === d).length})</option>
+              ))}
+            </select>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} className="gap-1.5">
+            {isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Refresh
+          </Button>
+          {filtered.length > 0 && (
+            <Button
+              size="sm"
+              onClick={handleBulkApprove}
+              disabled={bulkRunning}
+              className="gap-1.5 bg-green-700 hover:bg-green-800 text-white"
+              data-testid="btn-bulk-approve"
+            >
+              {bulkRunning
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Approving…</>
+                : <><CheckCheck className="h-3.5 w-3.5" /> Approve All ({filtered.length})</>
+              }
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Bulk result banner */}
+      {bulkResult && (
+        <div className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${
+          bulkResult.failed === 0
+            ? "bg-green-50 border-green-200 text-green-800"
+            : "bg-amber-50 border-amber-200 text-amber-800"
+        }`}>
+          {bulkResult.failed === 0
+            ? <CheckCircle className="h-4 w-4 mt-0.5 shrink-0 text-green-600" />
+            : <TriangleAlert className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />}
+          <p>
+            <strong>{bulkResult.approved}</strong> approved
+            {bulkResult.failed > 0 && <>, <strong>{bulkResult.failed}</strong> failed — check server logs</>}.
+          </p>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {rows.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground text-sm">
+          <CheckCircle className="h-8 w-8 mb-2 text-green-500" />
+          <p>No pending imports. All caught up.</p>
+        </div>
+      )}
+
+      {/* Mobile: card view */}
+      {filtered.length > 0 && (
+        <>
+          <div className="sm:hidden space-y-3">
+            {filtered.map(row => {
+              const busy = processingIds.has(row.id);
+              return (
+                <div key={row.id} className="border border-border rounded-lg p-3 bg-white space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">{row.title}</p>
+                      <p className="text-xs text-muted-foreground">{row.dealer_slug} · {[row.city, row.state].filter(Boolean).join(", ") || "—"}</p>
+                    </div>
+                    {row.image_url && (
+                      <img src={row.image_url} alt="" className="h-12 w-16 object-cover rounded shrink-0" onError={e => (e.currentTarget.style.display = "none")} />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>{formatPendingPrice(row.asking_price)}</span>
+                    {row.year && <span>{row.year}</span>}
+                    {row.condition && <span className="capitalize">{row.condition}</span>}
+                    {row.source_url && (
+                      <a href={row.source_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-0.5">
+                        <Eye className="h-3 w-3" /> View
+                      </a>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" disabled={busy} onClick={() => handleAction(row.id, "approve")}
+                      className="flex-1 gap-1 bg-green-700 hover:bg-green-800 text-white">
+                      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />} Approve
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={busy} onClick={() => handleAction(row.id, "reject")}
+                      className="flex-1 gap-1 text-red-600 border-red-200 hover:bg-red-50">
+                      <XCircle className="h-3.5 w-3.5" /> Reject
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop: table view */}
+          <div className="hidden sm:block overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-sm border-collapse min-w-[900px]">
+              <thead>
+                <tr className="bg-muted text-left text-xs">
+                  {["Image", "Title", "Dealer", "Location", "Year", "Condition", "Price", "Found", "Source", "Actions"].map(h => (
+                    <th key={h} className="p-2 border border-border font-semibold whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(row => {
+                  const busy = processingIds.has(row.id);
+                  return (
+                    <tr key={row.id} className="odd:bg-white even:bg-gray-50 hover:bg-muted/40 transition-colors">
+                      <td className="p-2 border border-border">
+                        {row.image_url
+                          ? <img src={row.image_url} alt="" className="h-10 w-14 object-cover rounded"
+                              onError={e => (e.currentTarget.style.display = "none")} />
+                          : <div className="h-10 w-14 bg-muted rounded flex items-center justify-center text-muted-foreground text-xs">—</div>
+                        }
+                      </td>
+                      <td className="p-2 border border-border max-w-[200px]">
+                        <p className="font-medium truncate text-xs">{row.title}</p>
+                        {row.notes && <p className="text-xs text-muted-foreground truncate">{row.notes}</p>}
+                      </td>
+                      <td className="p-2 border border-border text-xs font-medium whitespace-nowrap">{row.dealer_slug}</td>
+                      <td className="p-2 border border-border text-xs whitespace-nowrap">
+                        {[row.city, row.state].filter(Boolean).join(", ") || "—"}
+                      </td>
+                      <td className="p-2 border border-border text-xs text-center">{row.year || "—"}</td>
+                      <td className="p-2 border border-border text-xs capitalize">{row.condition || "—"}</td>
+                      <td className="p-2 border border-border text-xs font-medium whitespace-nowrap">{formatPendingPrice(row.asking_price)}</td>
+                      <td className="p-2 border border-border text-xs text-muted-foreground whitespace-nowrap">
+                        {row.found_at ? new Date(row.found_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                      </td>
+                      <td className="p-2 border border-border text-xs">
+                        {row.source_url
+                          ? <a href={row.source_url} target="_blank" rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-blue-600 hover:underline">
+                              <ExternalLink className="h-3 w-3" /> View
+                            </a>
+                          : <span className="text-muted-foreground">—</span>
+                        }
+                      </td>
+                      <td className="p-2 border border-border">
+                        <div className="flex items-center gap-1.5">
+                          <Button size="sm" disabled={busy} onClick={() => handleAction(row.id, "approve")}
+                            className="gap-1 bg-green-700 hover:bg-green-800 text-white text-xs h-7 px-2"
+                            data-testid={`btn-approve-${row.id}`}>
+                            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+                            Approve
+                          </Button>
+                          <Button size="sm" variant="outline" disabled={busy} onClick={() => handleAction(row.id, "reject")}
+                            className="gap-1 text-red-600 border-red-200 hover:bg-red-50 text-xs h-7 px-2"
+                            data-testid={`btn-reject-${row.id}`}>
+                            <XCircle className="h-3 w-3" /> Reject
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main Admin Page ────────────────────────────────────────────────────────────
 export default function Admin() {
   const { authed, adminToken, password, setPassword, login, error: authError } = useAdminAuth();
@@ -631,6 +901,7 @@ export default function Admin() {
             <TabsTrigger value="sources" data-testid="tab-sources">Inventory Sources</TabsTrigger>
             <TabsTrigger value="coverage" data-testid="tab-coverage">Coverage Audit</TabsTrigger>
             <TabsTrigger value="inventory" data-testid="tab-inventory">Inventory Gap</TabsTrigger>
+            <TabsTrigger value="pending" data-testid="tab-pending">Pending Imports</TabsTrigger>
           </TabsList>
 
           {/* Listings Tab */}
@@ -784,6 +1055,20 @@ export default function Admin() {
               </CardHeader>
               <CardContent>
                 <InventoryCoverage adminToken={adminToken} />
+              </CardContent>
+            </Card>
+          </TabsContent>
+          {/* Pending Imports Tab */}
+          <TabsContent value="pending">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Pending Imports</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Review listings discovered by sync adapters. Approve to publish to public search, or reject to discard.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <PendingImports adminToken={adminToken} />
               </CardContent>
             </Card>
           </TabsContent>

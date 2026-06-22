@@ -640,6 +640,48 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // POST /api/admin/pending-imports/bulk-approve — approve all pending imports for a dealer
+  app.post("/api/admin/pending-imports/bulk-approve", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { dealer_slug, ids } = req.body as { dealer_slug?: string; ids?: number[] };
+
+      // Fetch the pending rows to approve
+      let q = sb.from("pending_imports").select("id").eq("status", "pending");
+      if (ids && ids.length > 0) {
+        q = q.in("id", ids);
+      } else if (dealer_slug) {
+        q = q.eq("dealer_slug", dealer_slug);
+      } else {
+        return res.status(400).json({ error: "Provide dealer_slug or ids" });
+      }
+      const { data: rows, error: fetchErr } = await q;
+      if (fetchErr) return res.status(500).json({ error: fetchErr.message });
+      if (!rows || rows.length === 0) return res.json({ approved: 0, failed: 0, errors: [] });
+
+      const { runSync } = await import("./sync/pipeline.js");
+      let approved = 0;
+      let failed = 0;
+      const errors: { id: number; error: string }[] = [];
+
+      // Process sequentially to avoid overwhelming the DB
+      for (const row of rows) {
+        try {
+          await runSync({ mode: "import", import_id: row.id });
+          approved++;
+        } catch (e: any) {
+          failed++;
+          errors.push({ id: row.id, error: e.message });
+        }
+      }
+
+      res.json({ approved, failed, errors, total: rows.length });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GET /api/admin/coverage-audit — dealer coverage summary from dealer_coverage_log
   // Falls back to a live DB aggregate when no log rows exist yet (pre-backfill state).
   app.get("/api/admin/coverage-audit", requireAdmin, async (_req, res) => {
