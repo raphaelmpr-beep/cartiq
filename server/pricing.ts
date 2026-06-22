@@ -27,6 +27,7 @@ export interface PricingInput {
   state?: string | null;
   city?: string | null;
   lastVerifiedAt?: string | null;
+  condition?: string | null;
 }
 
 export interface PricingResult {
@@ -51,9 +52,18 @@ export interface PricingResult {
 function estimateBaseValue(input: PricingInput): number {
   const year = input.year || 2018;
   const age = new Date().getFullYear() - year;
+  const isNew = (input.condition as string | undefined) === "new";
 
-  // Brand tier multipliers
-  const premiumBrands = ["club car", "yamaha", "e-z-go", "ezgo", "star ev", "evolution"];
+  // For new dealer/manufacturer carts: estimated value = asking price (MSRP is the market)
+  // These are not "over market" — they are the market.
+  if (isNew && input.sellerType === "dealer") {
+    const effectivePrice = input.salePrice ?? input.askingPrice ?? input.regularPrice ?? 0;
+    if (effectivePrice > 0) return effectivePrice;
+  }
+
+  // Brand tier multipliers — includes new premium EV brands
+  const premiumBrands = ["club car", "yamaha", "e-z-go", "ezgo", "star ev", "evolution",
+    "teko", "venom", "dach", "verdi", "kandi", "whisper"];
   const midBrands = ["icon", "advanced ev", "tomberlin", "bintelli"];
   const budgetBrands = ["crickett", "barefoot", "jakes"];
 
@@ -79,7 +89,8 @@ function estimateBaseValue(input: PricingInput): number {
   else if (ah > 0 && ah < 75) baseValue -= 400;
 
   // Age depreciation (~8% per year, floors at 30% of base)
-  const depreciationFactor = Math.max(0.3, 1 - age * 0.08);
+  // New carts: no depreciation (already handled above for dealer new)
+  const depreciationFactor = isNew ? 1.0 : Math.max(0.3, 1 - age * 0.08);
   baseValue *= depreciationFactor;
 
   // Seating adjustment

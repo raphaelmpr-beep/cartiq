@@ -246,6 +246,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
         batteryWarrantyIncluded: data.batteryWarrantyIncluded,
         sellerType: data.sellerType,
         state: data.state,
+        condition: data.condition,
       });
 
       const dealCheck = storage.createDealCheck({
