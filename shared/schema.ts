@@ -1,276 +1,247 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+// CartIQ shared schema — Supabase/Postgres types
+// No Drizzle ORM — Supabase client handles queries directly.
 
-// ─── Users ───────────────────────────────────────────────────────────────────
-export const users = sqliteTable("users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  email: text("email").notNull().unique(),
-  name: text("name"),
-  role: text("role").notNull().default("buyer"), // buyer | admin | dealer
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
-  updatedAt: text("updated_at").notNull().default(new Date().toISOString()),
-});
-export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+// ─── Users ────────────────────────────────────────────────────────────────────
+export interface User {
+  id: number;
+  email: string;
+  name: string | null;
+  role: string; // buyer | admin | dealer
+  created_at: string;
+  updated_at: string;
+}
+export type InsertUser = Omit<User, 'id' | 'created_at' | 'updated_at'>;
 
-// ─── Dealers ─────────────────────────────────────────────────────────────────
-export const dealers = sqliteTable("dealers", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  slug: text("slug").notNull().unique(),
-  websiteUrl: text("website_url"),
-  phone: text("phone"),
-  email: text("email"),
-  city: text("city"),
-  state: text("state"),
-  zip: text("zip"),
-  lat: real("lat"),
-  lng: real("lng"),
-  serviceAreaMiles: integer("service_area_miles"),
-  deliveryAvailable: integer("delivery_available", { mode: "boolean" }).default(false),
-  deliveryIncluded: integer("delivery_included", { mode: "boolean" }).default(false),
-  deliveryBaseFee: real("delivery_base_fee"),
-  deliveryPerMileFee: real("delivery_per_mile_fee"),
-  deliveryFreeRadiusMiles: integer("delivery_free_radius_miles"),
-  defaultWarrantyIncluded: integer("default_warranty_included", { mode: "boolean" }).default(false),
-  defaultWarrantyMonths: integer("default_warranty_months"),
-  defaultWarrantyNotes: text("default_warranty_notes"),
-  notes: text("notes"),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
-  updatedAt: text("updated_at").notNull().default(new Date().toISOString()),
-});
-export const insertDealerSchema = createInsertSchema(dealers).omit({ id: true, createdAt: true, updatedAt: true });
-export type InsertDealer = z.infer<typeof insertDealerSchema>;
-export type Dealer = typeof dealers.$inferSelect;
+// ─── Dealers ──────────────────────────────────────────────────────────────────
+export interface Dealer {
+  id: number;
+  name: string;
+  slug: string;
+  website_url: string | null;
+  phone: string | null;
+  email: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  lat: number | null;
+  lng: number | null;
+  service_area_miles: number | null;
+  delivery_available: boolean;
+  delivery_included: boolean;
+  delivery_base_fee: number | null;
+  delivery_per_mile_fee: number | null;
+  delivery_free_radius_miles: number | null;
+  default_warranty_included: boolean;
+  default_warranty_months: number | null;
+  default_warranty_notes: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type InsertDealer = Omit<Dealer, 'id' | 'created_at' | 'updated_at'>;
 
 // ─── RetailSources ────────────────────────────────────────────────────────────
-export const retailSources = sqliteTable("retail_sources", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  slug: text("slug").notNull().unique(),
-  websiteUrl: text("website_url"),
-  sourceType: text("source_type").notNull().default("retailer"), // costco | retailer | other
-  authorizedMode: text("authorized_mode").notNull().default("manual"), // manual | csv | approved_api | placeholder
-  allowedUseNotes: text("allowed_use_notes"),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
-  updatedAt: text("updated_at").notNull().default(new Date().toISOString()),
-});
-export const insertRetailSourceSchema = createInsertSchema(retailSources).omit({ id: true, createdAt: true, updatedAt: true });
-export type InsertRetailSource = z.infer<typeof insertRetailSourceSchema>;
-export type RetailSource = typeof retailSources.$inferSelect;
+export interface RetailSource {
+  id: number;
+  name: string;
+  slug: string;
+  website_url: string | null;
+  source_type: string;
+  authorized_mode: string;
+  allowed_use_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type InsertRetailSource = Omit<RetailSource, 'id' | 'created_at' | 'updated_at'>;
 
 // ─── Listings ─────────────────────────────────────────────────────────────────
-export const listings = sqliteTable("listings", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  title: text("title").notNull(),
-  slug: text("slug").notNull().unique(),
-  description: text("description"),
-  sourceType: text("source_type").notNull().default("admin_manual"),
-  // dealer_direct | private_direct | admin_manual | buyer_submitted | dealer_csv
-  // retail_manual | retail_csv | official_meta_api
-  sourceUrl: text("source_url"),
-  publicListing: integer("public_listing", { mode: "boolean" }).notNull().default(true),
-  sellerType: text("seller_type").notNull().default("private"), // dealer | private | retail
-  status: text("status").notNull().default("active"), // active | pending | sold | inactive | unavailable
-  dealerId: integer("dealer_id"),
-  retailSourceId: integer("retail_source_id"),
-  retailerName: text("retailer_name"),
-  retailerSku: text("retailer_sku"),
-  retailerProductUrl: text("retailer_product_url"),
-  retailEventName: text("retail_event_name"),
-  retailEventDates: text("retail_event_dates"),
-  availabilityStatus: text("availability_status"),
-  shipToStates: text("ship_to_states"), // JSON array
-  lastVerifiedAt: text("last_verified_at"),
-  askingPrice: real("asking_price"),
-  regularPrice: real("regular_price"),
-  salePrice: real("sale_price"),
-  cartiqEstimatedValue: real("cartiq_estimated_value"),
-  estimatedDeliveryCost: real("estimated_delivery_cost"),
-  totalDeliveredCost: real("total_delivered_cost"),
-  dealDelta: real("deal_delta"),
-  dealRating: text("deal_rating").default("unknown"),
-  // great_deal | good_deal | fair_price | high_price | over_market | unknown
-  buyerScore: integer("buyer_score").default(70),
-  year: integer("year"),
-  brand: text("brand"),
-  model: text("model"),
-  condition: text("condition"),
-  powerType: text("power_type").default("unknown"), // gas | electric | unknown
-  batteryType: text("battery_type").default("unknown"), // lithium | lead_acid | gas | unknown
-  batteryAh: integer("battery_ah"),
-  batteryAgeMonths: integer("battery_age_months"),
-  seating: integer("seating"),
-  lifted: integer("lifted", { mode: "boolean" }).default(false),
-  streetLegalClaimed: integer("street_legal_claimed", { mode: "boolean" }).default(false),
-  streetLegalConfidence: text("street_legal_confidence").default("unknown"), // high | medium | low | unknown
-  chargerIncluded: text("charger_included").default("unknown"), // yes | no | unknown
-  warrantyIncluded: text("warranty_included").default("unknown"), // yes | no | unknown
-  warrantyProvider: text("warranty_provider").default("unknown"), // dealer | manufacturer | third_party | retailer | none | unknown
-  warrantyMonths: integer("warranty_months"),
-  batteryWarrantyIncluded: text("battery_warranty_included").default("unknown"), // yes | no | unknown
-  warrantyNotes: text("warranty_notes"),
-  city: text("city"),
-  state: text("state"),
-  zip: text("zip"),
-  lat: real("lat"),
-  lng: real("lng"),
-  deliveryAvailable: integer("delivery_available", { mode: "boolean" }).default(false),
-  deliveryIncluded: integer("delivery_included", { mode: "boolean" }).default(false),
-  deliveryNotes: text("delivery_notes"),
-  imageUrl: text("image_url"),
-  imageUrls: text("image_urls"),            // JSON array of additional image URLs for carousel
-  sellerName: text("seller_name"),          // dealer business name or "Private Seller"
-  sellerPhone: text("seller_phone"),        // displayed on card and detail page
-  sellerEmail: text("seller_email"),        // shown on detail page only
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
-  updatedAt: text("updated_at").notNull().default(new Date().toISOString()),
-});
-export const insertListingSchema = createInsertSchema(listings).omit({ id: true, createdAt: true, updatedAt: true });
-export type InsertListing = z.infer<typeof insertListingSchema>;
-export type Listing = typeof listings.$inferSelect;
+export interface Listing {
+  id: number;
+  title: string;
+  slug: string;
+  description: string | null;
+  source_type: string;
+  source_url: string | null;
+  public_listing: boolean;
+  seller_type: string; // dealer | private | retail
+  status: string; // active | pending | sold | inactive | unavailable
+  dealer_id: number | null;
+  retail_source_id: number | null;
+  retailer_name: string | null;
+  retailer_sku: string | null;
+  retailer_product_url: string | null;
+  retail_event_name: string | null;
+  retail_event_dates: string | null;
+  availability_status: string | null;
+  ship_to_states: string | null;
+  last_verified_at: string | null;
+  asking_price: number | null;
+  regular_price: number | null;
+  sale_price: number | null;
+  cartiq_estimated_value: number | null;
+  estimated_delivery_cost: number | null;
+  total_delivered_cost: number | null;
+  deal_delta: number | null;
+  deal_rating: string;
+  buyer_score: number;
+  year: number | null;
+  brand: string | null;
+  model: string | null;
+  condition: string | null;
+  power_type: string;
+  battery_type: string;
+  battery_ah: number | null;
+  battery_age_months: number | null;
+  seating: number | null;
+  lifted: boolean;
+  street_legal_claimed: boolean;
+  street_legal_confidence: string;
+  charger_included: string;
+  warranty_included: string;
+  warranty_provider: string;
+  warranty_months: number | null;
+  battery_warranty_included: string;
+  warranty_notes: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  lat: number | null;
+  lng: number | null;
+  delivery_available: boolean;
+  delivery_included: boolean;
+  delivery_notes: string | null;
+  image_url: string | null;
+  image_urls: string | null;
+  seller_name: string | null;
+  seller_phone: string | null;
+  seller_email: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type InsertListing = Omit<Listing, 'id' | 'created_at' | 'updated_at'>;
 
-// ─── DealChecks ──────────────────────────────────────────────────────────────
-export const dealChecks = sqliteTable("deal_checks", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("user_id"),
-  sourcePlatform: text("source_platform").notNull().default("other"),
-  // facebook_marketplace | craigslist | offerup | dealer_website | costco_retailer | other
-  sourceUrl: text("source_url"),
-  extractionMethod: text("extraction_method").notNull().default("manual_user_entry"),
-  // manual_user_entry | user_pasted_text | user_uploaded_screenshot | seller_authorized_import | official_meta_api
-  userConfirmedDisclosure: integer("user_confirmed_disclosure", { mode: "boolean" }).notNull().default(false),
-  askingPrice: real("asking_price"),
-  regularPrice: real("regular_price"),
-  salePrice: real("sale_price"),
-  year: integer("year"),
-  brand: text("brand"),
-  model: text("model"),
-  city: text("city"),
-  state: text("state"),
-  sellerType: text("seller_type"),
-  retailerName: text("retailer_name"),
-  powerType: text("power_type").default("unknown"),
-  batteryType: text("battery_type").default("unknown"),
-  batteryAh: integer("battery_ah"),
-  batteryAgeMonths: integer("battery_age_months"),
-  seating: integer("seating"),
-  lifted: text("lifted").default("unknown"), // yes | no | unknown
-  streetLegalClaimed: text("street_legal_claimed").default("unknown"),
-  chargerIncluded: text("charger_included").default("unknown"),
-  warrantyIncluded: text("warranty_included").default("unknown"),
-  warrantyProvider: text("warranty_provider").default("unknown"),
-  warrantyMonths: integer("warranty_months"),
-  batteryWarrantyIncluded: text("battery_warranty_included").default("unknown"),
-  warrantyNotes: text("warranty_notes"),
-  deliveryAvailable: text("delivery_available").default("unknown"),
-  deliveryCost: real("delivery_cost"),
-  lastVerifiedAt: text("last_verified_at"),
-  cartiqEstimatedValue: real("cartiq_estimated_value"),
-  totalDeliveredCost: real("total_delivered_cost"),
-  dealDelta: real("deal_delta"),
-  dealRating: text("deal_rating").default("unknown"),
-  buyerScore: integer("buyer_score").default(70),
-  batteryRisk: text("battery_risk").default("unknown"), // high | medium | low | unknown
-  chargerWarning: text("charger_warning"),
-  warrantySignal: text("warranty_signal"),
-  streetLegalConfidence: text("street_legal_confidence").default("unknown"),
-  redFlags: text("red_flags").default("[]"), // JSON
-  questionsToAsk: text("questions_to_ask").default("[]"), // JSON
-  negotiationLow: real("negotiation_low"),
-  negotiationHigh: real("negotiation_high"),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
-});
-export const insertDealCheckSchema = createInsertSchema(dealChecks).omit({ id: true, createdAt: true });
-export type InsertDealCheck = z.infer<typeof insertDealCheckSchema>;
-export type DealCheck = typeof dealChecks.$inferSelect;
+// ─── DealChecks ───────────────────────────────────────────────────────────────
+export interface DealCheck {
+  id: number;
+  user_id: number | null;
+  source_platform: string;
+  source_url: string | null;
+  extraction_method: string;
+  user_confirmed_disclosure: boolean;
+  asking_price: number | null;
+  regular_price: number | null;
+  sale_price: number | null;
+  year: number | null;
+  brand: string | null;
+  model: string | null;
+  city: string | null;
+  state: string | null;
+  seller_type: string | null;
+  retailer_name: string | null;
+  power_type: string;
+  battery_type: string;
+  battery_ah: number | null;
+  battery_age_months: number | null;
+  seating: number | null;
+  lifted: string;
+  street_legal_claimed: string;
+  charger_included: string;
+  warranty_included: string;
+  warranty_provider: string;
+  warranty_months: number | null;
+  battery_warranty_included: string;
+  warranty_notes: string | null;
+  delivery_available: string;
+  delivery_cost: number | null;
+  last_verified_at: string | null;
+  cartiq_estimated_value: number | null;
+  total_delivered_cost: number | null;
+  deal_delta: number | null;
+  deal_rating: string;
+  buyer_score: number;
+  battery_risk: string;
+  charger_warning: string | null;
+  warranty_signal: string | null;
+  street_legal_confidence: string;
+  red_flags: string;
+  questions_to_ask: string;
+  negotiation_low: number | null;
+  negotiation_high: number | null;
+  created_at: string;
+}
+export type InsertDealCheck = Omit<DealCheck, 'id' | 'created_at'>;
 
-// ─── MarketComps ─────────────────────────────────────────────────────────────
-export const marketComps = sqliteTable("market_comps", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  listingId: integer("listing_id"),
-  brand: text("brand"),
-  model: text("model"),
-  yearMin: integer("year_min"),
-  yearMax: integer("year_max"),
-  state: text("state"),
-  city: text("city"),
-  radiusMiles: integer("radius_miles"),
-  sampleSize: integer("sample_size"),
-  medianPrice: real("median_price"),
-  adjustedValue: real("adjusted_value"),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
-});
-export const insertMarketCompSchema = createInsertSchema(marketComps).omit({ id: true, createdAt: true });
-export type InsertMarketComp = z.infer<typeof insertMarketCompSchema>;
-export type MarketComp = typeof marketComps.$inferSelect;
+// ─── MarketComps ──────────────────────────────────────────────────────────────
+export interface MarketComp {
+  id: number;
+  listing_id: number | null;
+  brand: string | null;
+  model: string | null;
+  year_min: number | null;
+  year_max: number | null;
+  state: string | null;
+  city: string | null;
+  radius_miles: number | null;
+  sample_size: number | null;
+  median_price: number | null;
+  adjusted_value: number | null;
+  created_at: string;
+}
+export type InsertMarketComp = Omit<MarketComp, 'id' | 'created_at'>;
 
 // ─── InventorySources ─────────────────────────────────────────────────────────
-export const inventorySources = sqliteTable("inventory_sources", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  sourceType: text("source_type").notNull().default("manual"),
-  // manual | csv | dealer_authorized | buyer_submitted | seller_authorized
-  // official_meta_api | retail_manual | retail_csv | approved_retail_api
-  status: text("status").notNull().default("active"),
-  // active | inactive | not_configured | pending_access | approved | disabled | error
-  baseUrl: text("base_url"),
-  apiProvider: text("api_provider"),
-  allowedUseNotes: text("allowed_use_notes"),
-  lastSyncAt: text("last_sync_at"),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
-  updatedAt: text("updated_at").notNull().default(new Date().toISOString()),
-});
-export const insertInventorySourceSchema = createInsertSchema(inventorySources).omit({ id: true, createdAt: true, updatedAt: true });
-export type InsertInventorySource = z.infer<typeof insertInventorySourceSchema>;
-export type InventorySource = typeof inventorySources.$inferSelect;
+export interface InventorySource {
+  id: number;
+  name: string;
+  source_type: string;
+  status: string;
+  base_url: string | null;
+  api_provider: string | null;
+  allowed_use_notes: string | null;
+  last_sync_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type InsertInventorySource = Omit<InventorySource, 'id' | 'created_at' | 'updated_at'>;
 
-// ─── SeoArticles ─────────────────────────────────────────────────────────────
-export const seoArticles = sqliteTable("seo_articles", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  title: text("title").notNull(),
-  slug: text("slug").notNull().unique(),
-  metaDescription: text("meta_description"),
-  canonicalPath: text("canonical_path"),
-  primaryKeyword: text("primary_keyword"),
-  secondaryKeywords: text("secondary_keywords").default("[]"), // JSON
-  h1: text("h1"),
-  shortAnswer: text("short_answer"),
-  body: text("body"),
-  faqJson: text("faq_json").default("[]"), // JSON
-  published: integer("published", { mode: "boolean" }).default(true),
-  updatedAt: text("updated_at").notNull().default(new Date().toISOString()),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
-});
-export const insertSeoArticleSchema = createInsertSchema(seoArticles).omit({ id: true, createdAt: true, updatedAt: true });
-export type InsertSeoArticle = z.infer<typeof insertSeoArticleSchema>;
-export type SeoArticle = typeof seoArticles.$inferSelect;
+// ─── SeoArticles ──────────────────────────────────────────────────────────────
+export interface SeoArticle {
+  id: number;
+  title: string;
+  slug: string;
+  meta_description: string | null;
+  canonical_path: string | null;
+  primary_keyword: string | null;
+  secondary_keywords: string;
+  h1: string | null;
+  short_answer: string | null;
+  body: string | null;
+  faq_json: string;
+  published: boolean;
+  updated_at: string;
+  created_at: string;
+}
+export type InsertSeoArticle = Omit<SeoArticle, 'id' | 'created_at' | 'updated_at'>;
 
 // ─── ListingWatches ───────────────────────────────────────────────────────────
-export const listingWatches = sqliteTable("listing_watches", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  email: text("email").notNull(),
-  listingId: integer("listing_id").notNull(),
-  priceAtWatch: real("price_at_watch").notNull(), // effective price when watch was created
-  alertedAt: text("alerted_at"),                  // set when a price-drop alert fires
-  alertPrice: real("alert_price"),                // the dropped price that triggered the alert
-  alertPct: real("alert_pct"),                    // % drop that triggered the alert
-  dismissed: integer("dismissed", { mode: "boolean" }).default(false),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
-});
-export const insertListingWatchSchema = createInsertSchema(listingWatches).omit({ id: true, createdAt: true });
-export type InsertListingWatch = z.infer<typeof insertListingWatchSchema>;
-export type ListingWatch = typeof listingWatches.$inferSelect;
+export interface ListingWatch {
+  id: number;
+  email: string;
+  listing_id: number;
+  price_at_watch: number;
+  alerted_at: string | null;
+  alert_price: number | null;
+  alert_pct: number | null;
+  dismissed: boolean;
+  created_at: string;
+}
+export type InsertListingWatch = Omit<ListingWatch, 'id' | 'created_at'>;
 
 // ─── SavedListings ────────────────────────────────────────────────────────────
-export const savedListings = sqliteTable("saved_listings", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  email: text("email").notNull(),
-  listingId: integer("listing_id").notNull(),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
-});
-export const insertSavedListingSchema = createInsertSchema(savedListings).omit({ id: true, createdAt: true });
-export type InsertSavedListing = z.infer<typeof insertSavedListingSchema>;
-export type SavedListing = typeof savedListings.$inferSelect;
+export interface SavedListing {
+  id: number;
+  email: string;
+  listing_id: number;
+  created_at: string;
+}
+export type InsertSavedListing = Omit<SavedListing, 'id' | 'created_at'>;

@@ -3,6 +3,22 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { calculateCartIQValue } from "./pricing";
 import { parseCsv, csvRowToListing } from "./csvParser";
+
+// ─── snake_case → camelCase normalizer ───────────────────────────────────────
+// Supabase returns column names as snake_case. The frontend expects camelCase.
+// This adapter runs on all outbound listing/dealer/dealCheck objects.
+function toCamel(obj: Record<string, any>): Record<string, any> {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return obj;
+  const out: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    const camel = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    out[camel] = obj[key];
+  }
+  return out;
+}
+function normList(rows: any[]): any[] { return rows.map(toCamel); }
+function norm(row: any): any { return toCamel(row); }
+
 import { getMetaConnectorStatus } from "./connectors/metaMarketplace";
 import { getRetailConnectorStatus } from "./connectors/retailSource";
 
@@ -18,85 +34,81 @@ function slugify(text: string): string {
 }
 
 // Suppress delivery fields from a DB record when seller doesn't offer delivery.
-// The internal $350 estimate is stored for scoring purposes only — never expose
-// it to buyers as a real delivery quote.
 function suppressDeliveryIfUnavailable(listing: Record<string, any>): Record<string, any> {
-  const offersDelivery = listing.deliveryAvailable === true || listing.deliveryAvailable === 1
-    || listing.deliveryIncluded === true || listing.deliveryIncluded === 1;
+  const offersDelivery = listing.delivery_available === true || listing.delivery_included === true;
   if (offersDelivery) return listing;
-  return { ...listing, estimatedDeliveryCost: null, totalDeliveredCost: null };
+  return { ...listing, estimated_delivery_cost: null, total_delivered_cost: null };
 }
 
 function enrichListingWithPricing(data: Record<string, any>): Record<string, any> {
   const result = calculateCartIQValue({
-    askingPrice: data.askingPrice,
-    regularPrice: data.regularPrice,
-    salePrice: data.salePrice,
-    deliveryCost: data.estimatedDeliveryCost,
-    deliveryIncluded: data.deliveryIncluded,
-    deliveryAvailable: data.deliveryAvailable ? "yes" : "no",
+    askingPrice: data.asking_price ?? data.askingPrice,
+    regularPrice: data.regular_price ?? data.regularPrice,
+    salePrice: data.sale_price ?? data.salePrice,
+    deliveryCost: data.estimated_delivery_cost ?? data.estimatedDeliveryCost,
+    deliveryIncluded: data.delivery_included ?? data.deliveryIncluded,
+    deliveryAvailable: (data.delivery_available ?? data.deliveryAvailable) ? "yes" : "no",
     year: data.year,
     brand: data.brand,
     model: data.model,
-    powerType: data.powerType,
-    batteryType: data.batteryType,
-    batteryAh: data.batteryAh,
-    batteryAgeMonths: data.batteryAgeMonths,
+    powerType: data.power_type ?? data.powerType,
+    batteryType: data.battery_type ?? data.batteryType,
+    batteryAh: data.battery_ah ?? data.batteryAh,
+    batteryAgeMonths: data.battery_age_months ?? data.batteryAgeMonths,
     seating: data.seating,
     lifted: data.lifted,
-    streetLegalClaimed: data.streetLegalClaimed,
-    chargerIncluded: data.chargerIncluded,
-    warrantyIncluded: data.warrantyIncluded,
-    warrantyProvider: data.warrantyProvider,
-    warrantyMonths: data.warrantyMonths,
-    batteryWarrantyIncluded: data.batteryWarrantyIncluded,
-    sellerType: data.sellerType,
+    streetLegalClaimed: data.street_legal_claimed ?? data.streetLegalClaimed,
+    chargerIncluded: data.charger_included ?? data.chargerIncluded,
+    warrantyIncluded: data.warranty_included ?? data.warrantyIncluded,
+    warrantyProvider: data.warranty_provider ?? data.warrantyProvider,
+    warrantyMonths: data.warranty_months ?? data.warrantyMonths,
+    batteryWarrantyIncluded: data.battery_warranty_included ?? data.batteryWarrantyIncluded,
+    sellerType: data.seller_type ?? data.sellerType,
     state: data.state,
+    condition: data.condition,
   });
 
-  // FIX: only expose estimatedDeliveryCost / totalDeliveredCost when delivery
-  // is actually available from the seller. When deliveryAvailable=false, the
-  // internal $350 estimate is used for scoring only — it should not be shown
-  // to buyers as a real quote.
-  const sellerOffersDelivery = data.deliveryAvailable === true || data.deliveryIncluded === true;
+  const sellerOffersDelivery = (data.delivery_available ?? data.deliveryAvailable) === true
+    || (data.delivery_included ?? data.deliveryIncluded) === true;
+
   return {
     ...data,
-    cartiqEstimatedValue: result.cartiqEstimatedValue,
-    estimatedDeliveryCost: sellerOffersDelivery
-      ? (result.estimatedDeliveryCost >= 0 ? result.estimatedDeliveryCost : data.estimatedDeliveryCost)
+    cartiq_estimated_value: result.cartiqEstimatedValue,
+    estimated_delivery_cost: sellerOffersDelivery
+      ? (result.estimatedDeliveryCost >= 0 ? result.estimatedDeliveryCost : (data.estimated_delivery_cost ?? data.estimatedDeliveryCost))
       : null,
-    totalDeliveredCost: sellerOffersDelivery && result.totalDeliveredCost >= 0
+    total_delivered_cost: sellerOffersDelivery && result.totalDeliveredCost >= 0
       ? result.totalDeliveredCost
       : null,
-    dealDelta: result.dealDelta,
-    dealRating: result.dealRating,
-    buyerScore: result.buyerScore,
-    streetLegalConfidence: result.streetLegalConfidence,
+    deal_delta: result.dealDelta,
+    deal_rating: result.dealRating,
+    buyer_score: result.buyerScore,
+    street_legal_confidence: result.streetLegalConfidence,
   };
 }
 
 export function registerRoutes(httpServer: Server, app: Express) {
-  // ─── Health / debug ─────────────────────────────────────────────────────────
-  app.get("/api/health", (_req, res) => {
+  // ─── Health ─────────────────────────────────────────────────────────────────
+  app.get("/api/health", async (_req, res) => {
     try {
-      const count = storage.getListings({}).length;
-      res.json({ ok: true, listings: count, env: process.env.NODE_ENV, vercel: !!process.env.VERCEL });
+      const count = await storage.getListingCount();
+      res.json({ ok: true, listings: count, env: process.env.NODE_ENV, db: "supabase" });
     } catch (e: any) {
-      res.status(500).json({ ok: false, error: e.message, stack: e.stack?.split('\n').slice(0,5) });
+      res.status(500).json({ ok: false, error: e.message });
     }
   });
 
-  // ─── Auth middleware ────────────────────────────────────────────────────────
+  // ─── Auth middleware ─────────────────────────────────────────────────────────
   function requireAdmin(req: any, res: any, next: any) {
     const token = req.headers["x-admin-token"] || req.query.adminToken;
     if (token === ADMIN_PASSWORD) return next();
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  // ─── Listings ───────────────────────────────────────────────────────────────
-  app.get("/api/listings", (req, res) => {
+  // ─── Listings ────────────────────────────────────────────────────────────────
+  app.get("/api/listings", async (req, res) => {
     try {
-      const filters: Record<string, unknown> = { publicOnly: true, status: "active" };
+      const filters: Record<string, unknown> = {};
       if (req.query.state) filters.state = req.query.state as string;
       if (req.query.city) filters.city = req.query.city as string;
       if (req.query.brand) filters.brand = req.query.brand as string;
@@ -108,79 +120,68 @@ export function registerRoutes(httpServer: Server, app: Express) {
       if (req.query.maxPrice) filters.maxPrice = parseFloat(req.query.maxPrice as string);
       if (req.query.streetLegal === "true") filters.streetLegal = true;
       if (req.query.lifted === "true") filters.lifted = true;
-      const listings = storage.getListings(filters).map(suppressDeliveryIfUnavailable);
-      res.json(listings);
+      const listings = await storage.getListings(filters);
+      res.json(normList(listings.map(suppressDeliveryIfUnavailable)));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.get("/api/listings/:id", (req, res) => {
+  app.get("/api/listings/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const listing = isNaN(id)
-        ? storage.getListingBySlug(req.params.id)
-        : storage.getListingById(id);
+        ? await storage.getListingBySlug(req.params.id)
+        : await storage.getListingById(id);
       if (!listing) return res.status(404).json({ error: "Listing not found" });
-      res.json(suppressDeliveryIfUnavailable(listing as any));
+      res.json(norm(suppressDeliveryIfUnavailable(listing as any)));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.post("/api/listings", requireAdmin, (req, res) => {
+  app.post("/api/listings", requireAdmin, async (req, res) => {
     try {
       const data = req.body as Record<string, any>;
-
-      // Region check
-      if (data.state && !PILOT_STATES.includes(data.state?.toUpperCase()) && !data.sourceType?.includes("retail")) {
-        data.publicListing = false;
-        data._outOfPilotWarning = true;
+      if (data.state && !PILOT_STATES.includes(data.state?.toUpperCase()) && !data.source_type?.includes("retail")) {
+        data.public_listing = false;
       }
-
       const baseSlug = slugify(`${data.brand || "cart"}-${data.model || "listing"}-${data.city || "fl"}`);
       data.slug = data.slug || `${baseSlug}-${Date.now()}`;
-
       const enriched = enrichListingWithPricing(data);
-      const listing = storage.createListing(enriched as any);
-      res.status(201).json(listing);
+      const listing = await storage.createListing(enriched as any);
+      res.status(201).json(norm(listing as any));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  app.patch("/api/listings/:id", requireAdmin, (req, res) => {
+  app.patch("/api/listings/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const data = req.body as Record<string, any>;
-
-      // Capture old effective price BEFORE update for price-drop detection
-      const oldListing = storage.getListingById(id);
+      const oldListing = await storage.getListingById(id);
       const oldEffectivePrice = oldListing
-        ? (oldListing.askingPrice ?? oldListing.salePrice ?? oldListing.regularPrice ?? 0)
+        ? (oldListing.asking_price ?? oldListing.sale_price ?? oldListing.regular_price ?? 0)
         : null;
-
       const enriched = enrichListingWithPricing(data);
-      const listing = storage.updateListing(id, enriched as any);
+      const listing = await storage.updateListing(id, enriched as any);
       if (!listing) return res.status(404).json({ error: "Listing not found" });
-
-      // Fire price-drop alerts if the effective price dropped
-      const newEffectivePrice = listing.askingPrice ?? listing.salePrice ?? listing.regularPrice ?? 0;
+      const newEffectivePrice = listing.asking_price ?? listing.sale_price ?? listing.regular_price ?? 0;
       let alerts: any[] = [];
       if (oldEffectivePrice !== null && newEffectivePrice < oldEffectivePrice) {
-        alerts = storage.firePriceDropAlerts(id, newEffectivePrice);
+        alerts = await storage.firePriceDropAlerts(id, newEffectivePrice);
       }
-
-      res.json({ ...suppressDeliveryIfUnavailable(listing as any), _alertsFired: alerts.length });
+      res.json({ ...norm(suppressDeliveryIfUnavailable(listing as any)), _alertsFired: alerts.length });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  app.delete("/api/listings/:id", requireAdmin, (req, res) => {
+  app.delete("/api/listings/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const deleted = storage.deleteListing(id);
+      const deleted = await storage.deleteListing(id);
       if (!deleted) return res.status(404).json({ error: "Listing not found" });
       res.json({ success: true });
     } catch (e: any) {
@@ -188,22 +189,14 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  // ─── Deal Checks ────────────────────────────────────────────────────────────
-  app.post("/api/deal-checks", (req, res) => {
+  // ─── Deal Checks ─────────────────────────────────────────────────────────────
+  app.post("/api/deal-checks", async (req, res) => {
     try {
       const data = req.body as Record<string, any>;
-
       if (!data.userConfirmedDisclosure) {
-        return res.status(400).json({
-          error: "You must confirm the disclosure before submitting a deal check.",
-        });
+        return res.status(400).json({ error: "You must confirm the disclosure before submitting a deal check." });
       }
-
-      // FIX: accept 'make' as alias for 'brand' — brand-tier multiplier always applied
       const brand = data.brand || data.make || null;
-
-      // FIX: coerce JSON booleans → string for lifted/streetLegalClaimed
-      // SQLite text columns throw on raw JS booleans
       const coerceBoolStr = (v: any): string => {
         if (v === true || v === "true" || v === "yes") return "yes";
         if (v === false || v === "false" || v === "no") return "no";
@@ -211,17 +204,11 @@ export function registerRoutes(httpServer: Server, app: Express) {
       };
       const liftedStr = coerceBoolStr(data.lifted);
       const streetLegalStr = coerceBoolStr(data.streetLegalClaimed);
-
-      // FIX: accept estimatedDeliveryCost as alias for deliveryCost
       const deliveryCost = data.deliveryCost ?? data.estimatedDeliveryCost ?? null;
-
-      // Pilot warning for out-of-state
       let pilotWarning: string | null = null;
       if (data.state && !PILOT_STATES.includes(data.state?.toUpperCase())) {
-        pilotWarning =
-          "CartIQ pilot coverage is currently Florida and Georgia. Market estimates outside this area may be limited.";
+        pilotWarning = "CartIQ pilot coverage is currently Florida and Georgia. Market estimates outside this area may be limited.";
       }
-
       const pricing = calculateCartIQValue({
         askingPrice: data.askingPrice,
         regularPrice: data.regularPrice,
@@ -249,313 +236,300 @@ export function registerRoutes(httpServer: Server, app: Express) {
         condition: data.condition,
       });
 
-      const dealCheck = storage.createDealCheck({
-        sourcePlatform: data.sourcePlatform || "other",
-        sourceUrl: data.sourceUrl,
-        extractionMethod: "manual_user_entry",
-        userConfirmedDisclosure: true,
-        askingPrice: data.askingPrice,
-        regularPrice: data.regularPrice,
-        salePrice: data.salePrice,
+      const dealCheck = await storage.createDealCheck({
+        source_platform: data.sourcePlatform || "other",
+        source_url: data.sourceUrl,
+        extraction_method: "manual_user_entry",
+        user_confirmed_disclosure: true,
+        asking_price: data.askingPrice,
+        regular_price: data.regularPrice,
+        sale_price: data.salePrice,
         year: data.year,
         brand,
         model: data.model,
         city: data.city,
         state: data.state,
-        sellerType: data.sellerType,
-        retailerName: data.retailerName,
-        powerType: data.powerType || "unknown",
-        batteryType: data.batteryType || "unknown",
-        batteryAh: data.batteryAh,
-        batteryAgeMonths: data.batteryAgeMonths,
+        seller_type: data.sellerType,
+        retailer_name: data.retailerName,
+        power_type: data.powerType || "unknown",
+        battery_type: data.batteryType || "unknown",
+        battery_ah: data.batteryAh,
+        battery_age_months: data.batteryAgeMonths,
         seating: data.seating,
         lifted: liftedStr,
-        streetLegalClaimed: streetLegalStr,
-        chargerIncluded: data.chargerIncluded || "unknown",
-        warrantyIncluded: data.warrantyIncluded || "unknown",
-        warrantyProvider: data.warrantyProvider || "unknown",
-        warrantyMonths: data.warrantyMonths,
-        batteryWarrantyIncluded: data.batteryWarrantyIncluded || "unknown",
-        warrantyNotes: data.warrantyNotes,
-        deliveryAvailable: data.deliveryAvailable || "unknown",
-        deliveryCost,
-        lastVerifiedAt: data.lastVerifiedAt,
-        cartiqEstimatedValue: pricing.cartiqEstimatedValue,
-        totalDeliveredCost: pricing.totalDeliveredCost >= 0 ? pricing.totalDeliveredCost : undefined,
-        dealDelta: pricing.dealDelta,
-        dealRating: pricing.dealRating,
-        buyerScore: pricing.buyerScore,
-        batteryRisk: pricing.batteryRisk,
-        chargerWarning: pricing.chargerWarning ?? undefined,
-        warrantySignal: pricing.warrantySignal ?? undefined,
-        streetLegalConfidence: pricing.streetLegalConfidence,
-        redFlags: JSON.stringify(pricing.redFlags),
-        questionsToAsk: JSON.stringify(pricing.questionsToAsk),
-        negotiationLow: pricing.negotiationLow,
-        negotiationHigh: pricing.negotiationHigh,
+        street_legal_claimed: streetLegalStr,
+        charger_included: data.chargerIncluded || "unknown",
+        warranty_included: data.warrantyIncluded || "unknown",
+        warranty_provider: data.warrantyProvider || "unknown",
+        warranty_months: data.warrantyMonths,
+        battery_warranty_included: data.batteryWarrantyIncluded || "unknown",
+        warranty_notes: data.warrantyNotes,
+        delivery_available: data.deliveryAvailable || "unknown",
+        delivery_cost: deliveryCost,
+        last_verified_at: data.lastVerifiedAt,
+        cartiq_estimated_value: pricing.cartiqEstimatedValue,
+        total_delivered_cost: pricing.totalDeliveredCost >= 0 ? pricing.totalDeliveredCost : undefined,
+        deal_delta: pricing.dealDelta,
+        deal_rating: pricing.dealRating,
+        buyer_score: pricing.buyerScore,
+        battery_risk: pricing.batteryRisk,
+        charger_warning: pricing.chargerWarning ?? undefined,
+        warranty_signal: pricing.warrantySignal ?? undefined,
+        street_legal_confidence: pricing.streetLegalConfidence,
+        red_flags: JSON.stringify(pricing.redFlags),
+        questions_to_ask: JSON.stringify(pricing.questionsToAsk),
+        negotiation_low: pricing.negotiationLow,
+        negotiation_high: pricing.negotiationHigh,
+        user_id: null,
       });
 
-      res.status(201).json({ ...dealCheck, pilotWarning });
+      res.status(201).json({ ...norm(dealCheck as any), pilotWarning });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  app.get("/api/deal-checks/:id", requireAdmin, (req, res) => {
+  app.get("/api/deal-checks/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const dc = storage.getDealCheckById(id);
+      const dc = await storage.getDealCheckById(id);
       if (!dc) return res.status(404).json({ error: "Deal check not found" });
-      res.json(dc);
+      res.json(norm(dc as any));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  // ─── Watches ──────────────────────────────────────────────────────────────
-
-  // POST /api/watches — create a watch
-  app.post("/api/watches", (req, res) => {
+  // ─── Watches ─────────────────────────────────────────────────────────────────
+  app.post("/api/watches", async (req, res) => {
     try {
       const { email, listingId } = req.body as { email: string; listingId: number };
       if (!email || !listingId) return res.status(400).json({ error: "email and listingId are required" });
-      const listing = storage.getListingById(listingId);
+      const listing = await storage.getListingById(listingId);
       if (!listing) return res.status(404).json({ error: "Listing not found" });
-      if (storage.isWatching(email, listingId)) return res.status(200).json({ alreadyWatching: true });
-      const effectivePrice = listing.askingPrice ?? listing.salePrice ?? listing.regularPrice ?? 0;
-      const watch = storage.createWatch({ email, listingId, priceAtWatch: effectivePrice });
-      res.status(201).json(watch);
+      if (await storage.isWatching(email, listingId)) return res.status(200).json({ alreadyWatching: true });
+      const effectivePrice = listing.asking_price ?? listing.sale_price ?? listing.regular_price ?? 0;
+      const watch = await storage.createWatch({ email, listing_id: listingId, price_at_watch: effectivePrice, dismissed: false, alerted_at: null, alert_price: null, alert_pct: null });
+      res.status(201).json(norm(watch as any));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  // GET /api/watches?email= — get all watches (with alerts) for an email
-  app.get("/api/watches", (req, res) => {
+  app.get("/api/watches", async (req, res) => {
     try {
       const { email } = req.query as { email: string };
       if (!email) return res.status(400).json({ error: "email is required" });
-      const watches = storage.getWatchesByEmail(email);
-      const enriched = watches.map((w) => {
-        const listing = storage.getListingById(w.listingId);
-        return { ...w, listing: listing ? suppressDeliveryIfUnavailable(listing as any) : null };
-      });
+      const watches = await storage.getWatchesByEmail(email);
+      const enriched = await Promise.all(watches.map(async (w) => {
+        const listing = await storage.getListingById(w.listing_id);
+        const normalized = norm(w as any);
+        normalized.listing = listing ? norm(suppressDeliveryIfUnavailable(listing as any)) : null;
+        return normalized;
+      }));
       res.json(enriched);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  // DELETE /api/watches/:id — unwatch
-  app.delete("/api/watches/:id", (req, res) => {
+  app.delete("/api/watches/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { email } = req.query as { email: string };
-      const watch = storage.getWatchById(id);
+      const watch = await storage.getWatchById(id);
       if (!watch) return res.status(404).json({ error: "Watch not found" });
       if (email && watch.email !== email.toLowerCase().trim()) return res.status(403).json({ error: "Unauthorized" });
-      storage.deleteWatch(id);
+      await storage.deleteWatch(id);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  // POST /api/watches/:id/dismiss — dismiss an alert without removing the watch
-  app.post("/api/watches/:id/dismiss", (req, res) => {
+  app.post("/api/watches/:id/dismiss", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      storage.dismissWatch(id);
+      await storage.dismissWatch(id);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  // GET /api/watches/status?email=&listingId= — check if watching
-  app.get("/api/watches/status", (req, res) => {
+  app.get("/api/watches/status", async (req, res) => {
     try {
       const { email, listingId } = req.query as { email: string; listingId: string };
       if (!email || !listingId) return res.status(400).json({ error: "email and listingId are required" });
-      const watching = storage.isWatching(email, parseInt(listingId));
+      const watching = await storage.isWatching(email, parseInt(listingId));
       res.json({ watching });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  // ─── Saves ─────────────────────────────────────────────────────────────────
-
-  // POST /api/saves — save a listing
-  app.post("/api/saves", (req, res) => {
+  // ─── Saves ───────────────────────────────────────────────────────────────────
+  app.post("/api/saves", async (req, res) => {
     try {
       const { email, listingId } = req.body as { email: string; listingId: number };
       if (!email || !listingId) return res.status(400).json({ error: "email and listingId are required" });
-      const listing = storage.getListingById(listingId);
+      const listing = await storage.getListingById(listingId);
       if (!listing) return res.status(404).json({ error: "Listing not found" });
-      const saved = storage.saveListing(email, listingId);
+      const saved = await storage.saveListing(email, listingId);
       res.status(201).json(saved);
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  // DELETE /api/saves — unsave a listing
-  app.delete("/api/saves", (req, res) => {
+  app.delete("/api/saves", async (req, res) => {
     try {
       const { email, listingId } = req.body as { email: string; listingId: number };
       if (!email || !listingId) return res.status(400).json({ error: "email and listingId are required" });
-      storage.unsaveListing(email, listingId);
+      await storage.unsaveListing(email, listingId);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  // GET /api/saves?email= — get all saved listings for an email
-  app.get("/api/saves", (req, res) => {
+  app.get("/api/saves", async (req, res) => {
     try {
       const { email } = req.query as { email: string };
       if (!email) return res.status(400).json({ error: "email is required" });
-      const saves = storage.getSavedByEmail(email);
-      const enriched = saves.map((s) => {
-        const listing = storage.getListingById(s.listingId);
-        return { ...s, listing: listing ? suppressDeliveryIfUnavailable(listing as any) : null };
-      });
+      const saves = await storage.getSavedByEmail(email);
+      const enriched = await Promise.all(saves.map(async (s) => {
+        const listing = await storage.getListingById(s.listing_id);
+        const normalized = norm(s as any);
+        normalized.listing = listing ? norm(suppressDeliveryIfUnavailable(listing as any)) : null;
+        return normalized;
+      }));
       res.json(enriched);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  // GET /api/saves/status?email=&listingId= — check if saved
-  app.get("/api/saves/status", (req, res) => {
+  app.get("/api/saves/status", async (req, res) => {
     try {
       const { email, listingId } = req.query as { email: string; listingId: string };
       if (!email || !listingId) return res.status(400).json({ error: "email and listingId are required" });
-      const saved = storage.isSaved(email, parseInt(listingId));
+      const saved = await storage.isSaved(email, parseInt(listingId));
       res.json({ saved });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  // ─── CSV Import ─────────────────────────────────────────────────────────────
-  app.post("/api/admin/csv-import", requireAdmin, (req, res) => {
+  // ─── CSV Import ──────────────────────────────────────────────────────────────
+  app.post("/api/admin/csv-import", requireAdmin, async (req, res) => {
     try {
       const { csvText } = req.body as { csvText: string };
       if (!csvText) return res.status(400).json({ error: "csvText is required" });
-
       const { valid, errors } = parseCsv(csvText);
-
-      const created = valid.map((row, idx) => {
+      const created = await Promise.all(valid.map(async (row, idx) => {
         const data = csvRowToListing(row, idx) as any;
         const enriched = enrichListingWithPricing(data) as any;
         return storage.createListing(enriched);
-      });
-
-      res.json({
-        imported: created.length,
-        errors,
-        listings: created,
-      });
+      }));
+      res.json({ imported: created.length, errors, listings: normList(created as any[]) });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  // ─── Dealers ────────────────────────────────────────────────────────────────
-  app.get("/api/dealers", (req, res) => {
-    res.json(storage.getDealers());
+  // ─── Dealers ─────────────────────────────────────────────────────────────────
+  app.get("/api/dealers", async (_req, res) => {
+    res.json(normList(await storage.getDealers() as any[]));
   });
 
-  app.post("/api/dealers", requireAdmin, (req, res) => {
+  app.post("/api/dealers", requireAdmin, async (req, res) => {
     try {
       const data = req.body as any;
       if (!data.slug) data.slug = slugify(data.name || "dealer");
-      const dealer = storage.createDealer(data);
-      res.status(201).json(dealer);
+      const dealer = await storage.createDealer(data);
+      res.status(201).json(norm(dealer as any));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  app.patch("/api/dealers/:id", requireAdmin, (req, res) => {
+  app.patch("/api/dealers/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const dealer = storage.updateDealer(id, req.body);
+      const dealer = await storage.updateDealer(id, req.body);
       if (!dealer) return res.status(404).json({ error: "Dealer not found" });
-      res.json(dealer);
+      res.json(norm(dealer as any));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  // ─── Retail Sources ─────────────────────────────────────────────────────────
-  app.get("/api/retail-sources", (req, res) => {
-    res.json(storage.getRetailSources());
+  // ─── Retail Sources ───────────────────────────────────────────────────────────
+  app.get("/api/retail-sources", async (_req, res) => {
+    res.json(normList(await storage.getRetailSources() as any[]));
   });
 
-  app.post("/api/retail-sources", requireAdmin, (req, res) => {
+  app.post("/api/retail-sources", requireAdmin, async (req, res) => {
     try {
       const data = req.body as any;
       if (!data.slug) data.slug = slugify(data.name || "retailer");
-      const rs = storage.createRetailSource(data);
-      res.status(201).json(rs);
+      const rs = await storage.createRetailSource(data);
+      res.status(201).json(norm(rs as any));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  app.patch("/api/retail-sources/:id", requireAdmin, (req, res) => {
+  app.patch("/api/retail-sources/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const rs = storage.updateRetailSource(id, req.body);
+      const rs = await storage.updateRetailSource(id, req.body);
       if (!rs) return res.status(404).json({ error: "Retail source not found" });
-      res.json(rs);
+      res.json(norm(rs as any));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  // ─── Inventory Sources ──────────────────────────────────────────────────────
-  app.get("/api/inventory-sources", requireAdmin, (req, res) => {
-    res.json(storage.getInventorySources());
+  // ─── Inventory Sources ────────────────────────────────────────────────────────
+  app.get("/api/inventory-sources", requireAdmin, async (_req, res) => {
+    res.json(normList(await storage.getInventorySources() as any[]));
   });
 
-  app.post("/api/inventory-sources", requireAdmin, (req, res) => {
+  app.post("/api/inventory-sources", requireAdmin, async (req, res) => {
     try {
-      const src = storage.createInventorySource(req.body);
-      res.status(201).json(src);
+      const src = await storage.createInventorySource(req.body);
+      res.status(201).json(norm(src as any));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  app.patch("/api/inventory-sources/:id", requireAdmin, (req, res) => {
+  app.patch("/api/inventory-sources/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const src = storage.updateInventorySource(id, req.body);
+      const src = await storage.updateInventorySource(id, req.body);
       if (!src) return res.status(404).json({ error: "Inventory source not found" });
-      res.json(src);
+      res.json(norm(src as any));
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  // ─── Buyer Guide / SEO Articles ─────────────────────────────────────────────
-  app.get("/api/buyer-guide", (req, res) => {
-    res.json(storage.getSeoArticles());
+  // ─── Buyer Guide / SEO Articles ───────────────────────────────────────────────
+  app.get("/api/buyer-guide", async (_req, res) => {
+    res.json(normList(await storage.getSeoArticles() as any[]));
   });
 
-  app.get("/api/buyer-guide/:slug", (req, res) => {
-    const article = storage.getSeoArticleBySlug(req.params.slug);
+  app.get("/api/buyer-guide/:slug", async (req, res) => {
+    const article = await storage.getSeoArticleBySlug(req.params.slug);
     if (!article) return res.status(404).json({ error: "Article not found" });
-    res.json(article);
+    res.json(norm(article as any));
   });
 
-  // ─── Connector Status ────────────────────────────────────────────────────────
-  app.get("/api/connectors/meta-marketplace", (req, res) => {
+  // ─── Connector Status ─────────────────────────────────────────────────────────
+  app.get("/api/connectors/meta-marketplace", (_req, res) => {
     res.json(getMetaConnectorStatus());
   });
 
@@ -564,14 +538,10 @@ export function registerRoutes(httpServer: Server, app: Express) {
     res.json(getRetailConnectorStatus(retailer));
   });
 
-  // ─── Admin: all listings (including non-public) ──────────────────────────────
-  app.get("/api/admin/listings", requireAdmin, (req, res) => {
-    const listings = storage.getListings({});
-    res.json(listings);
+  // ─── Admin: all listings ──────────────────────────────────────────────────────
+  app.get("/api/admin/listings", requireAdmin, async (_req, res) => {
+    res.json(normList(await storage.getListings({}) as any[]));
   });
 
   return httpServer;
 }
-
-// Diagnostic: surface startup errors for Vercel debugging
-// Remove before production

@@ -81,16 +81,8 @@ app.use((req, res, next) => {
   let initError: Error | null = null;
 
   try {
-    // Initialize sql.js database (pure WASM — no native binary)
+    // Initialize storage (no-op for Supabase)
     await initStorage();
-
-    // Seed database on startup
-    try {
-      const { seedDatabase } = await import("./seed");
-      await seedDatabase();
-    } catch (e) {
-      console.error("Seed error:", e);
-    }
 
     await registerRoutes(httpServer, app);
   } catch (e: any) {

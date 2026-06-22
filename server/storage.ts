@@ -1,625 +1,411 @@
-import initSqlJs from "sql.js";
-import { drizzle } from "drizzle-orm/sql-js";
-import type { SQLJsDatabase } from "drizzle-orm/sql-js";
-import { eq, and } from "drizzle-orm";
-import * as fs from "node:fs";
-import * as path from "node:path";
-import * as schema from "@shared/schema";
+/**
+ * CartIQ Storage — Supabase/Postgres backend
+ * All methods are async. Routes call await storage.method().
+ */
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import type {
+  Listing, InsertListing,
+  Dealer, InsertDealer,
+  RetailSource, InsertRetailSource,
+  DealCheck, InsertDealCheck,
+  InventorySource, InsertInventorySource,
+  SeoArticle, InsertSeoArticle,
+  ListingWatch, InsertListingWatch,
+  SavedListing, InsertSavedListing,
+} from "@shared/schema";
 
-// On Vercel (Lambda), the working directory is read-only — use /tmp for SQLite.
-// Locally (pplx.app sandbox), use data.db in CWD so publish_website can snapshot it.
-const DB_PATH = process.env.VERCEL ? "/tmp/data.db" : "data.db";
-
-// Load the wasm binary SYNCHRONOUSLY.
-// At build time, script/build.ts generates server/generated/sql-wasm-loader.ts which
-// exports wasmBase64 as a plain string constant — esbuild inlines it into the CJS bundle.
-// We require() it synchronously so there is no async gap before httpServer.listen() is called
-// (Vercel Lambda's launcher only waits 1 second for listen() after module import).
-// In dev (tsx), the generated file may not exist — fall back to fs.readFileSync from node_modules.
-function loadWasmBinarySync(): Buffer {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { wasmBase64 } = require("./generated/sql-wasm-loader");
-    return Buffer.from(wasmBase64 as string, "base64");
-  } catch {
-    // Dev fallback: read directly from node_modules
-    const wasmPath = path.resolve("node_modules/sql.js/dist/sql-wasm.wasm");
-    return fs.readFileSync(wasmPath);
-  }
+function getClient(): SupabaseClient {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_ANON_KEY");
+  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
-// Module-level db — set after initStorage() resolves
-let db: SQLJsDatabase<typeof schema>;
-let sqlJsDb: import("sql.js").Database;
-
-// Persist the database back to disk after every write operation
-function persistDb(): void {
-  try {
-    const data = sqlJsDb.export();
-    fs.writeFileSync(DB_PATH, Buffer.from(data));
-  } catch (e) {
-    console.error("[storage] persist error:", e);
-  }
+// Lazy singleton
+let _client: SupabaseClient | null = null;
+function db(): SupabaseClient {
+  if (!_client) _client = getClient();
+  return _client;
 }
 
-const CREATE_TABLES_SQL = `
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT NOT NULL UNIQUE,
-    name TEXT,
-    role TEXT NOT NULL DEFAULT 'buyer',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS dealers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    slug TEXT NOT NULL UNIQUE,
-    website_url TEXT,
-    phone TEXT,
-    email TEXT,
-    city TEXT,
-    state TEXT,
-    zip TEXT,
-    lat REAL,
-    lng REAL,
-    service_area_miles INTEGER,
-    delivery_available INTEGER DEFAULT 0,
-    delivery_included INTEGER DEFAULT 0,
-    delivery_base_fee REAL,
-    delivery_per_mile_fee REAL,
-    delivery_free_radius_miles INTEGER,
-    default_warranty_included INTEGER DEFAULT 0,
-    default_warranty_months INTEGER,
-    default_warranty_notes TEXT,
-    notes TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS retail_sources (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    slug TEXT NOT NULL UNIQUE,
-    website_url TEXT,
-    source_type TEXT NOT NULL DEFAULT 'retailer',
-    authorized_mode TEXT NOT NULL DEFAULT 'manual',
-    allowed_use_notes TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS listings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    slug TEXT NOT NULL UNIQUE,
-    description TEXT,
-    source_type TEXT NOT NULL DEFAULT 'admin_manual',
-    source_url TEXT,
-    public_listing INTEGER NOT NULL DEFAULT 1,
-    seller_type TEXT NOT NULL DEFAULT 'private',
-    status TEXT NOT NULL DEFAULT 'active',
-    dealer_id INTEGER,
-    retail_source_id INTEGER,
-    retailer_name TEXT,
-    retailer_sku TEXT,
-    retailer_product_url TEXT,
-    retail_event_name TEXT,
-    retail_event_dates TEXT,
-    availability_status TEXT,
-    ship_to_states TEXT,
-    last_verified_at TEXT,
-    asking_price REAL,
-    regular_price REAL,
-    sale_price REAL,
-    cartiq_estimated_value REAL,
-    estimated_delivery_cost REAL,
-    total_delivered_cost REAL,
-    deal_delta REAL,
-    deal_rating TEXT DEFAULT 'unknown',
-    buyer_score INTEGER DEFAULT 70,
-    year INTEGER,
-    brand TEXT,
-    model TEXT,
-    condition TEXT,
-    power_type TEXT DEFAULT 'unknown',
-    battery_type TEXT DEFAULT 'unknown',
-    battery_ah INTEGER,
-    battery_age_months INTEGER,
-    seating INTEGER,
-    lifted INTEGER DEFAULT 0,
-    street_legal_claimed INTEGER DEFAULT 0,
-    street_legal_confidence TEXT DEFAULT 'unknown',
-    charger_included TEXT DEFAULT 'unknown',
-    warranty_included TEXT DEFAULT 'unknown',
-    warranty_provider TEXT DEFAULT 'unknown',
-    warranty_months INTEGER,
-    battery_warranty_included TEXT DEFAULT 'unknown',
-    warranty_notes TEXT,
-    city TEXT,
-    state TEXT,
-    zip TEXT,
-    lat REAL,
-    lng REAL,
-    delivery_available INTEGER DEFAULT 0,
-    delivery_included INTEGER DEFAULT 0,
-    delivery_notes TEXT,
-    image_url TEXT,
-    image_urls TEXT,
-    seller_name TEXT,
-    seller_phone TEXT,
-    seller_email TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS deal_checks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    source_platform TEXT NOT NULL DEFAULT 'other',
-    source_url TEXT,
-    extraction_method TEXT NOT NULL DEFAULT 'manual_user_entry',
-    user_confirmed_disclosure INTEGER NOT NULL DEFAULT 0,
-    asking_price REAL,
-    regular_price REAL,
-    sale_price REAL,
-    year INTEGER,
-    brand TEXT,
-    model TEXT,
-    city TEXT,
-    state TEXT,
-    seller_type TEXT,
-    retailer_name TEXT,
-    power_type TEXT DEFAULT 'unknown',
-    battery_type TEXT DEFAULT 'unknown',
-    battery_ah INTEGER,
-    battery_age_months INTEGER,
-    seating INTEGER,
-    lifted TEXT DEFAULT 'unknown',
-    street_legal_claimed TEXT DEFAULT 'unknown',
-    charger_included TEXT DEFAULT 'unknown',
-    warranty_included TEXT DEFAULT 'unknown',
-    warranty_provider TEXT DEFAULT 'unknown',
-    warranty_months INTEGER,
-    battery_warranty_included TEXT DEFAULT 'unknown',
-    warranty_notes TEXT,
-    delivery_available TEXT DEFAULT 'unknown',
-    delivery_cost REAL,
-    last_verified_at TEXT,
-    cartiq_estimated_value REAL,
-    total_delivered_cost REAL,
-    deal_delta REAL,
-    deal_rating TEXT DEFAULT 'unknown',
-    buyer_score INTEGER DEFAULT 70,
-    battery_risk TEXT DEFAULT 'unknown',
-    charger_warning TEXT,
-    warranty_signal TEXT,
-    street_legal_confidence TEXT DEFAULT 'unknown',
-    red_flags TEXT DEFAULT '[]',
-    questions_to_ask TEXT DEFAULT '[]',
-    negotiation_low REAL,
-    negotiation_high REAL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS market_comps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    listing_id INTEGER,
-    brand TEXT,
-    model TEXT,
-    year_min INTEGER,
-    year_max INTEGER,
-    state TEXT,
-    city TEXT,
-    radius_miles INTEGER,
-    sample_size INTEGER,
-    median_price REAL,
-    adjusted_value REAL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS inventory_sources (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    source_type TEXT NOT NULL DEFAULT 'manual',
-    status TEXT NOT NULL DEFAULT 'active',
-    base_url TEXT,
-    api_provider TEXT,
-    allowed_use_notes TEXT,
-    last_sync_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS seo_articles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    slug TEXT NOT NULL UNIQUE,
-    meta_description TEXT,
-    canonical_path TEXT,
-    primary_keyword TEXT,
-    secondary_keywords TEXT DEFAULT '[]',
-    h1 TEXT,
-    short_answer TEXT,
-    body TEXT,
-    faq_json TEXT DEFAULT '[]',
-    published INTEGER DEFAULT 1,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS listing_watches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT NOT NULL,
-    listing_id INTEGER NOT NULL,
-    price_at_watch REAL NOT NULL,
-    alerted_at TEXT,
-    alert_price REAL,
-    alert_pct REAL,
-    dismissed INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS saved_listings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT NOT NULL,
-    listing_id INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(email, listing_id)
-  );
-`;
-
+// ─── initStorage (no-op for Supabase — tables already exist) ─────────────────
 export async function initStorage(): Promise<void> {
-  // Load binary synchronously (no async gap — base64 decode is instant)
-  const wasmBinary = loadWasmBinarySync();
-
-  const SQL = await initSqlJs({ wasmBinary });
-
-  // Load existing DB file if it exists
-  if (fs.existsSync(DB_PATH)) {
-    const fileData = fs.readFileSync(DB_PATH);
-    sqlJsDb = new SQL.Database(fileData);
-  } else {
-    sqlJsDb = new SQL.Database();
-  }
-
-  // Create all tables
-  sqlJsDb.run(CREATE_TABLES_SQL);
-
-  // Schema migrations — add new columns to existing DBs (safe: IF NOT EXISTS not supported
-  // for ALTER TABLE in SQLite, so wrap each in try/catch)
-  const migrations = [
-    "ALTER TABLE listings ADD COLUMN image_urls TEXT",
-  ];
-  for (const sql of migrations) {
-    try { sqlJsDb.run(sql); } catch (_) { /* column already exists */ }
-  }
-
-  persistDb();
-
-  db = drizzle(sqlJsDb, { schema });
-  console.log("[storage] sql.js initialized, DB_PATH:", DB_PATH);
+  console.log("[storage] Supabase mode — skipping local DB init");
 }
 
+// ─── IStorage interface ───────────────────────────────────────────────────────
 export interface IStorage {
-  // Listings
-  getListings(filters?: Record<string, unknown>): schema.Listing[];
-  getListingById(id: number): schema.Listing | undefined;
-  getListingBySlug(slug: string): schema.Listing | undefined;
-  createListing(data: schema.InsertListing): schema.Listing;
-  updateListing(id: number, data: Partial<schema.InsertListing>): schema.Listing | undefined;
-  deleteListing(id: number): boolean;
-  createManyListings(data: schema.InsertListing[]): schema.Listing[];
+  getListings(filters?: Record<string, unknown>): Promise<Listing[]>;
+  getListingById(id: number): Promise<Listing | undefined>;
+  getListingBySlug(slug: string): Promise<Listing | undefined>;
+  createListing(data: InsertListing): Promise<Listing>;
+  updateListing(id: number, data: Partial<InsertListing>): Promise<Listing | undefined>;
+  deleteListing(id: number): Promise<boolean>;
+  createManyListings(data: InsertListing[]): Promise<Listing[]>;
 
-  // Dealers
-  getDealers(): schema.Dealer[];
-  getDealerById(id: number): schema.Dealer | undefined;
-  createDealer(data: schema.InsertDealer): schema.Dealer;
-  updateDealer(id: number, data: Partial<schema.InsertDealer>): schema.Dealer | undefined;
+  getDealers(): Promise<Dealer[]>;
+  getDealerById(id: number): Promise<Dealer | undefined>;
+  createDealer(data: InsertDealer): Promise<Dealer>;
+  updateDealer(id: number, data: Partial<InsertDealer>): Promise<Dealer | undefined>;
 
-  // Retail Sources
-  getRetailSources(): schema.RetailSource[];
-  getRetailSourceById(id: number): schema.RetailSource | undefined;
-  createRetailSource(data: schema.InsertRetailSource): schema.RetailSource;
-  updateRetailSource(id: number, data: Partial<schema.InsertRetailSource>): schema.RetailSource | undefined;
+  getRetailSources(): Promise<RetailSource[]>;
+  getRetailSourceById(id: number): Promise<RetailSource | undefined>;
+  createRetailSource(data: InsertRetailSource): Promise<RetailSource>;
+  updateRetailSource(id: number, data: Partial<InsertRetailSource>): Promise<RetailSource | undefined>;
 
-  // Deal Checks
-  createDealCheck(data: schema.InsertDealCheck): schema.DealCheck;
-  getDealCheckById(id: number): schema.DealCheck | undefined;
+  createDealCheck(data: InsertDealCheck): Promise<DealCheck>;
+  getDealCheckById(id: number): Promise<DealCheck | undefined>;
 
-  // Inventory Sources
-  getInventorySources(): schema.InventorySource[];
-  createInventorySource(data: schema.InsertInventorySource): schema.InventorySource;
-  updateInventorySource(id: number, data: Partial<schema.InsertInventorySource>): schema.InventorySource | undefined;
+  getInventorySources(): Promise<InventorySource[]>;
+  createInventorySource(data: InsertInventorySource): Promise<InventorySource>;
+  updateInventorySource(id: number, data: Partial<InsertInventorySource>): Promise<InventorySource | undefined>;
 
-  // SEO Articles
-  getSeoArticles(): schema.SeoArticle[];
-  getSeoArticleBySlug(slug: string): schema.SeoArticle | undefined;
-  createSeoArticle(data: schema.InsertSeoArticle): schema.SeoArticle;
-  hasSeoArticle(slug: string): boolean;
-  hasDealer(slug: string): boolean;
-  hasListing(slug: string): boolean;
-  hasInventorySource(name: string): boolean;
+  getSeoArticles(): Promise<SeoArticle[]>;
+  getSeoArticleBySlug(slug: string): Promise<SeoArticle | undefined>;
+  createSeoArticle(data: InsertSeoArticle): Promise<SeoArticle>;
+  hasSeoArticle(slug: string): Promise<boolean>;
+  hasDealer(slug: string): Promise<boolean>;
+  hasListing(slug: string): Promise<boolean>;
+  hasInventorySource(name: string): Promise<boolean>;
 
-  // Watches
-  createWatch(data: schema.InsertListingWatch): schema.ListingWatch;
-  getWatchesByEmail(email: string): schema.ListingWatch[];
-  getWatchesForListing(listingId: number): schema.ListingWatch[];
-  getWatchById(id: number): schema.ListingWatch | undefined;
-  isWatching(email: string, listingId: number): boolean;
-  firePriceDropAlerts(listingId: number, newPrice: number): schema.ListingWatch[];
-  dismissWatch(id: number): boolean;
-  deleteWatch(id: number): boolean;
+  createWatch(data: InsertListingWatch): Promise<ListingWatch>;
+  getWatchesByEmail(email: string): Promise<ListingWatch[]>;
+  getWatchesForListing(listingId: number): Promise<ListingWatch[]>;
+  getWatchById(id: number): Promise<ListingWatch | undefined>;
+  isWatching(email: string, listingId: number): Promise<boolean>;
+  firePriceDropAlerts(listingId: number, newPrice: number): Promise<ListingWatch[]>;
+  dismissWatch(id: number): Promise<boolean>;
+  deleteWatch(id: number): Promise<boolean>;
 
-  // Saved Listings
-  saveListing(email: string, listingId: number): schema.SavedListing;
-  unsaveListing(email: string, listingId: number): boolean;
-  isSaved(email: string, listingId: number): boolean;
-  getSavedByEmail(email: string): schema.SavedListing[];
+  saveListing(email: string, listingId: number): Promise<SavedListing>;
+  unsaveListing(email: string, listingId: number): Promise<boolean>;
+  isSaved(email: string, listingId: number): Promise<boolean>;
+  getSavedByEmail(email: string): Promise<SavedListing[]>;
+
+  getListingCount(): Promise<number>;
 }
 
-class SQLiteStorage implements IStorage {
-  getListings(filters: Record<string, unknown> = {}): schema.Listing[] {
-    const rows = db
+// ─── Helper: throw on Supabase error ─────────────────────────────────────────
+function check<T>(result: { data: T; error: any }): T {
+  if (result.error) throw new Error(`Supabase error: ${result.error.message}`);
+  return result.data;
+}
+
+// ─── SupabaseStorage ──────────────────────────────────────────────────────────
+class SupabaseStorage implements IStorage {
+
+  // ─── Listings ───────────────────────────────────────────────────────────────
+
+  async getListings(filters: Record<string, unknown> = {}): Promise<Listing[]> {
+    let q = db()
+      .from("listings")
+      .select("*")
+      .eq("status", "active")
+      .eq("public_listing", true)
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (filters.state)       q = q.eq("state", filters.state);
+    if (filters.brand)       q = q.ilike("brand", filters.brand as string);
+    if (filters.sellerType)  q = q.eq("seller_type", filters.sellerType);
+    if (filters.batteryType) q = q.eq("battery_type", filters.batteryType);
+    if (filters.dealRating)  q = q.eq("deal_rating", filters.dealRating);
+    if (filters.warrantyIncluded) q = q.eq("warranty_included", filters.warrantyIncluded);
+    if (filters.minPrice)    q = q.gte("asking_price", filters.minPrice);
+    if (filters.maxPrice)    q = q.lte("asking_price", filters.maxPrice);
+    if (filters.streetLegal === true) q = q.eq("street_legal_claimed", true);
+    if (filters.lifted === true)      q = q.eq("lifted", true);
+    if (filters.city)        q = q.ilike("city", filters.city as string);
+
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    return (data ?? []) as Listing[];
+  }
+
+  async getListingById(id: number): Promise<Listing | undefined> {
+    const { data } = await db().from("listings").select("*").eq("id", id).maybeSingle();
+    return (data as Listing) ?? undefined;
+  }
+
+  async getListingBySlug(slug: string): Promise<Listing | undefined> {
+    const { data } = await db().from("listings").select("*").eq("slug", slug).maybeSingle();
+    return (data as Listing) ?? undefined;
+  }
+
+  async createListing(data: InsertListing): Promise<Listing> {
+    const result = check(await db().from("listings").insert(data).select().single());
+    return result as Listing;
+  }
+
+  async updateListing(id: number, data: Partial<InsertListing>): Promise<Listing | undefined> {
+    const { data: result } = await db()
+      .from("listings")
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq("id", id)
       .select()
-      .from(schema.listings)
-      .all() as schema.Listing[];
-
-    return rows.filter((r) => {
-      if (filters.state && r.state !== filters.state) return false;
-      if (filters.city && r.city?.toLowerCase() !== (filters.city as string).toLowerCase()) return false;
-      if (filters.brand && r.brand?.toLowerCase() !== (filters.brand as string).toLowerCase()) return false;
-      if (filters.sellerType && r.sellerType !== filters.sellerType) return false;
-      if (filters.batteryType && r.batteryType !== filters.batteryType) return false;
-      if (filters.dealRating && r.dealRating !== filters.dealRating) return false;
-      if (filters.minPrice && (r.askingPrice ?? 0) < (filters.minPrice as number)) return false;
-      if (filters.maxPrice && (r.askingPrice ?? 0) > (filters.maxPrice as number)) return false;
-      if (filters.status && r.status !== filters.status) return false;
-      if (filters.publicOnly && !r.publicListing) return false;
-      if (filters.warrantyIncluded && r.warrantyIncluded !== filters.warrantyIncluded) return false;
-      if (filters.streetLegal !== undefined && filters.streetLegal !== null) {
-        if (filters.streetLegal === true && !r.streetLegalClaimed) return false;
-      }
-      if (filters.lifted !== undefined && filters.lifted !== null) {
-        if (filters.lifted === true && !r.lifted) return false;
-      }
-      return true;
-    });
+      .single();
+    return (result as Listing) ?? undefined;
   }
 
-  getListingById(id: number): schema.Listing | undefined {
-    return db.select().from(schema.listings).where(eq(schema.listings.id, id)).get() as schema.Listing | undefined;
+  async deleteListing(id: number): Promise<boolean> {
+    const { error } = await db().from("listings").delete().eq("id", id);
+    return !error;
   }
 
-  getListingBySlug(slug: string): schema.Listing | undefined {
-    return db.select().from(schema.listings).where(eq(schema.listings.slug, slug)).get() as schema.Listing | undefined;
+  async createManyListings(data: InsertListing[]): Promise<Listing[]> {
+    if (data.length === 0) return [];
+    const result = check(await db().from("listings").insert(data).select());
+    return (result ?? []) as Listing[];
   }
 
-  createListing(data: schema.InsertListing): schema.Listing {
-    const result = db.insert(schema.listings).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.Listing;
-    persistDb();
-    return result;
+  async getListingCount(): Promise<number> {
+    const { count } = await db().from("listings").select("*", { count: "exact", head: true }).eq("status", "active");
+    return count ?? 0;
   }
 
-  updateListing(id: number, data: Partial<schema.InsertListing>): schema.Listing | undefined {
-    const result = db.update(schema.listings).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.listings.id, id)).returning().get() as schema.Listing | undefined;
-    persistDb();
-    return result;
+  // ─── Dealers ────────────────────────────────────────────────────────────────
+
+  async getDealers(): Promise<Dealer[]> {
+    const { data } = await db().from("dealers").select("*").order("name");
+    return (data ?? []) as Dealer[];
   }
 
-  deleteListing(id: number): boolean {
-    const result = db.delete(schema.listings).where(eq(schema.listings.id, id)).run();
-    persistDb();
-    return (result as any).changes > 0;
+  async getDealerById(id: number): Promise<Dealer | undefined> {
+    const { data } = await db().from("dealers").select("*").eq("id", id).maybeSingle();
+    return (data as Dealer) ?? undefined;
   }
 
-  createManyListings(data: schema.InsertListing[]): schema.Listing[] {
-    return data.map((d) => this.createListing(d));
+  async createDealer(data: InsertDealer): Promise<Dealer> {
+    const result = check(await db().from("dealers").insert(data).select().single());
+    return result as Dealer;
   }
 
-  getDealers(): schema.Dealer[] {
-    return db.select().from(schema.dealers).all() as schema.Dealer[];
+  async updateDealer(id: number, data: Partial<InsertDealer>): Promise<Dealer | undefined> {
+    const { data: result } = await db()
+      .from("dealers")
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .single();
+    return (result as Dealer) ?? undefined;
   }
 
-  getDealerById(id: number): schema.Dealer | undefined {
-    return db.select().from(schema.dealers).where(eq(schema.dealers.id, id)).get() as schema.Dealer | undefined;
+  // ─── Retail Sources ──────────────────────────────────────────────────────────
+
+  async getRetailSources(): Promise<RetailSource[]> {
+    const { data } = await db().from("retail_sources").select("*");
+    return (data ?? []) as RetailSource[];
   }
 
-  createDealer(data: schema.InsertDealer): schema.Dealer {
-    const result = db.insert(schema.dealers).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.Dealer;
-    persistDb();
-    return result;
+  async getRetailSourceById(id: number): Promise<RetailSource | undefined> {
+    const { data } = await db().from("retail_sources").select("*").eq("id", id).maybeSingle();
+    return (data as RetailSource) ?? undefined;
   }
 
-  updateDealer(id: number, data: Partial<schema.InsertDealer>): schema.Dealer | undefined {
-    const result = db.update(schema.dealers).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.dealers.id, id)).returning().get() as schema.Dealer | undefined;
-    persistDb();
-    return result;
+  async createRetailSource(data: InsertRetailSource): Promise<RetailSource> {
+    const result = check(await db().from("retail_sources").insert(data).select().single());
+    return result as RetailSource;
   }
 
-  getRetailSources(): schema.RetailSource[] {
-    return db.select().from(schema.retailSources).all() as schema.RetailSource[];
+  async updateRetailSource(id: number, data: Partial<InsertRetailSource>): Promise<RetailSource | undefined> {
+    const { data: result } = await db()
+      .from("retail_sources")
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .single();
+    return (result as RetailSource) ?? undefined;
   }
 
-  getRetailSourceById(id: number): schema.RetailSource | undefined {
-    return db.select().from(schema.retailSources).where(eq(schema.retailSources.id, id)).get() as schema.RetailSource | undefined;
+  // ─── Deal Checks ─────────────────────────────────────────────────────────────
+
+  async createDealCheck(data: InsertDealCheck): Promise<DealCheck> {
+    const result = check(await db().from("deal_checks").insert(data).select().single());
+    return result as DealCheck;
   }
 
-  createRetailSource(data: schema.InsertRetailSource): schema.RetailSource {
-    const result = db.insert(schema.retailSources).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.RetailSource;
-    persistDb();
-    return result;
+  async getDealCheckById(id: number): Promise<DealCheck | undefined> {
+    const { data } = await db().from("deal_checks").select("*").eq("id", id).maybeSingle();
+    return (data as DealCheck) ?? undefined;
   }
 
-  updateRetailSource(id: number, data: Partial<schema.InsertRetailSource>): schema.RetailSource | undefined {
-    const result = db.update(schema.retailSources).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.retailSources.id, id)).returning().get() as schema.RetailSource | undefined;
-    persistDb();
-    return result;
+  // ─── Inventory Sources ────────────────────────────────────────────────────────
+
+  async getInventorySources(): Promise<InventorySource[]> {
+    const { data } = await db().from("inventory_sources").select("*");
+    return (data ?? []) as InventorySource[];
   }
 
-  createDealCheck(data: schema.InsertDealCheck): schema.DealCheck {
-    const result = db.insert(schema.dealChecks).values({ ...data, createdAt: new Date().toISOString() }).returning().get() as schema.DealCheck;
-    persistDb();
-    return result;
+  async createInventorySource(data: InsertInventorySource): Promise<InventorySource> {
+    const result = check(await db().from("inventory_sources").insert(data).select().single());
+    return result as InventorySource;
   }
 
-  getDealCheckById(id: number): schema.DealCheck | undefined {
-    return db.select().from(schema.dealChecks).where(eq(schema.dealChecks.id, id)).get() as schema.DealCheck | undefined;
+  async updateInventorySource(id: number, data: Partial<InsertInventorySource>): Promise<InventorySource | undefined> {
+    const { data: result } = await db()
+      .from("inventory_sources")
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .single();
+    return (result as InventorySource) ?? undefined;
   }
 
-  getInventorySources(): schema.InventorySource[] {
-    return db.select().from(schema.inventorySources).all() as schema.InventorySource[];
+  // ─── SEO Articles ─────────────────────────────────────────────────────────────
+
+  async getSeoArticles(): Promise<SeoArticle[]> {
+    const { data } = await db().from("seo_articles").select("*").eq("published", true);
+    return (data ?? []) as SeoArticle[];
   }
 
-  createInventorySource(data: schema.InsertInventorySource): schema.InventorySource {
-    const result = db.insert(schema.inventorySources).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.InventorySource;
-    persistDb();
-    return result;
+  async getSeoArticleBySlug(slug: string): Promise<SeoArticle | undefined> {
+    const { data } = await db().from("seo_articles").select("*").eq("slug", slug).maybeSingle();
+    return (data as SeoArticle) ?? undefined;
   }
 
-  updateInventorySource(id: number, data: Partial<schema.InsertInventorySource>): schema.InventorySource | undefined {
-    const result = db.update(schema.inventorySources).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(schema.inventorySources.id, id)).returning().get() as schema.InventorySource | undefined;
-    persistDb();
-    return result;
+  async createSeoArticle(data: InsertSeoArticle): Promise<SeoArticle> {
+    const result = check(await db().from("seo_articles").insert(data).select().single());
+    return result as SeoArticle;
   }
 
-  getSeoArticles(): schema.SeoArticle[] {
-    return db.select().from(schema.seoArticles).where(eq(schema.seoArticles.published, true)).all() as schema.SeoArticle[];
+  async hasSeoArticle(slug: string): Promise<boolean> {
+    const { count } = await db().from("seo_articles").select("*", { count: "exact", head: true }).eq("slug", slug);
+    return (count ?? 0) > 0;
   }
 
-  getSeoArticleBySlug(slug: string): schema.SeoArticle | undefined {
-    return db.select().from(schema.seoArticles).where(eq(schema.seoArticles.slug, slug)).get() as schema.SeoArticle | undefined;
+  async hasDealer(slug: string): Promise<boolean> {
+    const { count } = await db().from("dealers").select("*", { count: "exact", head: true }).eq("slug", slug);
+    return (count ?? 0) > 0;
   }
 
-  createSeoArticle(data: schema.InsertSeoArticle): schema.SeoArticle {
-    const result = db.insert(schema.seoArticles).values({ ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).returning().get() as schema.SeoArticle;
-    persistDb();
-    return result;
+  async hasListing(slug: string): Promise<boolean> {
+    const { count } = await db().from("listings").select("*", { count: "exact", head: true }).eq("slug", slug);
+    return (count ?? 0) > 0;
   }
 
-  hasSeoArticle(slug: string): boolean {
-    return !!db.select().from(schema.seoArticles).where(eq(schema.seoArticles.slug, slug)).get();
+  async hasInventorySource(name: string): Promise<boolean> {
+    const { count } = await db().from("inventory_sources").select("*", { count: "exact", head: true }).eq("name", name);
+    return (count ?? 0) > 0;
   }
 
-  hasDealer(slug: string): boolean {
-    return !!db.select().from(schema.dealers).where(eq(schema.dealers.slug, slug)).get();
+  // ─── Watches ─────────────────────────────────────────────────────────────────
+
+  async createWatch(data: InsertListingWatch): Promise<ListingWatch> {
+    const result = check(await db().from("listing_watches").insert(data).select().single());
+    return result as ListingWatch;
   }
 
-  hasListing(slug: string): boolean {
-    return !!db.select().from(schema.listings).where(eq(schema.listings.slug, slug)).get();
+  async getWatchesByEmail(email: string): Promise<ListingWatch[]> {
+    const { data } = await db()
+      .from("listing_watches")
+      .select("*")
+      .eq("email", email.toLowerCase().trim())
+      .eq("dismissed", false);
+    return (data ?? []) as ListingWatch[];
   }
 
-  hasInventorySource(name: string): boolean {
-    return !!db.select().from(schema.inventorySources).where(eq(schema.inventorySources.name, name)).get();
+  async getWatchesForListing(listingId: number): Promise<ListingWatch[]> {
+    const { data } = await db()
+      .from("listing_watches")
+      .select("*")
+      .eq("listing_id", listingId)
+      .eq("dismissed", false);
+    return (data ?? []) as ListingWatch[];
   }
 
-  // ─── Watches ───────────────────────────────────────────────────────────────
-
-  createWatch(data: schema.InsertListingWatch): schema.ListingWatch {
-    const result = db.insert(schema.listingWatches).values(data).returning().get() as schema.ListingWatch;
-    persistDb();
-    return result;
+  async getWatchById(id: number): Promise<ListingWatch | undefined> {
+    const { data } = await db().from("listing_watches").select("*").eq("id", id).maybeSingle();
+    return (data as ListingWatch) ?? undefined;
   }
 
-  getWatchesByEmail(email: string): schema.ListingWatch[] {
-    return db.select().from(schema.listingWatches)
-      .where(and(eq(schema.listingWatches.email, email.toLowerCase().trim()), eq(schema.listingWatches.dismissed, false)))
-      .all() as schema.ListingWatch[];
+  async isWatching(email: string, listingId: number): Promise<boolean> {
+    const { count } = await db()
+      .from("listing_watches")
+      .select("*", { count: "exact", head: true })
+      .eq("email", email.toLowerCase().trim())
+      .eq("listing_id", listingId)
+      .eq("dismissed", false);
+    return (count ?? 0) > 0;
   }
 
-  getWatchesForListing(listingId: number): schema.ListingWatch[] {
-    return db.select().from(schema.listingWatches)
-      .where(and(eq(schema.listingWatches.listingId, listingId), eq(schema.listingWatches.dismissed, false)))
-      .all() as schema.ListingWatch[];
-  }
-
-  getWatchById(id: number): schema.ListingWatch | undefined {
-    return db.select().from(schema.listingWatches).where(eq(schema.listingWatches.id, id)).get() as schema.ListingWatch | undefined;
-  }
-
-  isWatching(email: string, listingId: number): boolean {
-    return !!db.select().from(schema.listingWatches)
-      .where(and(
-        eq(schema.listingWatches.email, email.toLowerCase().trim()),
-        eq(schema.listingWatches.listingId, listingId),
-        eq(schema.listingWatches.dismissed, false)
-      )).get();
-  }
-
-  firePriceDropAlerts(listingId: number, newPrice: number): schema.ListingWatch[] {
-    const watches = this.getWatchesForListing(listingId);
-    const alerted: schema.ListingWatch[] = [];
+  async firePriceDropAlerts(listingId: number, newPrice: number): Promise<ListingWatch[]> {
+    const watches = await this.getWatchesForListing(listingId);
+    const alerted: ListingWatch[] = [];
     const now = new Date().toISOString();
     for (const w of watches) {
-      if (w.alertedAt) continue;
-      if (newPrice < w.priceAtWatch) {
-        const pct = ((w.priceAtWatch - newPrice) / w.priceAtWatch) * 100;
-        const updated = db.update(schema.listingWatches)
-          .set({ alertedAt: now, alertPrice: newPrice, alertPct: Math.round(pct * 10) / 10 })
-          .where(eq(schema.listingWatches.id, w.id))
-          .returning().get() as schema.ListingWatch | undefined;
-        if (updated) alerted.push(updated);
+      if (w.alerted_at) continue;
+      if (newPrice < w.price_at_watch) {
+        const pct = ((w.price_at_watch - newPrice) / w.price_at_watch) * 100;
+        const { data } = await db()
+          .from("listing_watches")
+          .update({ alerted_at: now, alert_price: newPrice, alert_pct: Math.round(pct * 10) / 10 })
+          .eq("id", w.id)
+          .select()
+          .single();
+        if (data) alerted.push(data as ListingWatch);
       }
     }
-    if (alerted.length > 0) persistDb();
     return alerted;
   }
 
-  dismissWatch(id: number): boolean {
-    const result = db.update(schema.listingWatches)
-      .set({ dismissed: true })
-      .where(eq(schema.listingWatches.id, id))
-      .returning().get();
-    persistDb();
-    return !!result;
+  async dismissWatch(id: number): Promise<boolean> {
+    const { error } = await db().from("listing_watches").update({ dismissed: true }).eq("id", id);
+    return !error;
   }
 
-  deleteWatch(id: number): boolean {
-    const result = db.delete(schema.listingWatches).where(eq(schema.listingWatches.id, id)).returning().get();
-    persistDb();
-    return !!result;
+  async deleteWatch(id: number): Promise<boolean> {
+    const { error } = await db().from("listing_watches").delete().eq("id", id);
+    return !error;
   }
 
-  // ─── Saved Listings ─────────────────────────────────────────────────────
+  // ─── Saved Listings ───────────────────────────────────────────────────────────
 
-  saveListing(email: string, listingId: number): schema.SavedListing {
-    const existing = this.getSavedEntry(email, listingId);
-    if (existing) return existing;
-    const result = db.insert(schema.savedListings)
-      .values({ email: email.toLowerCase().trim(), listingId })
-      .returning().get() as schema.SavedListing;
-    persistDb();
-    return result;
+  async saveListing(email: string, listingId: number): Promise<SavedListing> {
+    const normalized = email.toLowerCase().trim();
+    // upsert — ignore conflict
+    const { data } = await db()
+      .from("saved_listings")
+      .upsert({ email: normalized, listing_id: listingId }, { onConflict: "email,listing_id", ignoreDuplicates: true })
+      .select()
+      .single();
+    if (data) return data as SavedListing;
+    // Already existed — fetch it
+    const existing = await this.getSavedEntry(normalized, listingId);
+    if (!existing) throw new Error("Failed to save listing");
+    return existing;
   }
 
-  unsaveListing(email: string, listingId: number): boolean {
-    const result = db.delete(schema.savedListings)
-      .where(and(
-        eq(schema.savedListings.email, email.toLowerCase().trim()),
-        eq(schema.savedListings.listingId, listingId)
-      )).returning().get();
-    persistDb();
-    return !!result;
+  async unsaveListing(email: string, listingId: number): Promise<boolean> {
+    const { error } = await db()
+      .from("saved_listings")
+      .delete()
+      .eq("email", email.toLowerCase().trim())
+      .eq("listing_id", listingId);
+    return !error;
   }
 
-  isSaved(email: string, listingId: number): boolean {
-    return !!this.getSavedEntry(email, listingId);
+  async isSaved(email: string, listingId: number): Promise<boolean> {
+    const entry = await this.getSavedEntry(email.toLowerCase().trim(), listingId);
+    return !!entry;
   }
 
-  private getSavedEntry(email: string, listingId: number): schema.SavedListing | undefined {
-    return db.select().from(schema.savedListings)
-      .where(and(
-        eq(schema.savedListings.email, email.toLowerCase().trim()),
-        eq(schema.savedListings.listingId, listingId)
-      )).get() as schema.SavedListing | undefined;
+  async getSavedByEmail(email: string): Promise<SavedListing[]> {
+    const { data } = await db()
+      .from("saved_listings")
+      .select("*")
+      .eq("email", email.toLowerCase().trim());
+    return (data ?? []) as SavedListing[];
   }
 
-  getSavedByEmail(email: string): schema.SavedListing[] {
-    return db.select().from(schema.savedListings)
-      .where(eq(schema.savedListings.email, email.toLowerCase().trim()))
-      .all() as schema.SavedListing[];
+  private async getSavedEntry(email: string, listingId: number): Promise<SavedListing | undefined> {
+    const { data } = await db()
+      .from("saved_listings")
+      .select("*")
+      .eq("email", email)
+      .eq("listing_id", listingId)
+      .maybeSingle();
+    return (data as SavedListing) ?? undefined;
   }
 }
 
-export const storage = new SQLiteStorage();
+export const storage = new SupabaseStorage();

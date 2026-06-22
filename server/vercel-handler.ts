@@ -59,13 +59,6 @@ const initPromise = (async () => {
   try {
     await initStorage();
 
-    try {
-      const { seedDatabase } = await import("./seed");
-      await seedDatabase();
-    } catch (e) {
-      console.error("[vercel-handler] seed error:", e);
-    }
-
     await registerRoutes(httpServer, app);
     ready = true;
     console.log("[vercel-handler] init complete");
