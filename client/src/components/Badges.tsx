@@ -3,6 +3,7 @@ import { Shield, Zap, Truck, Star, AlertTriangle, CheckCircle, XCircle, HelpCirc
 
 // ── DealBadge ─────────────────────────────────────────────────────────────────
 export function DealBadge({ rating, className }: { rating?: string | null; className?: string }) {
+  if (!rating || rating === "unknown") return null;
   return (
     <span className={cn("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold", dealRatingClass(rating), className)}>
       {dealRatingLabel(rating)}
@@ -12,6 +13,7 @@ export function DealBadge({ rating, className }: { rating?: string | null; class
 
 // ── DealDeltaBadge ────────────────────────────────────────────────────────────
 export function DealDeltaBadge({ delta, className }: { delta?: number | null; className?: string }) {
+  if (delta == null) return null;
   return (
     <span className={cn("text-sm font-semibold", dealDeltaColor(delta), className)}>
       {dealDeltaText(delta)}
@@ -38,6 +40,7 @@ export function BatteryRiskBadge({ risk, batteryType, batteryAh, className }: {
   batteryAh?: number | null;
   className?: string;
 }) {
+  if ((!batteryType || batteryType === "unknown") && !batteryAh) return null;
   return (
     <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium", batteryRiskClass(risk), className)}>
       <Zap className="h-3 w-3" />
@@ -69,23 +72,20 @@ export function WarrantyBadge({ warrantyIncluded, warrantyMonths, className }: {
   warrantyMonths?: number | null;
   className?: string;
 }) {
+  // Only render when we have a definitive yes/no — hide when unknown/null
+  if (!warrantyIncluded || warrantyIncluded === "unknown") return null;
+
   const icon = warrantyIncluded === "yes"
     ? <CheckCircle className="h-3 w-3" />
-    : warrantyIncluded === "no"
-    ? <XCircle className="h-3 w-3" />
-    : <HelpCircle className="h-3 w-3" />;
+    : <XCircle className="h-3 w-3" />;
 
   const cls = warrantyIncluded === "yes"
     ? "bg-green-50 text-green-700 border border-green-200"
-    : warrantyIncluded === "no"
-    ? "bg-gray-50 text-gray-500 border border-gray-200"
-    : "bg-gray-50 text-gray-400 border border-gray-100";
+    : "bg-gray-50 text-gray-500 border border-gray-200";
 
   const label = warrantyIncluded === "yes"
     ? `Warranty${warrantyMonths ? ` (${warrantyMonths}mo)` : ""}`
-    : warrantyIncluded === "no"
-    ? "No Warranty"
-    : "Warranty Unknown";
+    : "No Warranty";
 
   return (
     <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium", cls, className)}>
@@ -118,27 +118,29 @@ export function DeliveryCostBadge({ deliveryIncluded, deliveryCost, deliveryAvai
   deliveryAvailable?: boolean | null;
   className?: string;
 }) {
-  let label = "";
-  let cls = "bg-gray-50 text-gray-500 border border-gray-200";
-
   if (deliveryIncluded) {
-    label = "Delivery Included";
-    cls = "bg-green-50 text-green-700 border border-green-200";
-  } else if (deliveryCost != null && deliveryCost > 0) {
-    label = `+$${deliveryCost.toLocaleString()} Delivery`;
-    cls = "bg-gray-50 text-gray-600 border border-gray-200";
-  } else if (deliveryAvailable) {
-    label = "Delivery Quote Needed";
-    cls = "bg-amber-50 text-amber-600 border border-amber-200";
-  } else {
-    label = "No Delivery Listed";
+    return (
+      <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200", className)}>
+        <Truck className="h-3 w-3" /> Delivery Included
+      </span>
+    );
   }
-
-  return (
-    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium", cls, className)}>
-      <Truck className="h-3 w-3" /> {label}
-    </span>
-  );
+  if (deliveryCost != null && deliveryCost > 0) {
+    return (
+      <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200", className)}>
+        <Truck className="h-3 w-3" /> +${deliveryCost.toLocaleString()} Delivery
+      </span>
+    );
+  }
+  if (deliveryAvailable) {
+    return (
+      <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-600 border border-amber-200", className)}>
+        <Truck className="h-3 w-3" /> Delivery Quote Needed
+      </span>
+    );
+  }
+  // No delivery info — render nothing
+  return null;
 }
 
 // ── RetailSourceBadge ─────────────────────────────────────────────────────────

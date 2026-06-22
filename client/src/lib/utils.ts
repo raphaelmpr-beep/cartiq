@@ -34,7 +34,7 @@ export function dealRatingClass(rating?: string | null): string {
 }
 
 export function dealDeltaText(delta?: number | null): string {
-  if (delta == null) return "Unknown";
+  if (delta == null) return "";
   const abs = Math.abs(delta);
   if (delta < 0) return `${formatPrice(abs)} Below Market`;
   if (delta > 0) return `${formatPrice(abs)} Above Market`;
@@ -53,7 +53,7 @@ export function batteryTypeLabel(bt?: string | null): string {
     case "lithium": return "Lithium";
     case "lead_acid": return "Lead-Acid";
     case "gas": return "Gas";
-    default: return "Unknown";
+    default: return "";
   }
 }
 
