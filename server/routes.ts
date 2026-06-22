@@ -156,7 +156,10 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
   app.get("/api/listings/:id", async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      // Use strict numeric check — parseInt("2027-some-slug") = 2027 which is wrong.
+      // Only treat param as a numeric ID if the ENTIRE string is digits.
+      const isNumericId = /^\d+$/.test(req.params.id);
+      const id = isNumericId ? parseInt(req.params.id) : NaN;
       const listing = isNaN(id)
         ? await storage.getListingBySlug(req.params.id)
         : await storage.getListingById(id);
