@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Upload, CheckCircle, XCircle, AlertCircle, RefreshCw } from "lucide-react";
+import { Plus, Pencil, Trash2, Upload, CheckCircle, XCircle, AlertCircle, RefreshCw, ExternalLink, TriangleAlert, ShieldCheck, CircleDashed, CircleAlert, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -353,6 +353,210 @@ function CsvImport({ adminToken }: { adminToken: string }) {
   );
 }
 
+// ── Coverage Audit Tab ──────────────────────────────────────────────────────────
+
+type CoverageRow = {
+  dealer_slug: string;
+  inventory_url: string | null;
+  discovered_count: number;
+  pending_imports_count: number;
+  public_listings_count: number;
+  duplicate_count: number;
+  skipped_count: number;
+  pagination_detected: boolean;
+  pages_visited: number;
+  load_more_detected: boolean;
+  scroll_required: boolean;
+  detail_pages_visited: number;
+  source_page_type: string | null;
+  coverage_status: string;
+  valuation_review_needed: boolean;
+  adapter_notes: string | null;
+  scanned_at: string | null;
+};
+
+const COVERAGE_STATUS_META: Record<string, { label: string; color: string }> = {
+  verified_full_inventory:  { label: "Verified Full",         color: "bg-green-100 text-green-800 border-green-200"   },
+  partial_inventory:        { label: "Partial",               color: "bg-yellow-100 text-yellow-800 border-yellow-200" },
+  featured_only:            { label: "Featured Only",         color: "bg-orange-100 text-orange-800 border-orange-200" },
+  pagination_incomplete:    { label: "Pagination Incomplete", color: "bg-orange-100 text-orange-800 border-orange-200" },
+  location_filter_needed:   { label: "Filter Needed",         color: "bg-blue-100 text-blue-800 border-blue-200"       },
+  browser_required:         { label: "Browser Required",      color: "bg-purple-100 text-purple-800 border-purple-200" },
+  adapter_error:            { label: "Adapter Error",         color: "bg-red-100 text-red-800 border-red-200"          },
+  needs_manual_review:      { label: "Needs Review",          color: "bg-gray-100 text-gray-600 border-gray-200"       },
+};
+
+function CoverageStatusBadge({ status }: { status: string }) {
+  const meta = COVERAGE_STATUS_META[status] || COVERAGE_STATUS_META["needs_manual_review"];
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${meta.color}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function CoverageAudit({ adminToken }: { adminToken: string }) {
+  const ADMIN_HEADERS = { "x-admin-token": adminToken };
+  const { data: rows = [], isLoading, error, refetch } = useQuery<CoverageRow[]>({
+    queryKey: ["/api/admin/coverage-audit"],
+    queryFn: () => apiRequest("GET", "/api/admin/coverage-audit", undefined, ADMIN_HEADERS).then(r => r.json()),
+  });
+
+  const flaggedCount  = rows.filter(r => r.valuation_review_needed).length;
+  const activeCount   = rows.filter(r => r.public_listings_count > 0).length;
+  const reviewCount   = rows.filter(r => r.coverage_status === "needs_manual_review" || r.coverage_status === "adapter_error").length;
+
+  if (isLoading) return <p className="text-sm text-muted-foreground py-4">Loading coverage data…</p>;
+  if (error)     return <p className="text-sm text-red-600 py-4">Failed to load coverage data.</p>;
+
+  return (
+    <div className="space-y-4">
+      {/* Summary strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Sources w/ Listings",  value: activeCount,   color: "text-green-700" },
+          { label: "Total Live Listings",  value: rows.reduce((s, r) => s + r.public_listings_count, 0), color: "text-foreground" },
+          { label: "Valuation Review",     value: flaggedCount,  color: flaggedCount > 0 ? "text-orange-600" : "text-muted-foreground" },
+          { label: "Needs Review",          value: reviewCount,   color: reviewCount > 0 ? "text-red-600" : "text-muted-foreground" },
+        ].map(item => (
+          <div key={item.label} className="bg-muted rounded-lg p-3">
+            <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{item.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Valuation review banner */}
+      {flaggedCount > 0 && (
+        <div className="flex items-start gap-2 bg-orange-50 border border-orange-200 rounded-lg p-3">
+          <TriangleAlert className="h-4 w-4 text-orange-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-orange-800">
+              Valuation review required on {flaggedCount} source{flaggedCount !== 1 ? "s" : ""}
+            </p>
+            <p className="text-xs text-orange-700 mt-0.5">
+              All imported listings from these sources are rated <strong>great_deal</strong> — this may indicate a
+              calibration issue. Reset deal_rating to <code>unknown</code> before publishing.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full text-sm border-collapse min-w-[960px]">
+          <thead>
+            <tr className="bg-muted text-left">
+              {["Dealer", "Inventory URL", "Discovered", "Pending", "Live", "Dups",
+                "Coverage Status", "Page Type", "Pagination", "Valuation Flag",
+                "Last Scanned", "Adapter Notes"].map(h => (
+                <th key={h} className="p-2 border border-border font-semibold text-xs whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.dealer_slug}
+                className={`odd:bg-white even:bg-gray-50 hover:bg-muted/50 transition-colors ${
+                  row.valuation_review_needed ? "bg-orange-50 hover:bg-orange-100" : ""
+                }`}
+              >
+                <td className="p-2 border border-border">
+                  <p className="font-medium text-xs whitespace-nowrap">{row.dealer_slug}</p>
+                </td>
+
+                <td className="p-2 border border-border text-xs max-w-[180px]">
+                  {row.inventory_url ? (
+                    <a
+                      href={row.inventory_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-blue-600 hover:underline"
+                      title={row.inventory_url}
+                    >
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                      <span className="truncate max-w-[140px] block">{row.inventory_url.replace(/^https?:\/\//, "")}</span>
+                    </a>
+                  ) : <span className="text-muted-foreground">—</span>}
+                </td>
+
+                <td className="p-2 border border-border text-xs text-center">{row.discovered_count || "—"}</td>
+                <td className="p-2 border border-border text-xs text-center">
+                  <span className={row.pending_imports_count > 0 ? "font-semibold text-blue-700" : ""}>
+                    {row.pending_imports_count || "—"}
+                  </span>
+                </td>
+                <td className="p-2 border border-border text-xs text-center">
+                  <span className={row.public_listings_count > 0 ? "font-semibold text-green-700" : "text-muted-foreground"}>
+                    {row.public_listings_count || "—"}
+                  </span>
+                </td>
+                <td className="p-2 border border-border text-xs text-center text-muted-foreground">
+                  {row.duplicate_count || "—"}
+                </td>
+
+                <td className="p-2 border border-border">
+                  <CoverageStatusBadge status={row.coverage_status} />
+                </td>
+
+                <td className="p-2 border border-border text-xs text-muted-foreground">
+                  {row.source_page_type ? row.source_page_type.replace(/_/g, " ") : "—"}
+                </td>
+
+                <td className="p-2 border border-border">
+                  <div className="flex flex-col gap-0.5 text-xs">
+                    {row.pagination_detected && (
+                      <span className="text-purple-700 font-medium">paginated ({row.pages_visited}p)</span>
+                    )}
+                    {row.load_more_detected && <span className="text-blue-700">load-more</span>}
+                    {row.scroll_required && <span className="text-orange-700">scroll</span>}
+                    {!row.pagination_detected && !row.load_more_detected && !row.scroll_required && (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </div>
+                </td>
+
+                <td className="p-2 border border-border text-center">
+                  {row.valuation_review_needed ? (
+                    <span title="All listings = great_deal — review needed">
+                      <TriangleAlert className="h-4 w-4 text-orange-500 inline" />
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground text-xs">ok</span>
+                  )}
+                </td>
+
+                <td className="p-2 border border-border text-xs text-muted-foreground whitespace-nowrap">
+                  {row.scanned_at
+                    ? new Date(row.scanned_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })
+                    : <span className="italic">not yet</span>
+                  }
+                </td>
+
+                <td className="p-2 border border-border text-xs text-muted-foreground max-w-[200px]">
+                  <span title={row.adapter_notes || ""}>{row.adapter_notes || "—"}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length === 0 && (
+          <p className="text-center text-sm text-muted-foreground py-8">
+            No coverage data yet. Run the DDL migration, then backfill dealer_coverage_log.
+          </p>
+        )}
+      </div>
+
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5">
+          <RefreshCw className="h-3.5 w-3.5" /> Refresh
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Admin Page ────────────────────────────────────────────────────────────
 export default function Admin() {
   const { authed, adminToken, password, setPassword, login, error: authError } = useAdminAuth();
@@ -424,6 +628,7 @@ export default function Admin() {
             <TabsTrigger value="csv" data-testid="tab-csv">CSV Import</TabsTrigger>
             <TabsTrigger value="dealers" data-testid="tab-dealers">Dealers ({dealers.length})</TabsTrigger>
             <TabsTrigger value="sources" data-testid="tab-sources">Inventory Sources</TabsTrigger>
+            <TabsTrigger value="coverage" data-testid="tab-coverage">Coverage Audit</TabsTrigger>
           </TabsList>
 
           {/* Listings Tab */}
@@ -545,6 +750,22 @@ export default function Admin() {
                   ))}
                   {inventorySources.length === 0 && <p className="text-sm text-muted-foreground">No sources configured.</p>}
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Coverage Audit Tab */}
+          <TabsContent value="coverage">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Dealer Coverage Audit</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Per-source inventory coverage status. Run DDL migration + backfill to populate log data.
+                  Live listing/pending counts are always current from the DB.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <CoverageAudit adminToken={adminToken} />
               </CardContent>
             </Card>
           </TabsContent>

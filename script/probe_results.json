@@ -1,0 +1,124 @@
+{
+  "viable": [
+    {
+      "slug": "discovery-golf-cars-clearwater",
+      "probeResult": "viable_static",
+      "bestUrl": "https://discoverygolfcars.com/inventory/",
+      "probeNotes": "Static HTML has inventory signals. score=3. price=false brand=true year=true"
+    },
+    {
+      "slug": "discovery-golf-cars-land-o-lakes",
+      "probeResult": "viable_static",
+      "bestUrl": "https://discoverygolfcars.com/land-o-lakes/",
+      "probeNotes": "Static HTML has inventory signals. score=3. price=false brand=true year=true"
+    },
+    {
+      "slug": "sunshine-golf-car",
+      "probeResult": "viable_static",
+      "bestUrl": "https://sunshinegolfcar.com/inventory/",
+      "probeNotes": "Static HTML has inventory signals. score=3. price=false brand=true year=true"
+    },
+    {
+      "slug": "south-florida-golf-carts",
+      "probeResult": "viable_static",
+      "bestUrl": "https://southfloridagolfcarts.com/",
+      "probeNotes": "Static HTML has inventory signals. score=3. price=false brand=true year=true"
+    },
+    {
+      "slug": "hole-in-one-golf-carts-naples",
+      "probeResult": "viable_static",
+      "bestUrl": "https://holeinonegolfcarts.com/",
+      "probeNotes": "Static HTML has inventory signals. score=3. price=false brand=true year=true"
+    }
+  ],
+  "js_rendered": [
+    {
+      "slug": "electric-cart-watersound-inlet-beach",
+      "probeResult": "js_rendered",
+      "bestUrl": "https://electriccartwatersound.com/",
+      "probeNotes": "Site reached but inventory is JS-rendered (DealerSpike/DX1). Needs browser."
+    }
+  ],
+  "unreachable": [
+    {
+      "slug": "botero-carts-clearwater",
+      "probeResult": "unreachable",
+      "bestUrl": null,
+      "probeNotes": "https://boterocarts.com/inventory/: 403; https://boterocarts.com/used-golf-carts/: 403; https://boterocarts.com/new-golf-carts/: 403"
+    },
+    {
+      "slug": "botero-carts-jacksonville",
+      "probeResult": "unreachable",
+      "bestUrl": null,
+      "probeNotes": "https://boterocarts.com/inventory/: 403"
+    },
+    {
+      "slug": "botero-carts-melbourne",
+      "probeResult": "unreachable",
+      "bestUrl": null,
+      "probeNotes": "https://boterocarts.com/inventory/: 403"
+    },
+    {
+      "slug": "botero-carts-ocala",
+      "probeResult": "unreachable",
+      "bestUrl": null,
+      "probeNotes": "https://boterocarts.com/inventory/: 403"
+    },
+    {
+      "slug": "botero-carts-pensacola",
+      "probeResult": "unreachable",
+      "bestUrl": null,
+      "probeNotes": "https://boterocarts.com/inventory/: 403"
+    },
+    {
+      "slug": "golf-cart-megastore-sarasota",
+      "probeResult": "unreachable",
+      "bestUrl": null,
+      "probeNotes": "https://golfcartmegastore.com/inventory/: 404; https://golfcartmegastore.com/used-golf-carts/: 404; https://golfcartmegastore.com/new-golf-carts/: 404"
+    },
+    {
+      "slug": "wholesale-golf-carts-summerfield",
+      "probeResult": "unreachable",
+      "bestUrl": null,
+      "probeNotes": "https://wholesalegolfcarts.com/inventory/: read ECONNRESET; https://wholesalegolfcarts.com/golf-carts/: read ECONNRESET"
+    },
+    {
+      "slug": "north-florida-golf-carts-lake-city",
+      "probeResult": "unreachable",
+      "bestUrl": null,
+      "probeNotes": "https://northfloridagolfcarts.com/inventory/: write EPROTO C0EC2B339D7F0000:error:0A000438:SSL routines:ssl3_read_bytes:tlsv1 alert internal error:../deps/openssl/openssl/ssl/record/rec_layer_s3.c:1601:SSL alert number 80\n; https://northfloridagolfcarts.com/for-sale/: write EPROTO C0EC2B339D7F0000:error:0A000438:SSL routines:ssl3_read_bytes:tlsv1 alert internal error:../deps/openssl/openssl/ssl/record/rec_layer_s3.c:1601:SSL alert number 80\n"
+    },
+    {
+      "slug": "panama-city-golf-carts",
+      "probeResult": "unreachable",
+      "bestUrl": null,
+      "probeNotes": "https://panamacitygolfcarts.com/: getaddrinfo ENOTFOUND panamacitygolfcarts.com; https://panamacitygolfcarts.com/inventory/: getaddrinfo ENOTFOUND panamacitygolfcarts.com"
+    }
+  ],
+  "no_inventory": [
+    {
+      "slug": "coastal-golf-carts-port-orange",
+      "probeResult": "reachable_no_inventory",
+      "bestUrl": "https://coastalgolfcarts.com/inventory/",
+      "probeNotes": "Site reachable (200) but no inventory signals found. score=0"
+    },
+    {
+      "slug": "golf-cart-megastore-sun-city",
+      "probeResult": "reachable_no_inventory",
+      "bestUrl": "https://suncitycarts.com/inventory/",
+      "probeNotes": "Site reachable (200) but no inventory signals found. score=0"
+    },
+    {
+      "slug": "golf-cart-megastore-capital-carts",
+      "probeResult": "reachable_no_inventory",
+      "bestUrl": "https://capitalcarts.com/inventory/",
+      "probeNotes": "Site reachable (200) but no inventory signals found. score=0"
+    },
+    {
+      "slug": "budget-golf-carts-yulee",
+      "probeResult": "reachable_no_inventory",
+      "bestUrl": "https://budgetgolfcarts.com/inventory/",
+      "probeNotes": "Site reachable (202) but no inventory signals found. score=1"
+    }
+  ]
+}

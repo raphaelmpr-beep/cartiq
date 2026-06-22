@@ -275,7 +275,8 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
   const titleParts = [imp.year, brand, model].filter(Boolean);
   const title = titleParts.length > 0 ? titleParts.join(' ') : (rawTitle || `${imp.dealer_slug} listing`);
 
-  const dealRating = computeDealRating(imp.price, brand, imp.condition);
+  // deal_rating and valuation_confidence intentionally left as defaults (unknown/low)
+  // until comps are verified via the CartIQ admin valuation workflow.
   const slug = makeSlug(title, city, Date.now() % 1000000);
 
   const newListing = {
@@ -295,7 +296,8 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
     verified_at: imp.price ? new Date().toISOString() : null,
     last_checked_at: new Date().toISOString(),
     price_confidence: imp.price ? 'confirmed' : 'estimated',
-    deal_rating: dealRating,
+    deal_rating: 'unknown',           // always unknown on import — verify comps first
+    valuation_confidence: 'low',      // always low on import — set via admin after review
     status: 'active',
     public_listing: true,
     seller_type: 'dealer',

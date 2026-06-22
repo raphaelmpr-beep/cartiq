@@ -637,6 +637,94 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // GET /api/admin/coverage-audit — dealer coverage summary from dealer_coverage_log
+  // Falls back to a live DB aggregate when no log rows exist yet (pre-backfill state).
+  app.get("/api/admin/coverage-audit", requireAdmin, async (_req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      // Most-recent log row per dealer_slug
+      const { data: logRows, error: logErr } = await sb
+        .from("dealer_coverage_log")
+        .select("*")
+        .order("scanned_at", { ascending: false });
+
+      // Live listing counts per sync_source for the fallback / enrichment
+      const { data: liveCounts, error: liveErr } = await sb
+        .from("listings")
+        .select("sync_source, deal_rating")
+        .not("sync_source", "is", null);
+
+      // Live pending_import counts per dealer_slug
+      const { data: pendingCounts } = await sb
+        .from("pending_imports")
+        .select("dealer_slug")
+        .eq("status", "pending");
+
+      if (logErr || liveErr) return res.status(500).json({ error: logErr?.message || liveErr?.message });
+
+      // Build live aggregates
+      const liveBySource: Record<string, { total: number; allGreatDeal: boolean; greatDealCount: number }> = {};
+      for (const row of (liveCounts || [])) {
+        const k = row.sync_source;
+        if (!liveBySource[k]) liveBySource[k] = { total: 0, allGreatDeal: true, greatDealCount: 0 };
+        liveBySource[k].total++;
+        if (row.deal_rating === "great_deal") liveBySource[k].greatDealCount++;
+        if (row.deal_rating !== "great_deal") liveBySource[k].allGreatDeal = false;
+      }
+
+      const pendingByDealer: Record<string, number> = {};
+      for (const row of (pendingCounts || [])) {
+        pendingByDealer[row.dealer_slug] = (pendingByDealer[row.dealer_slug] || 0) + 1;
+      }
+
+      // Deduplicate log rows — keep most recent per dealer_slug
+      const latestByDealer: Record<string, any> = {};
+      for (const row of (logRows || [])) {
+        if (!latestByDealer[row.dealer_slug]) latestByDealer[row.dealer_slug] = row;
+      }
+
+      // Merge live data into log rows, add synthetic rows for sources with no log entry
+      const allDealers = new Set([
+        ...Object.keys(latestByDealer),
+        ...Object.keys(liveBySource),
+      ]);
+
+      const result = Array.from(allDealers).map(slug => {
+        const log = latestByDealer[slug] || null;
+        const live = liveBySource[slug] || { total: 0, allGreatDeal: false, greatDealCount: 0 };
+        const pending = pendingByDealer[slug] || 0;
+        const valuationReview = live.total > 0 && live.allGreatDeal;
+        return {
+          dealer_slug: slug,
+          inventory_url:          log?.inventory_url || null,
+          discovered_count:       log?.discovered_count || 0,
+          pending_imports_count:  pending,
+          public_listings_count:  live.total,
+          duplicate_count:        log?.duplicate_count || 0,
+          skipped_count:          log?.skipped_count || 0,
+          pagination_detected:    log?.pagination_detected || false,
+          pages_visited:          log?.pages_visited || 0,
+          load_more_detected:     log?.load_more_detected || false,
+          scroll_required:        log?.scroll_required || false,
+          detail_pages_visited:   log?.detail_pages_visited || 0,
+          source_page_type:       log?.source_page_type || null,
+          coverage_status:        log?.coverage_status || "needs_manual_review",
+          valuation_review_needed: valuationReview || log?.valuation_review_needed || false,
+          adapter_notes:          log?.adapter_notes || null,
+          scanned_at:             log?.scanned_at || null,
+        };
+      });
+
+      // Sort: active sources with listings first, then by slug
+      result.sort((a, b) => b.public_listings_count - a.public_listings_count || a.dealer_slug.localeCompare(b.dealer_slug));
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GET /api/admin/sync-log — recent sync activity
   app.get("/api/admin/sync-log", requireAdmin, async (_req, res) => {
     try {
