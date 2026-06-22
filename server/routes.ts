@@ -628,7 +628,11 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
     const title = imp.raw_title || [imp.year, imp.make, imp.model].filter(Boolean).join(" ") || "Unknown listing";
 
+    const baseSlug = slugify(`${imp.make || "cart"}-${imp.model || "listing"}-${imp.location_city || imp.dealer_slug || "fl"}`);
+    const slug = `${baseSlug}-${Date.now()}`;
+
     const newListing = {
+      slug,
       title,
       year:               imp.year        ?? null,
       brand:              imp.make        ?? null,
