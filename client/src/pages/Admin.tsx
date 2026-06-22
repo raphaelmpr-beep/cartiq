@@ -14,6 +14,7 @@ import { DealBadge } from "@/components/Badges";
 import { formatPrice } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import type { Listing, Dealer, InventorySource } from "@/lib/types";
+import InventoryCoverage from "@/pages/InventoryCoverage";
 
 // The admin token is whatever the user typed — never a compiled constant.
 // The server validates it; the client just forwards it.
@@ -629,6 +630,7 @@ export default function Admin() {
             <TabsTrigger value="dealers" data-testid="tab-dealers">Dealers ({dealers.length})</TabsTrigger>
             <TabsTrigger value="sources" data-testid="tab-sources">Inventory Sources</TabsTrigger>
             <TabsTrigger value="coverage" data-testid="tab-coverage">Coverage Audit</TabsTrigger>
+            <TabsTrigger value="inventory" data-testid="tab-inventory">Inventory Gap</TabsTrigger>
           </TabsList>
 
           {/* Listings Tab */}
@@ -766,6 +768,22 @@ export default function Admin() {
               </CardHeader>
               <CardContent>
                 <CoverageAudit adminToken={adminToken} />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Inventory Coverage Tab */}
+          <TabsContent value="inventory">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Inventory Gap Audit</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Full reconciliation: mapped dealers vs synced vs pending vs public search.
+                  Requires adapter_run_log DDL migration to be applied.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <InventoryCoverage adminToken={adminToken} />
               </CardContent>
             </Card>
           </TabsContent>

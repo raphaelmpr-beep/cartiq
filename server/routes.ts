@@ -728,6 +728,204 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // GET /api/admin/inventory-reconciliation — full inventory gap audit
+  app.get("/api/admin/inventory-reconciliation", requireAdmin, async (_req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      const [
+        { data: allListings },
+        { data: allDealers },
+        { data: allPending },
+        { data: syncLogs },
+        { data: coverageLogs },
+        adapterRunsResult,
+      ] = await Promise.all([
+        sb.from("listings").select("id,sync_source,source_type,dealer_id,status,public_listing,price_confidence,state").limit(2000),
+        sb.from("dealers").select("id,slug,name,state,city").limit(500),
+        sb.from("pending_imports").select("dealer_slug,status").limit(2000),
+        sb.from("sync_log").select("dealer_slug,status,synced_at,notes").order("synced_at", { ascending: false }).limit(500),
+        sb.from("dealer_coverage_log").select("dealer_slug,coverage_status,source_page_type,pagination_detected,pages_visited,load_more_detected,discovered_count,pending_imports_count,duplicate_count,scanned_at,adapter_notes,valuation_review_needed,inventory_url").order("scanned_at", { ascending: false }).limit(500),
+        sb.from("adapter_run_log").select("dealer_slug,status,coverage_status,source_page_type,discovered_count,inserted_pending_count,duplicate_count,skipped_count,started_at,notes,error_message").order("started_at", { ascending: false }).limit(500).then((r: any) => r).catch(() => ({ data: [] as any[] })),
+      ]);
+      const adapterRuns = (adapterRunsResult as any).data || [];
+
+      // Listings breakdown by sync_source
+      type ListingBucket = { active: number; inactive: number; pending_review: number; unavailable: number };
+      const listingsBySource: Record<string, ListingBucket> = {};
+      for (const l of (allListings || [])) {
+        const k = l.sync_source || "__manual__";
+        if (!listingsBySource[k]) listingsBySource[k] = { active: 0, inactive: 0, pending_review: 0, unavailable: 0 };
+        if (l.status === "active" && l.public_listing) listingsBySource[k].active++;
+        else if (l.status === "inactive") listingsBySource[k].inactive++;
+        else if (l.status === "pending_review") listingsBySource[k].pending_review++;
+        if (l.price_confidence === "unavailable") listingsBySource[k].unavailable++;
+      }
+
+      // Pending imports by dealer
+      type PendingBucket = { pending: number; imported: number; rejected: number; duplicate: number };
+      const pendingByDealer: Record<string, PendingBucket> = {};
+      for (const p of (allPending || [])) {
+        const k = p.dealer_slug;
+        if (!pendingByDealer[k]) pendingByDealer[k] = { pending: 0, imported: 0, rejected: 0, duplicate: 0 };
+        if (p.status === "pending") pendingByDealer[k].pending++;
+        else if (p.status === "imported") pendingByDealer[k].imported++;
+        else if (p.status === "rejected") pendingByDealer[k].rejected++;
+        else if (p.status === "duplicate") pendingByDealer[k].duplicate++;
+      }
+
+      // Last sync_log per dealer
+      const lastSyncByDealer: Record<string, any> = {};
+      for (const s of (syncLogs || [])) {
+        if (!lastSyncByDealer[s.dealer_slug]) lastSyncByDealer[s.dealer_slug] = s;
+      }
+
+      // Last adapter_run per dealer
+      const lastAdapterRun: Record<string, any> = {};
+      for (const r of adapterRuns) {
+        if (!lastAdapterRun[r.dealer_slug]) lastAdapterRun[r.dealer_slug] = r;
+      }
+
+      // Last coverage_log per dealer
+      const lastCoverage: Record<string, any> = {};
+      for (const r of (coverageLogs || [])) {
+        if (!lastCoverage[r.dealer_slug]) lastCoverage[r.dealer_slug] = r;
+      }
+
+      // Dealer lookup
+      const dealerBySlug: Record<string, any> = {};
+      for (const d of (allDealers || [])) dealerBySlug[d.slug] = d;
+
+      // Union of all known source slugs
+      const allSlugs = new Set([
+        ...Object.keys(listingsBySource).filter(k => k !== "__manual__"),
+        ...Object.keys(pendingByDealer),
+        ...Object.keys(lastSyncByDealer),
+        ...Object.keys(lastAdapterRun),
+      ]);
+
+      const byDealer: any[] = [];
+      const seenSlugs = new Set<string>();
+
+      for (const slug of Array.from(allSlugs).sort()) {
+        seenSlugs.add(slug);
+        const dealer = dealerBySlug[slug];
+        const listings = listingsBySource[slug] || { active: 0, inactive: 0, pending_review: 0, unavailable: 0 };
+        const pending = pendingByDealer[slug] || { pending: 0, imported: 0, rejected: 0, duplicate: 0 };
+        const lastSync = lastSyncByDealer[slug];
+        const lastRun = lastAdapterRun[slug];
+        const coverage = lastCoverage[slug];
+
+        let coverageStatus: string = coverage?.coverage_status || lastRun?.coverage_status || "not_synced";
+        if (listings.active > 0 && coverageStatus === "not_synced") coverageStatus = "needs_manual_review";
+
+        let actionNeeded = "none";
+        if (coverageStatus === "not_synced") actionNeeded = "run_discovery";
+        else if (coverageStatus === "partial_inventory") actionNeeded = "run_discovery";
+        else if (coverageStatus === "pagination_incomplete") actionNeeded = "handle_pagination";
+        else if (coverageStatus === "location_filter_needed") actionNeeded = "split_location_inventory";
+        else if (coverageStatus === "adapter_error" || coverageStatus === "blocked") actionNeeded = "fix_adapter";
+        else if (coverageStatus === "browser_required") actionNeeded = "run_discovery";
+        else if (coverageStatus === "featured_only") actionNeeded = "run_discovery";
+        else if (coverageStatus === "needs_manual_review" && listings.active === 0) actionNeeded = "run_discovery";
+        else if (pending.pending > 0) actionNeeded = "review_pending_imports";
+        else if (listings.inactive > 0) actionNeeded = "verify_public_listings";
+
+        let notes: string | null = coverage?.adapter_notes || lastRun?.notes || null;
+        if (coverage?.valuation_review_needed) notes = "[valuation_review_needed] " + (notes || "");
+
+        byDealer.push({
+          dealerSlug: slug,
+          dealerName: dealer?.name || slug,
+          state: dealer?.state || null,
+          city: dealer?.city || null,
+          inventoryUrl: coverage?.inventory_url || null,
+          publicActiveCount: listings.active,
+          publicInactiveCount: listings.inactive,
+          pendingReviewListingCount: listings.pending_review,
+          pendingImportCount: pending.pending + pending.imported + pending.rejected + pending.duplicate,
+          pendingReviewCount: pending.pending,
+          rejectedPendingCount: pending.rejected,
+          duplicatePendingCount: pending.duplicate,
+          importedCount: pending.imported,
+          lastSyncAt: lastSync?.synced_at || lastRun?.started_at || null,
+          lastSyncStatus: lastSync?.status || lastRun?.status || null,
+          lastDiscoveredCount: lastRun?.discovered_count ?? coverage?.discovered_count ?? null,
+          lastInsertedPendingCount: lastRun?.inserted_pending_count ?? coverage?.pending_imports_count ?? null,
+          lastDuplicateCount: lastRun?.duplicate_count ?? coverage?.duplicate_count ?? null,
+          lastSkippedCount: lastRun?.skipped_count ?? null,
+          coverageStatus,
+          actionNeeded,
+          notes,
+        });
+      }
+
+      // Dealers mapped in DB but never appeared in any activity
+      const flGaDealers = (allDealers || []).filter((d: any) => d.state === "FL" || d.state === "GA");
+      for (const dealer of flGaDealers) {
+        if (seenSlugs.has(dealer.slug)) continue;
+        byDealer.push({
+          dealerSlug: dealer.slug,
+          dealerName: dealer.name,
+          state: dealer.state,
+          city: dealer.city,
+          inventoryUrl: null,
+          publicActiveCount: 0,
+          publicInactiveCount: 0,
+          pendingReviewListingCount: 0,
+          pendingImportCount: 0,
+          pendingReviewCount: 0,
+          rejectedPendingCount: 0,
+          duplicatePendingCount: 0,
+          importedCount: 0,
+          lastSyncAt: null,
+          lastSyncStatus: null,
+          lastDiscoveredCount: null,
+          lastInsertedPendingCount: null,
+          lastDuplicateCount: null,
+          lastSkippedCount: null,
+          coverageStatus: "not_synced",
+          actionNeeded: "run_discovery",
+          notes: null,
+        });
+      }
+
+      byDealer.sort((a: any, b: any) => b.publicActiveCount - a.publicActiveCount || a.dealerSlug.localeCompare(b.dealerSlug));
+
+      const totals = {
+        mappedDealers:             flGaDealers.length,
+        dealersWithPublicListings: byDealer.filter((d: any) => d.publicActiveCount > 0).length,
+        dealersNeverSynced:        byDealer.filter((d: any) => d.coverageStatus === "not_synced").length,
+        publicActiveListings:      (allListings || []).filter((l: any) => l.status === "active" && l.public_listing).length,
+        publicActiveFlGa:          (allListings || []).filter((l: any) => l.status === "active" && l.public_listing && (l.state === "FL" || l.state === "GA")).length,
+        pendingImports:            (allPending || []).length,
+        pendingReview:             (allPending || []).filter((p: any) => p.status === "pending").length,
+        importedFromPending:       (allPending || []).filter((p: any) => p.status === "imported").length,
+        rejectedFromPending:       (allPending || []).filter((p: any) => p.status === "rejected").length,
+        inactiveListings:          (allListings || []).filter((l: any) => l.status === "inactive").length,
+        pendingReviewListings:     (allListings || []).filter((l: any) => l.status === "pending_review").length,
+        unavailableListings:       (allListings || []).filter((l: any) => l.price_confidence === "unavailable").length,
+        staleListings:             (allListings || []).filter((l: any) => l.price_confidence === "stale").length,
+        adapterErrors:             byDealer.filter((d: any) => d.coverageStatus === "adapter_error" || d.coverageStatus === "blocked").length,
+        partialCoverageDealers:    byDealer.filter((d: any) => ["partial_inventory","featured_only","pagination_incomplete","location_filter_needed","browser_required"].includes(d.coverageStatus)).length,
+        gapSummary: {
+          publicSearch:              (allListings || []).filter((l: any) => l.status === "active" && l.public_listing).length,
+          pendingNotPublished:       (allPending || []).filter((p: any) => p.status === "pending").length,
+          rejectedImports:           (allPending || []).filter((p: any) => p.status === "rejected").length,
+          inactiveHidden:            (allListings || []).filter((l: any) => l.status === "inactive").length,
+          pendingReviewHidden:       (allListings || []).filter((l: any) => l.status === "pending_review").length,
+          notSyncedDealers:          byDealer.filter((d: any) => d.coverageStatus === "not_synced").length,
+          partialDealers:            byDealer.filter((d: any) => ["partial_inventory","browser_required","featured_only","pagination_incomplete"].includes(d.coverageStatus)).length,
+        },
+      };
+
+      res.json({ totals, byDealer });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GET /api/admin/sync-log — recent sync activity
   app.get("/api/admin/sync-log", requireAdmin, async (_req, res) => {
     try {
