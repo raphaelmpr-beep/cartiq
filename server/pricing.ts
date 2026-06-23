@@ -1,13 +1,17 @@
-// CartIQ Market Value Algorithm (MVP)
-// Rules-based pricing engine. No machine learning.
-// Based on comparable golf cart attributes and market adjustments for FL/GA.
+// CartIQ Pricing Engine — Comp-Based IMV
+// =============================================================================
+// Inspired by CarGurus' Instant Market Value (IMV) approach:
+//   1. Use REAL comps from the DB as the primary price anchor
+//   2. Fall back to brand-tier × depreciation × feature formula only when no comps exist
+//   3. Deal ratings are anchored to market comps, not asking price
+// =============================================================================
 
 export interface PricingInput {
   askingPrice?: number | null;
   regularPrice?: number | null;
   salePrice?: number | null;
   deliveryCost?: number | null;
-  deliveryIncluded?: boolean;
+  deliveryIncluded?: boolean | null;
   deliveryAvailable?: string | boolean | null;
   year?: number | null;
   brand?: string | null;
@@ -19,11 +23,11 @@ export interface PricingInput {
   seating?: number | null;
   lifted?: boolean | string | null;
   streetLegalClaimed?: boolean | string | null;
-  chargerIncluded?: string | null;
-  warrantyIncluded?: string | null;
+  chargerIncluded?: string | boolean | null;
+  warrantyIncluded?: string | boolean | null;
   warrantyProvider?: string | null;
   warrantyMonths?: number | null;
-  batteryWarrantyIncluded?: string | null;
+  batteryWarrantyIncluded?: string | boolean | null;
   sellerType?: string | null;
   state?: string | null;
   city?: string | null;
@@ -31,9 +35,26 @@ export interface PricingInput {
   condition?: string | null;
 }
 
+export interface CompListing {
+  asking_price: number;
+  year?: number | null;
+  power_type?: string | null;
+  battery_type?: string | null;
+  seating?: number | null;
+  lifted?: boolean | null;
+  warranty_included?: string | boolean | null;
+  charger_included?: string | boolean | null;
+  delivery_available?: boolean | null;
+}
+
+export interface IMVResult {
+  imv: number;
+  priceConfidence: "high" | "medium" | "low";
+  compCount: number;
+  compTier: 1 | 2 | 3 | 4;
+}
+
 export interface PriceToImprove {
-  // Dollar reduction from current total delivered cost needed to reach each rating.
-  // null means the listing already meets or beats that threshold.
   toFairPrice: number | null;
   toGoodDeal: number | null;
   toGreatDeal: number | null;
@@ -50,198 +71,362 @@ export interface PricingResult {
   dealDeltaPercent: number;
   dealRating: string;
   buyerScore: number;
+  priceConfidence: string;
   batteryRisk: string;
   chargerWarning: string | null;
   warrantySignal: string | null;
   streetLegalConfidence: string;
   redFlags: string[];
   questionsToAsk: string[];
-  /** Negotiation range anchored to CartIQ Market Value */
   negotiationLow: number;
   negotiationHigh: number;
-  /**
-   * For listings rated High Price or Over Market: how much the buyer would need
-   * to reduce the total delivered cost to reach each better rating.
-   * null entries mean that rating is already achieved.
-   */
   priceToImprove: PriceToImprove;
 }
 
-// ── Base market value estimator ──────────────────────────────────────────────
-// Derives CartIQ Market Value from cart attributes.
-// This is NOT the asking price — it is an independent estimate of fair market value.
-function estimateBaseValue(input: PricingInput): number {
-  const year = input.year || 2018;
-  const age = new Date().getFullYear() - year;
-  const isNew = (input.condition as string | undefined) === "new";
+// =============================================================================
+// Brand Tier Bases (FL/GA dealer new cart market, 2026 baseline)
+// =============================================================================
+const BRAND_TIERS: Record<string, { base: number; tier: string }> = {
+  // Premium — high resale, strong dealer network
+  "club car":   { base: 13500, tier: "premium" },
+  "e-z-go":     { base: 13000, tier: "premium" },
+  "ezgo":       { base: 13000, tier: "premium" },
+  "yamaha":     { base: 12500, tier: "premium" },
+  // Standard — solid market penetration, known brands
+  "icon":       { base: 11500, tier: "standard" },
+  "star ev":    { base: 11000, tier: "standard" },
+  "advanced ev":{ base: 11000, tier: "standard" },
+  "epic":       { base: 12000, tier: "standard" },
+  "evolution":  { base: 11000, tier: "standard" },
+  "cushman":    { base: 12000, tier: "standard" },
+  // Value — newer brands with growing FL/GA footprint
+  "bintelli":   { base: 10500, tier: "value" },
+  "madjax":     { base: 9500,  tier: "value" },
+  "teko ev":    { base: 10500, tier: "value" },
+  "teko":       { base: 10000, tier: "value" },
+  "dach":       { base: 10500, tier: "value" },
+  "sivo":       { base: 10000, tier: "value" },
+  "tara":       { base: 9500,  tier: "value" },
+  "verdi":      { base: 9500,  tier: "value" },
+  "whisper":    { base: 9000,  tier: "value" },
+  "venom":      { base: 9000,  tier: "value" },
+  "gem":        { base: 10000, tier: "value" },
+  "blue cell":  { base: 9500,  tier: "value" },
+  "denago":     { base: 9500,  tier: "value" },
+  "star":       { base: 10000, tier: "value" },
+};
+const BUDGET_BASE = 7500;
+const UNKNOWN_BASE = 8000;
 
-  // New dealer carts: MSRP is the market. Estimate = asking price.
-  if (isNew && input.sellerType === "dealer") {
-    const effectivePrice = input.salePrice ?? input.askingPrice ?? input.regularPrice ?? 0;
-    if (effectivePrice > 0) return effectivePrice;
+function getBrandBase(brand: string | null | undefined): number {
+  if (!brand) return UNKNOWN_BASE;
+  const b = brand.toLowerCase().trim();
+  for (const [key, val] of Object.entries(BRAND_TIERS)) {
+    if (b.includes(key) || key.includes(b)) return val.base;
   }
+  return BUDGET_BASE;
+}
 
-  // Brand tier multipliers
-  const premiumBrands = [
-    "club car", "yamaha", "e-z-go", "ezgo", "star ev", "evolution",
-    "teko", "venom", "dach", "verdi", "kandi", "whisper",
-  ];
-  const midBrands = ["icon", "advanced ev", "tomberlin", "bintelli"];
-  const budgetBrands = ["crickett", "barefoot", "jakes"];
+// =============================================================================
+// Year depreciation multiplier — anchored to 2026 = 1.0
+// New carts from dealers trade near MSRP so 2026/2027 are at or above 1.0
+// =============================================================================
+const YEAR_MULT: Record<number, number> = {
+  2027: 1.05,
+  2026: 1.00,
+  2025: 0.90,
+  2024: 0.82,
+  2023: 0.75,
+  2022: 0.68,
+  2021: 0.62,
+  2020: 0.56,
+  2019: 0.50,
+  2018: 0.44,
+};
+function getYearMult(year: number | null | undefined): number {
+  if (!year) return 0.70;
+  if (year >= 2027) return 1.05;
+  if (year <= 2017) return 0.38;
+  return YEAR_MULT[year] ?? 0.56;
+}
 
-  const brandLower = (input.brand || "").toLowerCase();
-  let brandMultiplier = 1.0;
-  if (premiumBrands.some((b) => brandLower.includes(b))) brandMultiplier = 1.15;
-  else if (midBrands.some((b) => brandLower.includes(b))) brandMultiplier = 1.05;
-  else if (budgetBrands.some((b) => brandLower.includes(b))) brandMultiplier = 0.9;
+// =============================================================================
+// Condition multiplier — used only for formula tier (comps already match condition)
+// =============================================================================
+function getConditionMult(condition: string | null | undefined): number {
+  const c = (condition || "new").toLowerCase();
+  if (c === "new") return 1.00;
+  if (c === "demo") return 0.88;
+  if (c === "refurbished") return 0.72;
+  if (c === "used") return 0.56;
+  return 0.90;
+}
 
-  // Base value by power type
-  const powerType = (input.powerType || "electric").toLowerCase();
-  let baseValue = powerType === "gas" ? 6500 : 7500;
+// =============================================================================
+// Feature adjustments (additive dollars, applied after base × year × condition)
+// =============================================================================
+function featureAdjustments(input: PricingInput): number {
+  let adj = 0;
+  const power = (input.powerType || "").toLowerCase();
+  const battery = (input.batteryType || "").toLowerCase();
 
-  // Battery type adjustment
-  const batteryType = (input.batteryType || "unknown").toLowerCase();
-  if (batteryType === "lithium") baseValue += 2000;
-  else if (batteryType === "lead_acid") baseValue -= 500;
+  if (power === "electric" && battery === "lithium") adj += 1200;
+  else if (power === "electric") adj += 400;
+  // gas: no adjustment
 
-  // Battery Ah adjustment
-  const ah = input.batteryAh || 0;
-  if (ah >= 150) baseValue += 800;
-  else if (ah >= 105) baseValue += 300;
-  else if (ah > 0 && ah < 75) baseValue -= 400;
-
-  // Age depreciation: ~8% per year, floor at 30% of base
-  const depreciationFactor = isNew ? 1.0 : Math.max(0.3, 1 - age * 0.08);
-  baseValue *= depreciationFactor;
-
-  // Seating
   const seating = input.seating || 4;
-  if (seating >= 6) baseValue += 1200;
-  else if (seating <= 2) baseValue -= 300;
+  if (seating >= 6) adj += 1500;
+  else if (seating <= 2) adj -= 500;
 
-  // Lifted
-  const lifted = input.lifted === true || input.lifted === "yes";
-  if (lifted) baseValue += 600;
+  if (input.lifted === true || input.lifted === "yes") adj += 600;
+  if (toBool(input.chargerIncluded)) adj += 200;
+  if (toBool(input.warrantyIncluded)) adj += 300;
 
-  // Street legal
-  const streetLegal = input.streetLegalClaimed === true || input.streetLegalClaimed === "yes";
-  if (streetLegal) baseValue += 500;
-
-  return Math.round(brandMultiplier * baseValue);
+  return adj;
 }
 
-function toBool(val: string | boolean | null | undefined, trueVals = ["yes", "true"]): boolean | null {
-  if (val === null || val === undefined) return null;
-  if (typeof val === "boolean") return val;
-  return trueVals.includes(val.toLowerCase());
-}
+// =============================================================================
+// computeIMV — Tiered comp-based market value
+// comps: array of active listings with same brand+model, year±1, same condition
+// =============================================================================
+export function computeIMV(input: PricingInput, comps: CompListing[]): IMVResult {
+  const validComps = comps.filter(c => c.asking_price > 500 && c.asking_price < 100000);
 
-// ── Deal rating thresholds ────────────────────────────────────────────────────
-// Anchored to CartIQ Market Value, based on total delivered cost.
-const THRESHOLDS = {
-  GREAT_DEAL: -0.15,   // 15%+ below market
-  GOOD_DEAL:  -0.05,   // 5–15% below market
-  FAIR_PRICE:  0.05,   // within 5% of market
-  HIGH_PRICE:  0.15,   // 5–15% above market
-  // over_market: > 15% above
-} as const;
-
-// ── Price-to-improve calculator ───────────────────────────────────────────────
-// Returns the dollar reduction in total delivered cost needed to reach each rating.
-// null = already at or better than that threshold.
-function calcPriceToImprove(
-  totalDeliveredCost: number,
-  cartiqMarketValue: number
-): PriceToImprove {
-  if (cartiqMarketValue <= 0) {
-    return { toFairPrice: null, toGoodDeal: null, toGreatDeal: null };
+  // ── Tier 1: ≥3 direct comps — use trimmed median ─────────────────────────
+  if (validComps.length >= 3) {
+    const prices = validComps.map(c => c.asking_price).sort((a, b) => a - b);
+    // Trim top/bottom 10% outliers (CarGurus-style)
+    const trim = Math.floor(prices.length * 0.10);
+    const trimmed = prices.slice(trim, prices.length - trim || undefined);
+    const imv = Math.round(median(trimmed));
+    return {
+      imv,
+      priceConfidence: validComps.length >= 8 ? "high" : "medium",
+      compCount: validComps.length,
+      compTier: 1,
+    };
   }
 
-  // Price ceilings for each rating (total delivered cost must not exceed these)
-  const fairPriceCeiling  = Math.round(cartiqMarketValue * (1 + THRESHOLDS.FAIR_PRICE));
-  const goodDealCeiling   = Math.round(cartiqMarketValue * (1 + THRESHOLDS.GOOD_DEAL));
-  const greatDealCeiling  = Math.round(cartiqMarketValue * (1 + THRESHOLDS.GREAT_DEAL));
+  // ── Tier 2: 1–2 comps — use comp average + formula blend ─────────────────
+  if (validComps.length >= 1) {
+    const compAvg = validComps.reduce((s, c) => s + c.asking_price, 0) / validComps.length;
+    const formulaIMV = computeFormulaIMV(input);
+    // 60% comp / 40% formula when few comps
+    const imv = Math.round(compAvg * 0.60 + formulaIMV * 0.40);
+    return { imv, priceConfidence: "medium", compCount: validComps.length, compTier: 2 };
+  }
 
-  const toFairPrice  = totalDeliveredCost > fairPriceCeiling  ? totalDeliveredCost - fairPriceCeiling  : null;
-  const toGoodDeal   = totalDeliveredCost > goodDealCeiling   ? totalDeliveredCost - goodDealCeiling   : null;
-  const toGreatDeal  = totalDeliveredCost > greatDealCeiling  ? totalDeliveredCost - greatDealCeiling  : null;
-
-  return { toFairPrice, toGoodDeal, toGreatDeal };
+  // ── Tier 3: No comps — pure formula ──────────────────────────────────────
+  const imv = computeFormulaIMV(input);
+  return { imv, priceConfidence: "low", compCount: 0, compTier: imv > 0 ? 3 : 4 };
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+function computeFormulaIMV(input: PricingInput): number {
+  const base      = getBrandBase(input.brand);
+  const yearMult  = getYearMult(input.year);
+  const condMult  = getConditionMult(input.condition);
+  const adj       = featureAdjustments(input);
+
+  // Dealer new-cart premium: dealers price ~3% above open-market
+  const sellerPremium = (input.condition === "new" && input.sellerType === "dealer") ? 1.03 : 1.0;
+
+  return Math.round(base * yearMult * condMult * sellerPremium + adj);
+}
+
+// =============================================================================
+// computeDealRating — Based on TDC vs IMV
+// =============================================================================
+export function computeDealRating(
+  askingPrice: number,
+  imv: number,
+  deliveryCost = 0
+): { dealRating: string; dealDelta: number; tdc: number } {
+  const tdc = askingPrice + deliveryCost;
+  const delta = tdc - imv;
+  const pct = imv > 0 ? delta / imv : 0;
+
+  let dealRating: string;
+  if (askingPrice <= 0 || imv <= 0) {
+    dealRating = "unknown";
+  } else if (pct <= -0.15) {
+    dealRating = "great_deal";
+  } else if (pct <= -0.05) {
+    dealRating = "good_deal";
+  } else if (pct <= 0.05) {
+    dealRating = "fair_price";
+  } else if (pct <= 0.15) {
+    dealRating = "high_price";
+  } else {
+    dealRating = "over_market";
+  }
+
+  return { dealRating, dealDelta: delta, tdc };
+}
+
+// =============================================================================
+// computeBuyerScore — 0–100 composite (CarGurus-inspired)
+// =============================================================================
+export function computeBuyerScore(input: PricingInput, dealRating: string): number {
+  let score = 0;
+
+  // ── Deal component (50 pts) ───────────────────────────────────────────────
+  const dealPts: Record<string, number> = {
+    great_deal: 50, good_deal: 40, fair_price: 30,
+    high_price: 15, over_market: 5, unknown: 22,
+  };
+  score += dealPts[dealRating] ?? 22;
+
+  // ── Battery/power component (20 pts) ─────────────────────────────────────
+  const battery = (input.batteryType || "").toLowerCase();
+  const power   = (input.powerType || "").toLowerCase();
+  const age     = input.batteryAgeMonths;
+  if (power === "gas") {
+    score += 10;
+  } else if (battery === "lithium") {
+    if (age != null && age <= 12) score += 20;
+    else if (age == null)          score += 15;
+    else if (age <= 24)            score += 12;
+    else                           score += 8;
+  } else if (battery === "lead_acid") {
+    if (age != null && age < 24) score += 8;
+    else                         score += 4;
+  } else {
+    // unknown battery
+    score += 6;
+  }
+
+  // ── Warranty component (15 pts) ───────────────────────────────────────────
+  const warrantyIncluded = toBool(input.warrantyIncluded);
+  const warrantyMonths   = input.warrantyMonths;
+  if (warrantyIncluded === true) {
+    score += (warrantyMonths != null && warrantyMonths >= 36) ? 15 : 10;
+  } else if (warrantyIncluded === false) {
+    score += 0;
+  } else {
+    score += 5; // unknown
+  }
+
+  // ── Charger component (10 pts) ────────────────────────────────────────────
+  const charger = toBool(input.chargerIncluded);
+  if (charger === true)        score += 10;
+  else if (charger === false)  score += 0;
+  else                         score += 5;
+
+  // ── Delivery component (5 pts) ────────────────────────────────────────────
+  const delivery = input.deliveryAvailable === true
+    || input.deliveryAvailable === "yes"
+    || input.deliveryIncluded === true;
+  score += delivery ? 5 : 2;
+
+  return Math.max(0, Math.min(100, score));
+}
+
+// =============================================================================
+// enrichListing — Main entry point called at write time and in reprice-all
+// Returns the pricing fields to persist to Supabase
+// =============================================================================
+export function enrichListing(
+  listing: Record<string, any>,
+  comps: CompListing[]
+): {
+  cartiq_estimated_value: number;
+  deal_rating: string;
+  deal_delta: number;
+  buyer_score: number;
+  price_confidence: string;
+  valuation_confidence: string;
+  estimated_delivery_cost: number | null;
+  total_delivered_cost: number | null;
+} {
+  const input = listingToInput(listing);
+  const effectivePrice = input.salePrice ?? input.askingPrice ?? 0;
+
+  if (!effectivePrice || effectivePrice <= 0) {
+    return {
+      cartiq_estimated_value: 0,
+      deal_rating: "unknown",
+      deal_delta: 0,
+      buyer_score: 25,
+      price_confidence: "low",
+      valuation_confidence: "low",
+      estimated_delivery_cost: null,
+      total_delivered_cost: null,
+    };
+  }
+
+  const { imv, priceConfidence, compTier } = computeIMV(input, comps);
+
+  // Delivery cost for TDC
+  const offersDelivery = listing.delivery_available === true || listing.delivery_included === true;
+  let deliveryCost = 0;
+  if (offersDelivery) {
+    deliveryCost = listing.estimated_delivery_cost
+      ?? listing.delivery_included ? 0 : 350;
+  }
+
+  const { dealRating, dealDelta, tdc } = computeDealRating(effectivePrice, imv, deliveryCost);
+  const buyerScore = computeBuyerScore(input, dealRating);
+
+  const valConfidence: string =
+    compTier === 1 ? "high" :
+    compTier === 2 ? "medium" :
+    "low";
+
+  return {
+    cartiq_estimated_value: imv,
+    deal_rating: dealRating,
+    deal_delta: dealDelta,
+    buyer_score: buyerScore,
+    price_confidence: priceConfidence,
+    valuation_confidence: valConfidence,
+    estimated_delivery_cost: offersDelivery ? deliveryCost : null,
+    total_delivered_cost: offersDelivery ? tdc : null,
+  };
+}
+
+// =============================================================================
+// calculateCartIQValue — Legacy single-listing API (Deal Checker)
+// Now uses the same IMV engine but with no comp data (pure formula fallback)
+// =============================================================================
 export function calculateCartIQValue(input: PricingInput): PricingResult {
   const redFlags: string[] = [];
   const questionsToAsk: string[] = [];
 
-  // ── Effective price ─────────────────────────────────────────────────────────
   const effectivePrice = input.salePrice ?? input.askingPrice ?? input.regularPrice ?? 0;
 
-  // ── Delivery cost ───────────────────────────────────────────────────────────
-  // Important: delivery cost can reduce or eliminate a deal advantage.
-  // If delivery is unknown, we use a conservative estimate for scoring but flag it.
+  // Delivery
   const deliveryIncluded = input.deliveryIncluded === true;
-  const deliveryKnown =
-    deliveryIncluded ||
-    (typeof input.deliveryCost === "number" && input.deliveryCost >= 0);
-
+  const deliveryKnown = deliveryIncluded || (typeof input.deliveryCost === "number" && input.deliveryCost >= 0);
   let estimatedDeliveryCost = 0;
   if (deliveryIncluded) {
     estimatedDeliveryCost = 0;
   } else if (typeof input.deliveryCost === "number" && input.deliveryCost >= 0) {
     estimatedDeliveryCost = input.deliveryCost;
   } else {
-    // Unknown — conservative estimate used only for internal scoring
-    estimatedDeliveryCost = 350;
+    estimatedDeliveryCost = 350; // conservative unknown estimate
   }
-
-  // totalDeliveredCost is the true cost to the buyer and the basis for ALL ratings.
   const totalDeliveredCost = effectivePrice + estimatedDeliveryCost;
 
-  // ── CartIQ Market Value ─────────────────────────────────────────────────────
-  const cartiqMarketValue = estimateBaseValue(input);
-
-  // ── Deal delta ──────────────────────────────────────────────────────────────
-  // Positive = over market (buyer is paying more than market value).
-  // Negative = below market (good for buyer).
-  const dealDelta = totalDeliveredCost - cartiqMarketValue;
+  // IMV — no comps available in Deal Checker, use formula
+  const { imv: cartiqMarketValue, priceConfidence } = computeIMV(input, []);
+  const { dealRating, dealDelta } = computeDealRating(effectivePrice, cartiqMarketValue, estimatedDeliveryCost);
   const dealDeltaPercent = cartiqMarketValue > 0 ? dealDelta / cartiqMarketValue : 0;
+  const buyerScore = computeBuyerScore(input, dealRating);
 
-  // ── Deal rating ─────────────────────────────────────────────────────────────
-  let dealRating = "unknown";
-  if (effectivePrice === 0) {
-    dealRating = "unknown";
-  } else if (dealDeltaPercent <= THRESHOLDS.GREAT_DEAL) {
-    dealRating = "great_deal";
-  } else if (dealDeltaPercent <= THRESHOLDS.GOOD_DEAL) {
-    dealRating = "good_deal";
-  } else if (dealDeltaPercent <= THRESHOLDS.FAIR_PRICE) {
-    dealRating = "fair_price";
-  } else if (dealDeltaPercent <= THRESHOLDS.HIGH_PRICE) {
-    dealRating = "high_price";
-  } else {
-    dealRating = "over_market";
-  }
-
-  // ── Battery logic ───────────────────────────────────────────────────────────
-  // Old or unknown lead-acid batteries reduce buyer score and are flagged.
-  // Battery condition does NOT change CartIQ Market Value (it's an attribute of the cart
-  // being priced, not a comps adjustment) but it does affect buyer confidence.
+  // Battery risk
   const batteryType = (input.batteryType || "unknown").toLowerCase();
+  const powerType   = (input.powerType || "unknown").toLowerCase();
   const batteryAgeMonths = input.batteryAgeMonths;
-  const chargerIncluded = input.chargerIncluded || "unknown";
+  const chargerIncluded  = toBoolStr(input.chargerIncluded);
   const lifted = toBool(input.lifted) ?? false;
   const seating = input.seating || 4;
   const ah = input.batteryAh || 0;
-  const powerType = (input.powerType || "unknown").toLowerCase();
 
   let batteryRisk = "unknown";
-  if (powerType === "electric" || batteryType !== "gas") {
+  if (powerType !== "gas") {
     if (batteryType === "lead_acid" && (batteryAgeMonths == null || batteryAgeMonths > 48)) {
       batteryRisk = "high";
-      redFlags.push(
-        "Lead-acid battery age is unknown or over 4 years. Factor in replacement cost (~$800–$1,500)."
-      );
+      redFlags.push("Lead-acid battery age is unknown or over 4 years. Factor in replacement cost (~$800–$1,500).");
     } else if (batteryType === "unknown") {
       batteryRisk = "high";
       redFlags.push("Battery type is unknown. Verify before purchasing.");
@@ -252,135 +437,78 @@ export function calculateCartIQValue(input: PricingInput): PricingResult {
     } else if (batteryType === "lithium" && ah > 0) {
       batteryRisk = "low";
     }
-
-    // Ah caution for larger or lifted setups
     if (ah > 0 && ah <= 105 && (seating >= 6 || lifted)) {
-      redFlags.push(
-        `Battery size (${ah}Ah) may be light for this setup. Confirm real-world range with passengers and accessories.`
-      );
+      redFlags.push(`Battery size (${ah}Ah) may be light for this setup.`);
     }
   }
 
-  // ── Charger logic ────────────────────────────────────────────────────────────
+  // Charger
   let chargerWarning: string | null = null;
   if (chargerIncluded === "no") {
     chargerWarning = "Charger not included. Confirm compatible charger cost before buying.";
     redFlags.push(chargerWarning);
   } else if (chargerIncluded === "unknown") {
     chargerWarning = "Charger inclusion unknown.";
-    questionsToAsk.push(
-      "Is the correct charger included and matched to the battery type and voltage?"
-    );
+    questionsToAsk.push("Is the correct charger included and matched to the battery type and voltage?");
   }
 
-  // ── Warranty logic ──────────────────────────────────────────────────────────
-  // Warranty improves buyer confidence (score) but does NOT improve the deal rating.
-  // A cart with a warranty is still Over Market if the price is over market.
-  const warrantyIncluded = input.warrantyIncluded || "unknown";
-  const batteryWarrantyIncluded = input.batteryWarrantyIncluded || "unknown";
+  // Warranty
+  const warrantyIncluded = toBoolStr(input.warrantyIncluded);
   let warrantySignal: string | null = null;
-
   if (warrantyIncluded === "yes") {
     warrantySignal = "warranty_included";
   } else if (warrantyIncluded === "no") {
     warrantySignal = "no_warranty";
     if (input.sellerType === "dealer" || input.sellerType === "retail") {
-      redFlags.push(
-        "No warranty listed for a dealer or retail cart. Treat as as-is unless confirmed otherwise in writing."
-      );
+      redFlags.push("No warranty listed for a dealer cart. Treat as as-is unless confirmed in writing.");
     } else {
-      redFlags.push("No warranty listed. Treat the cart as as-is unless the seller confirms otherwise in writing.");
+      redFlags.push("No warranty listed. Treat as as-is unless the seller confirms in writing.");
     }
   } else {
     warrantySignal = "warranty_unknown";
-    questionsToAsk.push(
-      "Is any dealer, manufacturer, battery, retailer, or third-party warranty included?"
-    );
+    questionsToAsk.push("Is any dealer, manufacturer, battery, or third-party warranty included?");
   }
 
-  if (batteryType === "lithium" && batteryWarrantyIncluded === "unknown") {
-    questionsToAsk.push(
-      "Is there a separate lithium battery warranty, and is it transferable?"
-    );
+  if (batteryType === "lithium" && (input.batteryWarrantyIncluded === "unknown" || input.batteryWarrantyIncluded == null)) {
+    questionsToAsk.push("Is there a separate lithium battery warranty, and is it transferable?");
   }
 
-  // ── Street legal logic ───────────────────────────────────────────────────────
+  // Street legal
   const streetLegalClaimed = toBool(input.streetLegalClaimed) ?? false;
-  let streetLegalConfidence = "unknown";
-  if (!streetLegalClaimed) {
-    streetLegalConfidence = "low";
-  } else {
-    streetLegalConfidence = "low"; // claimed but not verified
-    redFlags.push(
-      "Seller claims street legal, but title/VIN/registration are not confirmed."
-    );
+  let streetLegalConfidence = "low";
+  if (streetLegalClaimed) {
+    redFlags.push("Seller claims street legal, but title/VIN/registration are not confirmed.");
     questionsToAsk.push("Is there a title and VIN for this cart?");
     questionsToAsk.push("Is it registered as a Low-Speed Vehicle (LSV)?");
     questionsToAsk.push("Does it have a plate?");
-    questionsToAsk.push(
-      "Are seat belts, mirrors, turn signals, brake lights, and windshield all present?"
-    );
+    questionsToAsk.push("Are seat belts, mirrors, turn signals, brake lights, and windshield all present?");
   }
 
-  // ── Buyer score ──────────────────────────────────────────────────────────────
-  // 0–100. Reflects overall purchase confidence, not deal price.
-  // Battery unknowns and old lead-acid are significant negatives.
-  // Warranty improves confidence but does not affect deal rating.
-  let score = 70;
-
-  // Positive signals
-  if (batteryType === "lithium" && ah > 0) score += 10;
-  if (chargerIncluded === "yes") score += 5;
-  if (streetLegalConfidence === "high") score += 5;
-  if (input.sellerType === "dealer") score += 5;
-  const deliveryAvailStr = typeof input.deliveryAvailable === "string" ? input.deliveryAvailable : "";
-  if (input.deliveryIncluded || deliveryAvailStr === "yes" || input.deliveryAvailable === true) score += 5;
-  if (dealDelta < 0 && effectivePrice > 0) score += 5;   // below market
-  if (batteryAgeMonths != null) score += 5;               // age disclosed
-  if (warrantyIncluded === "yes") score += 5;
-  if (batteryWarrantyIncluded === "yes") score += 5;
-  if (input.warrantyProvider === "manufacturer" || input.warrantyProvider === "retailer") score += 5;
-
-  // Negative signals
-  // Old/unknown lead-acid: major penalty — significant hidden cost risk
-  if (batteryType === "lead_acid" && (batteryAgeMonths == null || batteryAgeMonths > 48)) score -= 15;
-  // Unknown battery type
-  if (batteryType === "unknown" && powerType === "electric") score -= 10;
-  if (chargerIncluded === "no" || chargerIncluded === "unknown") score -= 10;
-  if (streetLegalClaimed && streetLegalConfidence !== "high") score -= 10;
-  if (dealRating === "over_market") score -= 10;
-  if (!input.deliveryIncluded && !deliveryKnown) score -= 5;  // unknown delivery cost
-  if (!ah && batteryType !== "gas") score -= 5;               // Ah unknown
-  if (lifted && ah > 0 && ah <= 105) score -= 5;              // underpowered for lift
-  if (warrantyIncluded === "no" && (input.sellerType === "dealer" || input.sellerType === "retail")) score -= 5;
-  if (input.sellerType === "retail" && !input.lastVerifiedAt) score -= 5;
-
-  score = Math.max(0, Math.min(100, score));
-
-  // ── Negotiation range ────────────────────────────────────────────────────────
-  // Anchored to CartIQ Market Value (not asking price).
-  // negotiationHigh: the most a buyer should reasonably pay (market + 2% tolerance)
-  // negotiationLow:  aggressive opening offer (12% below market)
+  // Negotiation range
   const negotiationHigh = Math.round(cartiqMarketValue * 1.02);
   const negotiationLow  = Math.round(cartiqMarketValue * 0.88);
 
-  // ── Price to improve rating ──────────────────────────────────────────────────
-  // Only meaningful when the listing is above market. Shows the buyer exactly how
-  // much the seller needs to come down to reach each better rating.
-  // Based on total delivered cost, NOT asking price alone.
-  const effectiveTotalForImprove = deliveryKnown ? totalDeliveredCost : effectivePrice + estimatedDeliveryCost;
-  const priceToImprove = calcPriceToImprove(effectiveTotalForImprove, cartiqMarketValue);
+  // Price to improve
+  const fairCeil  = Math.round(cartiqMarketValue * 1.05);
+  const goodCeil  = Math.round(cartiqMarketValue * 0.95);
+  const greatCeil = Math.round(cartiqMarketValue * 0.85);
+  const priceToImprove: PriceToImprove = {
+    toFairPrice:  totalDeliveredCost > fairCeil  ? totalDeliveredCost - fairCeil  : null,
+    toGoodDeal:   totalDeliveredCost > goodCeil  ? totalDeliveredCost - goodCeil  : null,
+    toGreatDeal:  totalDeliveredCost > greatCeil ? totalDeliveredCost - greatCeil : null,
+  };
 
   return {
     cartiqMarketValue,
-    cartiqEstimatedValue: cartiqMarketValue, // backward-compat alias
+    cartiqEstimatedValue: cartiqMarketValue,
     effectivePrice,
     estimatedDeliveryCost: deliveryKnown ? estimatedDeliveryCost : -1,
     totalDeliveredCost: deliveryKnown ? totalDeliveredCost : -1,
     dealDelta,
     dealDeltaPercent,
     dealRating,
-    buyerScore: score,
+    buyerScore,
+    priceConfidence,
     batteryRisk,
     chargerWarning,
     warrantySignal,
@@ -390,5 +518,62 @@ export function calculateCartIQValue(input: PricingInput): PricingResult {
     negotiationLow,
     negotiationHigh,
     priceToImprove,
+  };
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+function median(arr: number[]): number {
+  if (!arr.length) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+function toBool(val: string | boolean | null | undefined): boolean | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "boolean") return val;
+  const v = val.toString().toLowerCase();
+  if (["yes", "true", "1"].includes(v)) return true;
+  if (["no", "false", "0"].includes(v)) return false;
+  return null;
+}
+
+function toBoolStr(val: string | boolean | null | undefined): "yes" | "no" | "unknown" {
+  const b = toBool(val);
+  if (b === true) return "yes";
+  if (b === false) return "no";
+  return "unknown";
+}
+
+function listingToInput(listing: Record<string, any>): PricingInput {
+  return {
+    askingPrice:           listing.asking_price,
+    salePrice:             listing.sale_price,
+    regularPrice:          listing.regular_price,
+    deliveryCost:          listing.estimated_delivery_cost,
+    deliveryIncluded:      listing.delivery_included,
+    deliveryAvailable:     listing.delivery_available,
+    year:                  listing.year,
+    brand:                 listing.brand,
+    model:                 listing.model,
+    powerType:             listing.power_type,
+    batteryType:           listing.battery_type,
+    batteryAh:             listing.battery_ah,
+    batteryAgeMonths:      listing.battery_age_months,
+    seating:               listing.seating,
+    lifted:                listing.lifted,
+    streetLegalClaimed:    listing.street_legal_claimed,
+    chargerIncluded:       listing.charger_included,
+    warrantyIncluded:      listing.warranty_included,
+    warrantyProvider:      listing.warranty_provider,
+    warrantyMonths:        listing.warranty_months,
+    batteryWarrantyIncluded: listing.battery_warranty_included,
+    sellerType:            listing.seller_type,
+    state:                 listing.state,
+    condition:             listing.condition,
   };
 }

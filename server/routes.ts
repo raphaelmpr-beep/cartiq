@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { calculateCartIQValue } from "./pricing";
+import { calculateCartIQValue, enrichListing } from "./pricing";
 import { parseCsv, csvRowToListing } from "./csvParser";
 
 // ─── snake_case → camelCase normalizer ───────────────────────────────────────
@@ -67,51 +67,24 @@ function suppressDeliveryIfUnavailable(listing: Record<string, any>): Record<str
   return { ...listing, estimated_delivery_cost: null, total_delivered_cost: null };
 }
 
+// Sync (no-comp) pricing — used for CSV import and places where we don't have comps handy
 function enrichListingWithPricing(data: Record<string, any>): Record<string, any> {
-  const result = calculateCartIQValue({
-    askingPrice: data.asking_price ?? data.askingPrice,
-    regularPrice: data.regular_price ?? data.regularPrice,
-    salePrice: data.sale_price ?? data.salePrice,
-    deliveryCost: data.estimated_delivery_cost ?? data.estimatedDeliveryCost,
-    deliveryIncluded: data.delivery_included ?? data.deliveryIncluded,
-    deliveryAvailable: (data.delivery_available ?? data.deliveryAvailable) ? "yes" : "no",
-    year: data.year,
-    brand: data.brand,
-    model: data.model,
-    powerType: data.power_type ?? data.powerType,
-    batteryType: data.battery_type ?? data.batteryType,
-    batteryAh: data.battery_ah ?? data.batteryAh,
-    batteryAgeMonths: data.battery_age_months ?? data.batteryAgeMonths,
-    seating: data.seating,
-    lifted: data.lifted,
-    streetLegalClaimed: data.street_legal_claimed ?? data.streetLegalClaimed,
-    chargerIncluded: data.charger_included ?? data.chargerIncluded,
-    warrantyIncluded: data.warranty_included ?? data.warrantyIncluded,
-    warrantyProvider: data.warranty_provider ?? data.warrantyProvider,
-    warrantyMonths: data.warranty_months ?? data.warrantyMonths,
-    batteryWarrantyIncluded: data.battery_warranty_included ?? data.batteryWarrantyIncluded,
-    sellerType: data.seller_type ?? data.sellerType,
-    state: data.state,
-    condition: data.condition,
-  });
+  const pricing = enrichListing(data, []); // no comps — formula fallback
+  return { ...data, ...pricing };
+}
 
-  const sellerOffersDelivery = (data.delivery_available ?? data.deliveryAvailable) === true
-    || (data.delivery_included ?? data.deliveryIncluded) === true;
-
-  return {
-    ...data,
-    cartiq_estimated_value: result.cartiqMarketValue,
-    estimated_delivery_cost: sellerOffersDelivery
-      ? (result.estimatedDeliveryCost >= 0 ? result.estimatedDeliveryCost : (data.estimated_delivery_cost ?? data.estimatedDeliveryCost))
-      : null,
-    total_delivered_cost: sellerOffersDelivery && result.totalDeliveredCost >= 0
-      ? result.totalDeliveredCost
-      : null,
-    deal_delta: result.dealDelta,
-    deal_rating: result.dealRating,
-    buyer_score: result.buyerScore,
-    street_legal_confidence: result.streetLegalConfidence,
-  };
+// Async (comp-aware) pricing — used for single listing create/update
+async function enrichListingWithComps(data: Record<string, any>, excludeId?: number): Promise<Record<string, any>> {
+  const brand     = data.brand ?? data.brand;
+  const model     = data.model ?? data.model;
+  const year      = data.year ?? new Date().getFullYear();
+  const condition = data.condition ?? "new";
+  let comps: any[] = [];
+  if (brand && model) {
+    comps = await storage.getCompsForListing(brand, model, year, condition, excludeId);
+  }
+  const pricing = enrichListing(data, comps);
+  return { ...data, ...pricing };
 }
 
 export function registerRoutes(httpServer: Server, app: Express) {
@@ -178,7 +151,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
       }
       const baseSlug = slugify(`${data.brand || "cart"}-${data.model || "listing"}-${data.city || "fl"}`);
       data.slug = data.slug || `${baseSlug}-${Date.now()}`;
-      const enriched = enrichListingWithPricing(data);
+      const enriched = await enrichListingWithComps(data);
       const listing = await storage.createListing(enriched as any);
       res.status(201).json(norm(listing as any));
     } catch (e: any) {
@@ -194,7 +167,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
       const oldEffectivePrice = oldListing
         ? (oldListing.asking_price ?? oldListing.sale_price ?? oldListing.regular_price ?? 0)
         : null;
-      const enriched = enrichListingWithPricing(data);
+      const enriched = await enrichListingWithComps(data, id);
       const listing = await storage.updateListing(id, enriched as any);
       if (!listing) return res.status(404).json({ error: "Listing not found" });
       const newEffectivePrice = listing.asking_price ?? listing.sale_price ?? listing.regular_price ?? 0;
@@ -456,6 +429,79 @@ export function registerRoutes(httpServer: Server, app: Express) {
       res.json({ saved });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Reprice All ─────────────────────────────────────────────────────────────
+  // Backfills cartiq_estimated_value, deal_rating, deal_delta, buyer_score,
+  // price_confidence, valuation_confidence for every active public listing.
+  // Uses comp-based IMV engine. Safe to call multiple times (idempotent).
+  app.post("/api/admin/reprice-all", requireAdmin, async (req, res) => {
+    const BATCH = 100;
+    let offset = 0;
+    let processed = 0;
+    let updated = 0;
+    const errors: string[] = [];
+
+    try {
+      const totalCount = await storage.getListingCount();
+      console.log(`[reprice-all] Starting — ${totalCount} listings`);
+
+      while (true) {
+        const batch = await storage.getAllListingsForReprice(offset, BATCH);
+        if (!batch.length) break;
+
+        // Fetch comps for each unique brand+model+year+condition group once
+        type CompKey = string;
+        const compCache = new Map<CompKey, any[]>();
+
+        for (const listing of batch) {
+          processed++;
+          try {
+            const brand     = listing.brand || "";
+            const model     = listing.model || "";
+            const year      = listing.year  || new Date().getFullYear();
+            const condition = listing.condition || "new";
+            const key: CompKey = `${brand}||${model}||${year}||${condition}`;
+
+            if (!compCache.has(key)) {
+              const comps = brand && model
+                ? await storage.getCompsForListing(brand, model, year, condition, listing.id)
+                : [];
+              compCache.set(key, comps);
+            }
+
+            const comps = compCache.get(key)!;
+            const pricing = enrichListing(listing, comps);
+
+            // Only write fields managed by the pricing engine
+            const patch: Record<string, any> = {
+              cartiq_estimated_value: pricing.cartiq_estimated_value,
+              deal_rating:            pricing.deal_rating,
+              deal_delta:             pricing.deal_delta,
+              buyer_score:            pricing.buyer_score,
+              price_confidence:       pricing.price_confidence,
+              valuation_confidence:   pricing.valuation_confidence,
+            };
+            if (pricing.estimated_delivery_cost !== null) patch.estimated_delivery_cost = pricing.estimated_delivery_cost;
+            if (pricing.total_delivered_cost    !== null) patch.total_delivered_cost    = pricing.total_delivered_cost;
+
+            await storage.updateListing(listing.id, patch as any);
+            updated++;
+          } catch (err: any) {
+            errors.push(`id=${listing.id}: ${err.message}`);
+          }
+        }
+
+        offset += BATCH;
+        console.log(`[reprice-all] Progress: ${processed} processed, ${updated} updated`);
+        if (batch.length < BATCH) break;
+      }
+
+      console.log(`[reprice-all] Done — ${updated}/${processed} updated, ${errors.length} errors`);
+      res.json({ processed, updated, errors: errors.slice(0, 20) });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message, processed, updated });
     }
   });
 

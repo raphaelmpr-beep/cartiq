@@ -55,6 +55,10 @@ export interface IStorage {
   createRetailSource(data: InsertRetailSource): Promise<RetailSource>;
   updateRetailSource(id: number, data: Partial<InsertRetailSource>): Promise<RetailSource | undefined>;
 
+  getCompsForListing(brand: string, model: string, year: number, condition: string, excludeId?: number): Promise<any[]>;
+  getAllListingsForReprice(offset: number, limit: number): Promise<any[]>;
+  getListingCount(): Promise<number>;
+
   createDealCheck(data: InsertDealCheck): Promise<DealCheck>;
   getDealCheckById(id: number): Promise<DealCheck | undefined>;
 
@@ -163,6 +167,44 @@ class SupabaseStorage implements IStorage {
   async getListingCount(): Promise<number> {
     const { count } = await db().from("listings").select("*", { count: "exact", head: true }).eq("status", "active");
     return count ?? 0;
+  }
+
+  // ─── Comp fetch for pricing engine ──────────────────────────────────────────
+  async getCompsForListing(
+    brand: string,
+    model: string,
+    year: number,
+    condition: string,
+    excludeId?: number
+  ): Promise<any[]> {
+    let q = db()
+      .from("listings")
+      .select("asking_price,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available")
+      .eq("status", "active")
+      .eq("public_listing", true)
+      .eq("brand", brand)
+      .eq("model", model)
+      .eq("condition", condition)
+      .gte("year", year - 1)
+      .lte("year", year + 1)
+      .not("asking_price", "is", null)
+      .limit(60);
+    if (excludeId) q = q.neq("id", excludeId);
+    const { data } = await q;
+    return (data ?? []) as any[];
+  }
+
+  // ─── Bulk reprice fetch (returns raw snake_case rows) ────────────────────────
+  async getAllListingsForReprice(offset: number, limit: number): Promise<any[]> {
+    const { data } = await db()
+      .from("listings")
+      .select("id,brand,model,year,condition,asking_price,sale_price,regular_price,power_type,battery_type,battery_ah,battery_age_months,seating,lifted,charger_included,warranty_included,warranty_months,delivery_available,delivery_included,estimated_delivery_cost,seller_type,street_legal_claimed")
+      .eq("status", "active")
+      .eq("public_listing", true)
+      .not("asking_price", "is", null)
+      .order("id", { ascending: true })
+      .range(offset, offset + limit - 1);
+    return (data ?? []) as any[];
   }
 
   // ─── Dealers ────────────────────────────────────────────────────────────────
