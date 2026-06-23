@@ -158,7 +158,14 @@ interface ClientFilters {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function Search() {
-  // SEO
+  // ── All state/ref declarations FIRST (Rules of Hooks) ──────────────────────
+  const [filters, setFilters] = useState<ClientFilters>({});
+  const [sort, setSort] = useState("best_match");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [zipError, setZipError] = useState("");
+  const initializedRef = useRef(false);
+
+  // SEO — must come after useState so filters is defined
   useEffect(() => {
     const brand = filters.brands ? ` — ${filters.brands.split(",")[0]}` : "";
     const loc = filters.state === "FL" ? " Florida" : filters.state === "GA" ? " Georgia" : " FL & GA";
@@ -168,11 +175,6 @@ export default function Search() {
       canonical: "https://cartiq-chi.vercel.app/search",
     });
   }, [filters.brands, filters.state]);
-  const [filters, setFilters] = useState<ClientFilters>({});
-  const [sort, setSort] = useState("best_match");
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [zipError, setZipError] = useState("");
-  const initializedRef = useRef(false);
 
   // Parse URL params on first load
   useEffect(() => {

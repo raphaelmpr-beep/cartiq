@@ -158,19 +158,26 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
   app.get("/sitemap.xml", async (_req, res) => {
     try {
       const listings = await storage.getListings({ status: "active", public_listing: true });
+      const articles = await storage.getSeoArticles() as any[];
       const base = "https://cartiq-chi.vercel.app";
       const today = new Date().toISOString().split("T")[0];
       const staticPages = [
         { path: "/",             priority: "1.0", changefreq: "weekly" },
         { path: "/search",       priority: "0.9", changefreq: "daily"  },
         { path: "/deal-checker", priority: "0.8", changefreq: "weekly" },
-        { path: "/buyer-guide",  priority: "0.7", changefreq: "weekly" },
-        { path: "/sell-my-cart", priority: "0.6", changefreq: "monthly"},
+        { path: "/buyer-guide",  priority: "0.8", changefreq: "weekly" },
+        { path: "/sell-my-cart", priority: "0.5", changefreq: "monthly"},
       ];
       const urls = [
         ...staticPages.map(p =>
           `  <url><loc>${base}${p.path}</loc><lastmod>${today}</lastmod><changefreq>${p.changefreq}</changefreq><priority>${p.priority}</priority></url>`
         ),
+        // Buyer Guide articles
+        ...articles.filter((a: any) => a.published).map((a: any) => {
+          const lastmod = (a.updated_at ?? a.updatedAt ?? today).toString().slice(0, 10);
+          return `  <url><loc>${base}/buyer-guide/${a.slug}</loc><lastmod>${lastmod}</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>`;
+        }),
+        // Listing detail pages
         ...listings.map((l: any) => {
           const slug = l.slug ?? l.id;
           const lastmod = (l.updatedAt ?? l.updated_at ?? today).toString().slice(0, 10);

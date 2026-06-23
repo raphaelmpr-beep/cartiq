@@ -40,8 +40,8 @@ export default function MyGarage() {
     setLoading(true);
     try {
       const [s, w] = await Promise.all([
-        fetch(`/api/saves?email=${encodeURIComponent(e)}`).then((r) => r.json()),
-        fetch(`/api/watches?email=${encodeURIComponent(e)}`).then((r) => r.json()),
+        apiRequest("GET", `/api/saves?email=${encodeURIComponent(e)}`).then((r) => r.json()),
+        apiRequest("GET", `/api/watches?email=${encodeURIComponent(e)}`).then((r) => r.json()),
       ]);
       setSaves(Array.isArray(s) ? s : []);
       setWatches(Array.isArray(w) ? w : []);
