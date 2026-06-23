@@ -482,7 +482,12 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
   app.get("/api/dealers/:slug", async (req, res) => {
-    const dealer = await storage.getDealerBySlug(req.params.slug);
+    const slug = req.params.slug;
+    let dealer = await storage.getDealerBySlug(slug);
+    if (!dealer) {
+      // fallback: try sync_source prefix match (e.g. 'jenkins' → 'jenkins-motorsports-lakeland')
+      dealer = await storage.getDealerBySyncSource(slug);
+    }
     if (!dealer) return res.status(404).json({ error: "Dealer not found" });
     res.json(norm(dealer as any));
   });
