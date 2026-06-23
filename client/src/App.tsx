@@ -31,6 +31,7 @@ import DealChecker from "@/pages/DealChecker";
 import { BuyerGuideIndex, ArticleDetail } from "@/pages/BuyerGuide";
 import Admin from "@/pages/Admin";
 import MyGarage from "@/pages/MyGarage";
+import Disclosure from "@/pages/Legal";
 
 function NotFound() {
   return (
@@ -72,6 +73,7 @@ function AppRoutes() {
           <Route path="/sell" component={SellPage} />
           <Route path="/garage" component={MyGarage} />
           <Route path="/admin" component={Admin} />
+          <Route path="/disclosure" component={Disclosure} />
           <Route component={NotFound} />
         </Switch>
       </main>
@@ -87,8 +89,9 @@ function AppRoutes() {
             <a href="/#/search" className="hover:text-foreground">Search</a>
             <a href="/#/garage" className="hover:text-foreground">My Garage</a>
             <a href="/#/admin" className="hover:text-foreground">Admin</a>
+            <a href="/#/disclosure" className="hover:text-foreground">Disclosure</a>
           </div>
-          <p>© {new Date().getFullYear()} CartIQ. Not affiliated with Facebook, Costco, or any manufacturer.</p>
+          <p>© {new Date().getFullYear()} CartIQ · Not affiliated with Facebook, Costco, or any manufacturer. <a href="/#/disclosure" className="hover:text-foreground underline">Information Disclosure</a></p>
         </div>
       </footer>
     </div>
