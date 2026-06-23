@@ -63,6 +63,16 @@ export function setSEO(opts: SEOOptions = {}): void {
   // ── Canonical ────────────────────────────────────────────────────────────
   setLink("canonical", canonical);
 
+  // ── Sitemap discovery (helps Googlebot find the sitemap from any page) ────
+  let sitemapEl = document.querySelector<HTMLLinkElement>('link[rel="sitemap"]');
+  if (!sitemapEl) {
+    sitemapEl = document.createElement("link");
+    sitemapEl.rel = "sitemap";
+    sitemapEl.setAttribute("type", "application/xml");
+    document.head.appendChild(sitemapEl);
+  }
+  sitemapEl.href = `${BASE_URL}/sitemap.xml`;
+
   // ── Open Graph ───────────────────────────────────────────────────────────
   setMeta('meta[property="og:type"]',        "content", "website");
   setMeta('meta[property="og:site_name"]',   "content", SITE_NAME);
@@ -71,6 +81,7 @@ export function setSEO(opts: SEOOptions = {}): void {
   setMeta('meta[property="og:image"]',       "content", image);
   setMeta('meta[property="og:image:width"]', "content", "1200");
   setMeta('meta[property="og:image:height"]',"content", "630");
+  setMeta('meta[property="og:image:alt"]',   "content", opts.title ?? SITE_NAME);
   setMeta('meta[property="og:url"]',         "content", canonical);
   setMeta('meta[property="og:locale"]',      "content", "en_US");
 

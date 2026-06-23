@@ -4,12 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
 
-    <!-- Default SEO — overridden per-page by seo.ts -->
+    <!-- Primary SEO — overridden per-page by seo.ts setSEO() -->
     <title>CartIQ — Florida &amp; Georgia Golf Cart Price Intelligence</title>
     <meta name="description" content="CartIQ is Florida &amp; Georgia's golf cart market intelligence platform. Compare dealer prices, check fair value, and find the best deals on new and used golf carts." />
     <meta name="robots" content="index,follow" />
     <meta name="author" content="CartIQ" />
     <link rel="canonical" href="https://cartiq-chi.vercel.app/" />
+
+    <!-- Sitemap discovery -->
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
@@ -19,6 +22,7 @@
     <meta property="og:image" content="https://cartiq-chi.vercel.app/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="CartIQ — Florida &amp; Georgia Golf Cart Price Intelligence" />
     <meta property="og:url" content="https://cartiq-chi.vercel.app/" />
     <meta property="og:locale" content="en_US" />
 
@@ -28,53 +32,26 @@
     <meta name="twitter:title" content="CartIQ — Florida &amp; Georgia Golf Cart Price Intelligence" />
     <meta name="twitter:description" content="Compare dealer prices, check fair value, and find the best golf cart deals in FL &amp; GA." />
     <meta name="twitter:image" content="https://cartiq-chi.vercel.app/og-image.png" />
-
-    <!-- AI / LLM crawlers (OpenAI GPTBot, Claude, Perplexity, Google Gemini) -->
-    <meta name="robots" content="index,follow" />
+    <meta name="twitter:image:alt" content="CartIQ golf cart price intelligence platform" />
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="/favicon.png" />
 
-    <!-- Fonts: trimmed to only what's used -->
+    <!-- Fonts: Inter only — DM Sans removed (unused) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
 
-    <!-- Base JSON-LD: WebSite + Organization (overridden per-page) -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@graph": [
-        {
-          "@type": "WebSite",
-          "name": "CartIQ",
-          "url": "https://cartiq-chi.vercel.app",
-          "description": "Florida & Georgia golf cart market intelligence platform.",
-          "potentialAction": {
-            "@type": "SearchAction",
-            "target": {
-              "@type": "EntryPoint",
-              "urlTemplate": "https://cartiq-chi.vercel.app/search?q={search_term_string}"
-            },
-            "query-input": "required name=search_term_string"
-          }
-        },
-        {
-          "@type": "Organization",
-          "name": "CartIQ",
-          "url": "https://cartiq-chi.vercel.app",
-          "logo": "https://cartiq-chi.vercel.app/favicon.png",
-          "areaServed": ["Florida", "Georgia"],
-          "serviceType": "Golf Cart Price Intelligence"
-        }
-      ]
-    }
-    </script>
-    <script type="module" crossorigin src="/assets/index-C0ZSK_4I.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BZ9dYLvu.css">
+    <!--
+      NOTE: No base JSON-LD here. seo.ts injects all structured data
+      dynamically per-page so there is never a duplicate or stale schema.
+      Google will always see the correct per-page @graph.
+    -->
+    <script type="module" crossorigin src="/assets/index-Dp7ues7S.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-w7RQXLlm.css">
   </head>
   <body>
     <div id="root"></div>

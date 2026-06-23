@@ -118,6 +118,20 @@ function renderBody(body: string): JSX.Element[] {
   return elements;
 }
 
+// ── Related articles relevance map (module-level, no runtime cost) ───────────
+const RELATED_MAP: Record<string, string[]> = {
+  'how-much-does-a-golf-cart-cost-in-florida': ['best-golf-cart-brands-florida-georgia', 'new-vs-used-golf-cart', 'how-to-check-golf-cart-deal'],
+  'lithium-vs-lead-acid-golf-cart-battery': ['how-much-does-a-golf-cart-cost-in-florida', 'best-golf-cart-brands-florida-georgia', 'golf-cart-warranty-what-to-know'],
+  'best-golf-cart-brands-florida-georgia': ['how-much-does-a-golf-cart-cost-in-florida', 'new-vs-used-golf-cart', 'lithium-vs-lead-acid-golf-cart-battery'],
+  'new-vs-used-golf-cart': ['how-much-does-a-golf-cart-cost-in-florida', 'golf-cart-dealer-vs-private-seller', 'golf-cart-warranty-what-to-know'],
+  'street-legal-golf-cart-florida': ['golf-cart-communities-florida', 'how-much-does-a-golf-cart-cost-in-florida', 'best-golf-cart-brands-florida-georgia'],
+  'golf-cart-dealer-vs-private-seller': ['new-vs-used-golf-cart', 'how-to-check-golf-cart-deal', 'golf-cart-delivery-florida'],
+  'how-to-check-golf-cart-deal': ['how-much-does-a-golf-cart-cost-in-florida', 'new-vs-used-golf-cart', 'golf-cart-dealer-vs-private-seller'],
+  'golf-cart-warranty-what-to-know': ['new-vs-used-golf-cart', 'best-golf-cart-brands-florida-georgia', 'golf-cart-dealer-vs-private-seller'],
+  'golf-cart-delivery-florida': ['how-much-does-a-golf-cart-cost-in-florida', 'golf-cart-dealer-vs-private-seller', 'golf-cart-communities-florida'],
+  'golf-cart-communities-florida': ['street-legal-golf-cart-florida', 'how-much-does-a-golf-cart-cost-in-florida', 'how-to-check-golf-cart-deal'],
+};
+
 // ── Buyer Guide Index ──────────────────────────────────────────────────────────
 export function BuyerGuideIndex() {
   useEffect(() => {
@@ -209,6 +223,21 @@ export function ArticleDetail() {
     enabled: !!slug,
     retry: false,
   });
+
+  // Fetch all articles for related cross-links — reuse the index cache
+  const { data: allArticles = [] } = useQuery<SeoArticle[]>({
+    queryKey: ["/api/buyer-guide"],
+  });
+
+  // Derive related articles from RELATED_MAP (computed, no extra fetch)
+  const relatedArticles = useMemo(() => {
+    if (!article?.slug) return [];
+    const relatedSlugs = RELATED_MAP[article.slug] ?? [];
+    return relatedSlugs
+      .map((s) => allArticles.find((a) => a.slug === s))
+      .filter((a): a is SeoArticle => !!a)
+      .slice(0, 3);
+  }, [article?.slug, allArticles]);
 
   // ALL hooks must run before any conditional returns
   const faqs = useMemo(
@@ -363,6 +392,38 @@ export function ArticleDetail() {
             <Link href="/search"><Button size="sm" className="bg-white/10 hover:bg-white/20 text-background border border-white/20">Search Carts</Button></Link>
           </div>
         </div>
+
+        {/* Related Articles */}
+        {relatedArticles.length > 0 && (
+          <section className="mt-12" aria-label="Related articles">
+            <h2 className="text-lg font-bold mb-4 text-foreground">Related Articles</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {relatedArticles.map((rel) => (
+                <Link
+                  key={rel.slug}
+                  href={`/buyer-guide/${rel.slug}`}
+                  className="block p-4 rounded-xl border border-border bg-white hover:shadow-md hover:border-green-200 transition-all group"
+                >
+                  <div className="flex items-start gap-2">
+                    <BookOpen className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm leading-snug mb-1 group-hover:text-green-700 transition-colors line-clamp-2">
+                        {rel.title}
+                      </p>
+                      {rel.metaDescription && (
+                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                          {rel.metaDescription.length > 100
+                            ? rel.metaDescription.slice(0, 97) + "..."
+                            : rel.metaDescription}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Back link */}
         <div className="mt-8 pt-6 border-t border-border">
