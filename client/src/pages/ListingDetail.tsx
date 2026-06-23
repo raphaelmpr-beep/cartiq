@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
-import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone, Mail, Store, User } from "lucide-react";
+import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone, Mail, Store, User, Truck, ShieldCheck } from "lucide-react";
 import SaveButton from "@/components/SaveButton";
 import WatchButton from "@/components/WatchButton";
 import { ImageCarousel } from "@/components/ImageCarousel";
@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DealBadge, SourceBadge, BuyerScoreBadge, WarrantyBadge, BatteryRiskBadge, StreetLegalBadge, DeliveryCostBadge, RetailSourceBadge } from "@/components/Badges";
 import { MarketCompareCard } from "@/components/MarketCompareCard";
 import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText } from "@/lib/utils";
-import type { Listing } from "@/lib/types";
+import type { Listing, Dealer } from "@/lib/types";
 import { apiRequest } from "@/lib/queryClient";
 
 // We run the pricing engine client-side so questions/redFlags are available
@@ -29,6 +29,14 @@ export default function ListingDetail() {
     queryKey: ["/api/listings", id],
     queryFn: () => apiRequest("GET", `/api/listings/${id}`).then((r) => r.json()),
     enabled: !!id,
+  });
+
+  const dealerSlug = listing?.syncSource;
+  const { data: dealer } = useQuery<Dealer>({
+    queryKey: ["/api/dealers", dealerSlug],
+    queryFn: () => apiRequest("GET", `/api/dealers/${dealerSlug}`).then((r) => r.json()),
+    enabled: !!dealerSlug && listing?.sellerType === "dealer",
+    retry: false,
   });
 
   if (isLoading) {
@@ -216,6 +224,63 @@ export default function ListingDetail() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Dealer Info — delivery & warranty offered by the dealer */}
+            {dealer && (
+              <Card>
+                <CardHeader><CardTitle className="text-base">Dealer Info</CardTitle></CardHeader>
+                <CardContent className="space-y-4 text-sm">
+                  {/* Delivery */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Truck className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">Delivery</span>
+                    </div>
+                    {dealer.deliveryAvailable ? (
+                      <div className="space-y-1">
+                        <span className="inline-flex items-center gap-1 text-xs font-medium bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200">
+                          <CheckCircle className="h-3 w-3" /> Delivery Available
+                        </span>
+                        <p className="text-muted-foreground">
+                          {dealer.deliveryIncluded
+                            ? "Free delivery included"
+                            : (dealer.deliveryFreeRadiusMiles && dealer.deliveryFreeRadiusMiles > 0)
+                              ? `Free within ${dealer.deliveryFreeRadiusMiles} miles`
+                              : (dealer.deliveryBaseFee && dealer.deliveryBaseFee > 0)
+                                ? `Delivery fee: ${formatPrice(dealer.deliveryBaseFee)}`
+                                : "Contact dealer for delivery details"}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground">Local pickup only</p>
+                    )}
+                  </div>
+
+                  {/* Warranty */}
+                  <div className="pt-2 border-t">
+                    <div className="flex items-center gap-2 mb-1">
+                      <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">Warranty</span>
+                    </div>
+                    {dealer.defaultWarrantyIncluded ? (
+                      <div className="space-y-1">
+                        <span className="inline-flex items-center gap-1 text-xs font-medium bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200">
+                          <CheckCircle className="h-3 w-3" /> Warranty Available
+                        </span>
+                        {dealer.defaultWarrantyMonths != null && dealer.defaultWarrantyMonths > 0 && (
+                          <p className="text-muted-foreground">{dealer.defaultWarrantyMonths}-month warranty</p>
+                        )}
+                        {dealer.defaultWarrantyNotes && (
+                          <p className="text-muted-foreground text-xs">{dealer.defaultWarrantyNotes.slice(0, 120)}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground">No dealer warranty</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Retail source notice */}
             {listing.sellerType === "retail" && (

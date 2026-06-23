@@ -63,8 +63,31 @@ export interface Listing {
   sellerName?: string;
   sellerPhone?: string;
   sellerEmail?: string;
+  syncSource?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Dealer {
+  id: number;
+  name: string;
+  slug: string;
+  websiteUrl?: string;
+  phone?: string;
+  email?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  serviceAreaMiles?: number;
+  deliveryAvailable?: boolean;
+  deliveryIncluded?: boolean;
+  deliveryBaseFee?: number;
+  deliveryPerMileFee?: number;
+  deliveryFreeRadiusMiles?: number;
+  defaultWarrantyIncluded?: boolean;
+  defaultWarrantyMonths?: number;
+  defaultWarrantyNotes?: string;
+  notes?: string;
 }
 
 export interface DealCheck {

@@ -481,6 +481,12 @@ export function registerRoutes(httpServer: Server, app: Express) {
     res.json(normList(await storage.getDealers() as any[]));
   });
 
+  app.get("/api/dealers/:slug", async (req, res) => {
+    const dealer = await storage.getDealerBySlug(req.params.slug);
+    if (!dealer) return res.status(404).json({ error: "Dealer not found" });
+    res.json(norm(dealer as any));
+  });
+
   app.post("/api/dealers", requireAdmin, async (req, res) => {
     try {
       const data = req.body as any;

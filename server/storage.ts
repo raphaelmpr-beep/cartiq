@@ -45,6 +45,7 @@ export interface IStorage {
 
   getDealers(): Promise<Dealer[]>;
   getDealerById(id: number): Promise<Dealer | undefined>;
+  getDealerBySlug(slug: string): Promise<Dealer | undefined>;
   createDealer(data: InsertDealer): Promise<Dealer>;
   updateDealer(id: number, data: Partial<InsertDealer>): Promise<Dealer | undefined>;
 
@@ -172,6 +173,11 @@ class SupabaseStorage implements IStorage {
 
   async getDealerById(id: number): Promise<Dealer | undefined> {
     const { data } = await db().from("dealers").select("*").eq("id", id).maybeSingle();
+    return (data as Dealer) ?? undefined;
+  }
+
+  async getDealerBySlug(slug: string): Promise<Dealer | undefined> {
+    const { data } = await db().from("dealers").select("*").eq("slug", slug).maybeSingle();
     return (data as Dealer) ?? undefined;
   }
 
