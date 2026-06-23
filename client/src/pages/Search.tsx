@@ -175,19 +175,17 @@ export default function Search() {
     });
   }, [filters.brands, filters.state]);
 
-  // Parse URL params on mount — reads hash synchronously (hashNav uses pushState+hashchange)
+  // Parse URL params on mount.
+  // wouter's navigate() puts query params in location.search (e.g. ?city=Nocatee&state=FL)
+  // NOT inside location.hash. Fallback: also check hash split for any legacy links.
   useEffect(() => {
-    function readHash() {
-      const search = window.location.hash.split("?")[1] || "";
-      const params = new URLSearchParams(search);
-      const init: ClientFilters = {};
-      params.forEach((v, k) => { (init as any)[k] = v; });
-      setFilters(init);
-    }
-    readHash();
-    // Belt-and-suspenders: if hash wasn't committed yet, catch it on change
-    window.addEventListener("hashchange", readHash, { once: true });
-    return () => window.removeEventListener("hashchange", readHash);
+    // Primary: location.search (set by wouter navigate)
+    const searchStr = window.location.search
+      || window.location.hash.split("?")[1] || "";
+    const params = new URLSearchParams(searchStr);
+    const init: ClientFilters = {};
+    params.forEach((v, k) => { (init as any)[k] = v; });
+    setFilters(init);
   }, []);
 
   // Sync filters to URL

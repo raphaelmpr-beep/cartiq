@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { useHashLocation } from "wouter/use-hash-location";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Search, ClipboardCheck, TrendingDown, ShieldCheck, Truck, BookOpen, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,22 +8,8 @@ import { ListingCard } from "@/components/ListingCard";
 import { MarketCompareCard } from "@/components/MarketCompareCard";
 import type { Listing, SeoArticle } from "@/lib/types";
 import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
 import { setSEO } from "@/lib/seo";
 import { PriceDealsCarousel } from "@/components/PriceDealsCarousel";
-
-// Navigate to a hash route with query params encoded INSIDE the hash
-// e.g. hashNav("/search", { city: "Nocatee", state: "FL" })
-// → navigates to  #/search?city=Nocatee&state=FL
-// Uses replace() so the hash is committed synchronously before the route component mounts.
-function hashNav(path: string, params: Record<string, string> = {}) {
-  const qs = new URLSearchParams(params).toString();
-  const target = qs ? `${path}?${qs}` : path;
-  // replaceState keeps the hash in sync without a full navigation, then
-  // dispatch hashchange so wouter re-renders the correct route.
-  window.history.pushState(null, "", `#${target}`);
-  window.dispatchEvent(new HashChangeEvent("hashchange"));
-}
 
 export default function Home() {
   // SEO
@@ -35,12 +22,20 @@ export default function Home() {
   }, []);
   const [dealUrl, setDealUrl] = useState("");
   const [heroSearch, setHeroSearch] = useState("");
-  const [, navigate] = useLocation();
+  const [, navigate] = useHashLocation();
+
+  // Navigate to a route with query params using wouter's native navigate.
+  // wouter puts params in location.search (not inside location.hash), so
+  // Search.tsx reads them from location.search.
+  function navWithParams(path: string, params: Record<string, string> = {}) {
+    const qs = new URLSearchParams(params).toString();
+    navigate(qs ? `${path}?${qs}` : path);
+  }
 
   function handleHeroSearch(e: React.FormEvent) {
     e.preventDefault();
     const params = heroSearch.trim() ? { q: heroSearch.trim() } : {};
-    hashNav("/search", params);
+    navWithParams("/search", params);
   }
 
   const { data: listings = [] } = useQuery<Listing[]>({
@@ -67,7 +62,7 @@ export default function Home() {
 
   function handleDealCheck(e: React.FormEvent) {
     e.preventDefault();
-    hashNav("/deal-checker");
+    navigate("/deal-checker");
   }
 
   return (
@@ -121,7 +116,7 @@ export default function Home() {
                     return (
                       <button
                         key={loc}
-                        onClick={() => hashNav("/search", { city, state })}
+                        onClick={() => navWithParams("/search", { city, state })}
                         className="text-xs px-2.5 py-1.5 rounded-full border border-border hover:bg-secondary transition-colors cursor-pointer"
                       >
                         {loc}
@@ -139,7 +134,7 @@ export default function Home() {
                   ] as [string, Record<string, string>][]).map(([label, params]) => (
                     <button
                       key={label}
-                      onClick={() => hashNav("/search", params)}
+                      onClick={() => navWithParams("/search", params)}
                       className="text-green-700 hover:underline cursor-pointer"
                     >
                       {label}
