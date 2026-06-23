@@ -7,15 +7,33 @@
       "config": { "maxLambdaSize": "50mb" }
     },
     {
-      "src": "dist/public/**",
+      "src": "dist/public/index.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "dist/public/assets/**",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "dist/public/favicon.png",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "dist/public/robots.txt",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "dist/public/llms.txt",
       "use": "@vercel/static"
     }
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "dist/vercel-handler.cjs" },
     { "src": "/sitemap.xml", "dest": "dist/vercel-handler.cjs" },
-    { "src": "/robots.txt", "dest": "dist/vercel-handler.cjs" },
-    { "src": "/llms.txt", "dest": "dist/vercel-handler.cjs" },
+    { "src": "/assets/(.*)", "dest": "dist/public/assets/$1" },
+    { "src": "/favicon.png", "dest": "dist/public/favicon.png" },
+    { "src": "/robots.txt", "dest": "dist/public/robots.txt" },
+    { "src": "/llms.txt", "dest": "dist/public/llms.txt" },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "dist/public/index.html" }
   ],
