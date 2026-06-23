@@ -361,6 +361,9 @@ export default function ListingDetail() {
           <div className="space-y-5">
             <MarketCompareCard listing={listing} />
             <BuyerScoreBadge score={listing.buyerScore} className="text-lg" />
+            <a href="/#/how-it-works" className="block text-xs text-green-700 hover:underline text-right -mt-3">
+              How is this score calculated? →
+            </a>
 
             {/* Contact Card */}
             <div className="border border-border rounded-xl p-4 space-y-3 bg-white">

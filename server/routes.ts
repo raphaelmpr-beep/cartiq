@@ -167,6 +167,7 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
         { path: "/deal-checker", priority: "0.8", changefreq: "weekly" },
         { path: "/buyer-guide",  priority: "0.8", changefreq: "weekly" },
         { path: "/sell-my-cart",  priority: "0.5", changefreq: "monthly" },
+        { path: "/how-it-works",   priority: "0.7", changefreq: "monthly" },
         { path: "/disclosure",     priority: "0.3", changefreq: "yearly"  },
       ];
       const urls = [
