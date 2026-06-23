@@ -201,6 +201,18 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
   }
 
   // ─── Listings ────────────────────────────────────────────────────────────────
+
+  // Hot deals carousel — great_deal + good_deal, priced + imaged, sorted by buyer_score
+  app.get("/api/listings/hot-deals", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 20, 40);
+      const deals = await storage.getHotDeals(limit);
+      res.json(normList(deals.map(suppressDeliveryIfUnavailable)));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/listings", async (req, res) => {
     try {
       const filters: Record<string, unknown> = {};

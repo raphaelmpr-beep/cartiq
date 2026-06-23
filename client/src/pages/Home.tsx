@@ -9,6 +9,7 @@ import type { Listing, SeoArticle } from "@/lib/types";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { setSEO } from "@/lib/seo";
+import { PriceDealsCarousel } from "@/components/PriceDealsCarousel";
 
 // Navigate to a hash route with query params encoded INSIDE the hash
 // e.g. hashNav("/search", { city: "Nocatee", state: "FL" })
@@ -183,6 +184,9 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* ─── Price Deals Carousel ─────────────────────────────────────────────── */}
+      <PriceDealsCarousel />
 
       {/* ─── Featured Listings ────────────────────────────────────────────────── */}
       {featured.length > 0 && (

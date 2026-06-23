@@ -36,6 +36,7 @@ export async function initStorage(): Promise<void> {
 // ─── IStorage interface ───────────────────────────────────────────────────────
 export interface IStorage {
   getListings(filters?: Record<string, unknown>): Promise<Listing[]>;
+  getHotDeals(limit?: number): Promise<Listing[]>;
   getListingById(id: number): Promise<Listing | undefined>;
   getListingBySlug(slug: string): Promise<Listing | undefined>;
   createListing(data: InsertListing): Promise<Listing>;
@@ -126,6 +127,32 @@ class SupabaseStorage implements IStorage {
     const { data, error } = await q;
     if (error) throw new Error(error.message);
     return (data ?? []) as Listing[];
+  }
+
+  async getHotDeals(limit = 20): Promise<Listing[]> {
+    // Hot deals: great_deal or good_deal, has price, has image, active+public
+    // Primary sort: deal_rating (great_deal first), secondary: updated_at desc
+    const { data, error } = await db()
+      .from("listings")
+      .select("*")
+      .eq("status", "active")
+      .eq("public_listing", true)
+      .in("deal_rating", ["great_deal", "good_deal"])
+      .not("asking_price", "is", null)
+      .not("image_url", "is", null)
+      .order("deal_rating", { ascending: true })   // great_deal < good_deal alphabetically — we re-sort below
+      .order("updated_at", { ascending: false })
+      .limit(limit * 2);  // fetch extra so we can re-sort by rating priority
+    if (error) throw new Error(error.message);
+    const ratingOrder: Record<string, number> = { great_deal: 0, good_deal: 1 };
+    const sorted = ((data ?? []) as Listing[])
+      .sort((a, b) => {
+        const ra = ratingOrder[(a as any).deal_rating] ?? 9;
+        const rb = ratingOrder[(b as any).deal_rating] ?? 9;
+        return ra !== rb ? ra - rb : 0;
+      })
+      .slice(0, limit);
+    return sorted;
   }
 
   async getListingById(id: number): Promise<Listing | undefined> {
