@@ -13,7 +13,7 @@ import { apiRequest } from "@/lib/queryClient";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BRANDS = ["Club Car", "Yamaha", "E-Z-GO", "ICON", "Star EV", "Advanced EV", "Bintelli", "Other"];
+const BRANDS = ["Advanced EV", "Bintelli", "Club Car", "E-Z-GO", "ICON", "Star EV", "Teko", "Verdi", "Venom", "Whisper", "Yamaha", "Other"];
 const STATES = [{ label: "Florida", value: "FL" }, { label: "Georgia", value: "GA" }];
 const SELLER_TYPES = [
   { label: "Dealer", value: "dealer" },
@@ -214,8 +214,10 @@ export default function Search() {
     if (selectedBrands.length > 0) {
       const match = selectedBrands.some((b) =>
         b === "Other"
-          ? !["Club Car", "Yamaha", "E-Z-GO", "ICON", "Star EV", "Advanced EV", "Bintelli"].includes(l.brand ?? "")
-          : l.brand === b
+          ? !["Advanced EV", "Bintelli", "Club Car", "E-Z-GO", "ICON", "Star EV", "Teko", "Verdi", "Venom", "Whisper", "Yamaha"].includes(l.brand ?? "")
+          : b === "Teko"
+            ? l.brand === "Teko" || l.brand === "Teko EV"
+            : l.brand === b
       );
       if (!match) return false;
     }
