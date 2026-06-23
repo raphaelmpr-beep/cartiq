@@ -132,13 +132,14 @@ export interface SeoArticle {
   metaDescription?: string;
   canonicalPath?: string;
   primaryKeyword?: string;
-  secondaryKeywords?: string; // JSON
+  secondaryKeywords?: string | string[]; // JSON array or already parsed
   h1?: string;
   shortAnswer?: string;
   body?: string;
   faqJson?: string; // JSON
   published: boolean;
-  updatedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Dealer {
