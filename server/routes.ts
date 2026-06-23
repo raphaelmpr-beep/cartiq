@@ -98,6 +98,93 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+
+  // ─── SEO: robots.txt ────────────────────────────────────────────────────────
+  app.get("/robots.txt", (_req, res) => {
+    res.type("text/plain").send(`# CartIQ — Florida & Georgia Golf Cart Price Intelligence
+# https://cartiq-chi.vercel.app
+
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api/
+Disallow: /my-garage
+
+User-agent: GPTBot
+Allow: /
+Disallow: /admin
+Disallow: /api/
+
+User-agent: Claude-Web
+Allow: /
+Disallow: /admin
+Disallow: /api/
+
+User-agent: PerplexityBot
+Allow: /
+Disallow: /admin
+Disallow: /api/
+
+User-agent: Google-Extended
+Allow: /
+Disallow: /admin
+Disallow: /api/
+
+Sitemap: https://cartiq-chi.vercel.app/sitemap.xml`);
+  });
+
+  // ─── SEO: llms.txt (AI crawler guidance) ────────────────────────────────────
+  app.get("/llms.txt", (_req, res) => {
+    res.type("text/plain").send(`# CartIQ — Florida & Georgia Golf Cart Price Intelligence
+# https://cartiq-chi.vercel.app
+
+## About CartIQ
+CartIQ is a golf cart market intelligence platform for Florida and Georgia.
+It aggregates 1,300+ listings from dealers, applies comp-based pricing (CarGurus-style),
+and provides deal ratings, buyer scores, and delivery-adjusted pricing.
+
+## Allowed for AI indexing
+- Public listing pages (/listing/*)
+- Search (/search), Buyer Guide (/buyer-guide/*), Homepage (/), Deal Checker (/deal-checker)
+
+## Restricted
+- /admin, /api/*, /my-garage
+
+## Attribution
+Source: CartIQ (cartiq-chi.vercel.app)`);
+  });
+
+  // ─── SEO: sitemap.xml (dynamic) ─────────────────────────────────────────────
+  app.get("/sitemap.xml", async (_req, res) => {
+    try {
+      const listings = await storage.getListings({ status: "active", public_listing: true });
+      const base = "https://cartiq-chi.vercel.app";
+      const today = new Date().toISOString().split("T")[0];
+      const staticPages = [
+        { path: "/",             priority: "1.0", changefreq: "weekly" },
+        { path: "/search",       priority: "0.9", changefreq: "daily"  },
+        { path: "/deal-checker", priority: "0.8", changefreq: "weekly" },
+        { path: "/buyer-guide",  priority: "0.7", changefreq: "weekly" },
+        { path: "/sell-my-cart", priority: "0.6", changefreq: "monthly"},
+      ];
+      const urls = [
+        ...staticPages.map(p =>
+          `  <url><loc>${base}${p.path}</loc><lastmod>${today}</lastmod><changefreq>${p.changefreq}</changefreq><priority>${p.priority}</priority></url>`
+        ),
+        ...listings.map((l: any) => {
+          const slug = l.slug ?? l.id;
+          const lastmod = (l.updatedAt ?? l.updated_at ?? today).toString().slice(0, 10);
+          return `  <url><loc>${base}/listing/${slug}</loc><lastmod>${lastmod}</lastmod><changefreq>weekly</changefreq><priority>0.6</priority></url>`;
+        }),
+      ];
+      res.type("application/xml").send(
+        `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`
+      );
+    } catch (e: any) {
+      res.status(500).send("<!-- sitemap error -->");
+    }
+  });
+
   // ─── Auth middleware ─────────────────────────────────────────────────────────
   function requireAdmin(req: any, res: any, next: any) {
     const token = req.headers["x-admin-token"] || req.query.adminToken;

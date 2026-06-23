@@ -1,3 +1,4 @@
+import { setSEO } from "@/lib/seo";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { SlidersHorizontal, X, MapPin } from "lucide-react";
@@ -157,6 +158,16 @@ interface ClientFilters {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function Search() {
+  // SEO
+  useEffect(() => {
+    const brand = filters.brands ? ` — ${filters.brands.split(",")[0]}` : "";
+    const loc = filters.state === "FL" ? " Florida" : filters.state === "GA" ? " Georgia" : " FL & GA";
+    setSEO({
+      title: `Golf Carts for Sale${brand}${loc}`,
+      description: `Browse ${loc.trim()} golf cart listings on CartIQ. Compare prices, deal ratings, and buyer scores from top dealers.`,
+      canonical: "https://cartiq-chi.vercel.app/search",
+    });
+  }, [filters.brands, filters.state]);
   const [filters, setFilters] = useState<ClientFilters>({});
   const [sort, setSort] = useState("best_match");
   const [drawerOpen, setDrawerOpen] = useState(false);

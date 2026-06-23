@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { setSEO, listingToProductSchema, breadcrumbSchema } from "@/lib/seo";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
 import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone, Mail, Store, User, Truck, ShieldCheck } from "lucide-react";
@@ -38,6 +40,25 @@ export default function ListingDetail() {
     enabled: !!dealerSlug && listing?.sellerType === "dealer",
     retry: false,
   });
+
+  // SEO — injected once listing loads
+  useEffect(() => {
+    if (!listing) return;
+    setSEO({
+      title: listing.title,
+      description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"} — CartIQ deal rating: ${listing.dealRating ?? "unknown"}.`,
+      image: listing.imageUrl ?? undefined,
+      canonical: `https://cartiq-chi.vercel.app/listing/${listing.slug ?? listing.id}`,
+      jsonLd: [
+        listingToProductSchema(listing),
+        breadcrumbSchema([
+          { name: "CartIQ", url: "https://cartiq-chi.vercel.app/" },
+          { name: "Search", url: "https://cartiq-chi.vercel.app/search" },
+          { name: listing.title, url: `https://cartiq-chi.vercel.app/listing/${listing.slug ?? listing.id}` },
+        ]),
+      ],
+    });
+  }, [listing]);
 
   if (isLoading) {
     return (

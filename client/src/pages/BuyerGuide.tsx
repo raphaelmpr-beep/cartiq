@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { setSEO } from "@/lib/seo";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
 import { ArrowLeft, BookOpen, ChevronRight } from "lucide-react";
@@ -8,6 +10,13 @@ import { parseJsonField } from "@/lib/utils";
 
 // ── Buyer Guide Index ──────────────────────────────────────────────────────────
 export function BuyerGuideIndex() {
+  useEffect(() => {
+    setSEO({
+      title: "Golf Cart Buyer Guide",
+      description: "Everything you need to know before buying a golf cart in Florida or Georgia. Battery types, brands, pricing, and what to look for.",
+      canonical: "https://cartiq-chi.vercel.app/buyer-guide",
+    });
+  }, []);
   const { data: articles = [], isLoading } = useQuery<SeoArticle[]>({
     queryKey: ["/api/buyer-guide"],
   });

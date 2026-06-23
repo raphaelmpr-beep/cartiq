@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle, HelpCircle, ArrowRight, ArrowLeft, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { formatPrice, dealRatingLabel, parseJsonField } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import type { DealCheck } from "@/lib/types";
 import { Link } from "wouter";
+import { setSEO } from "@/lib/seo";
 
 const SOURCE_PLATFORMS = [
   { value: "facebook_marketplace", label: "Facebook Marketplace" },
@@ -70,6 +71,14 @@ const defaultForm: FormData = {
 };
 
 export default function DealChecker() {
+  // SEO
+  useEffect(() => {
+    setSEO({
+      title: "Golf Cart Deal Checker",
+      description: "Check if a golf cart price is fair before you buy. CartIQ's Deal Checker compares your cart against real dealer comps in Florida and Georgia.",
+      canonical: "https://cartiq-chi.vercel.app/deal-checker",
+    });
+  }, []);
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormData>(defaultForm);
   const [result, setResult] = useState<DealCheck | null>(null);

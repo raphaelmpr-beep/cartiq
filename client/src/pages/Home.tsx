@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { ListingCard } from "@/components/ListingCard";
 import { MarketCompareCard } from "@/components/MarketCompareCard";
 import type { Listing, SeoArticle } from "@/lib/types";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
+import { setSEO } from "@/lib/seo";
 
 // Navigate to a hash route with query params encoded INSIDE the hash
 // e.g. hashNav("/search", { city: "Nocatee", state: "FL" })
@@ -18,6 +19,14 @@ function hashNav(path: string, params: Record<string, string> = {}) {
 }
 
 export default function Home() {
+  // SEO
+  useEffect(() => {
+    setSEO({
+      title: "Know the Right Cart. Pay the Right Price.",
+      description: "CartIQ is Florida & Georgia's golf cart price intelligence platform. Compare dealer prices, check fair value, and find great deals on new and used golf carts.",
+      canonical: "https://cartiq-chi.vercel.app/",
+    });
+  }, []);
   const [dealUrl, setDealUrl] = useState("");
   const [heroSearch, setHeroSearch] = useState("");
   const [, navigate] = useLocation();
