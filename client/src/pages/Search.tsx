@@ -13,7 +13,25 @@ import { apiRequest } from "@/lib/queryClient";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BRANDS = ["Advanced EV", "Bintelli", "Club Car", "E-Z-GO", "ICON", "Star EV", "Teko", "Verdi", "Venom", "Whisper", "Yamaha", "Other"];
+const BRANDS = [
+  "Bintelli",
+  "Club Car",
+  "Cushman",
+  "DACH",
+  "Denago EV",
+  "E-Z-GO",
+  "Epic",
+  "Evolution",
+  "GEM",
+  "ICON",
+  "MadJax",
+  "Sivo",
+  "Star EV",
+  "Teko EV",
+  "Verdi",
+  "Yamaha",
+  "Other",
+];
 const STATES = [{ label: "Florida", value: "FL" }, { label: "Georgia", value: "GA" }];
 const SELLER_TYPES = [
   { label: "Dealer", value: "dealer" },
@@ -212,12 +230,15 @@ export default function Search() {
     if (filters.sellerType && l.sellerType !== filters.sellerType) return false;
     // Brands (multi-select)
     if (selectedBrands.length > 0) {
+      const namedBrands = [
+        "Bintelli", "Club Car", "Cushman", "DACH", "Denago EV", "E-Z-GO",
+        "Epic", "Evolution", "GEM", "ICON", "MadJax",
+        "Sivo", "Star EV", "Teko EV", "Verdi", "Yamaha",
+      ];
       const match = selectedBrands.some((b) =>
         b === "Other"
-          ? !["Advanced EV", "Bintelli", "Club Car", "E-Z-GO", "ICON", "Star EV", "Teko", "Verdi", "Venom", "Whisper", "Yamaha"].includes(l.brand ?? "")
-          : b === "Teko"
-            ? l.brand === "Teko" || l.brand === "Teko EV"
-            : l.brand === b
+          ? !namedBrands.includes(l.brand ?? "")
+          : l.brand === b
       );
       if (!match) return false;
     }

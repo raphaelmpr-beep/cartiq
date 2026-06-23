@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { MapPin, Users, Phone, Store, ExternalLink } from "lucide-react";
+import { MapPin, Users, Phone, Store, ExternalLink, Car } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DealBadge, SourceBadge, BuyerScoreBadge, WarrantyBadge, DeliveryCostBadge, BatteryRiskBadge, DealDeltaBadge, StreetLegalBadge, RetailSourceBadge } from "./Badges";
@@ -38,10 +38,11 @@ export function ListingCard({ listing, compact }: ListingCardProps) {
           />
         ) : null}
         <div
-          className="img-fallback w-full h-full items-center justify-center bg-muted text-muted-foreground text-sm"
+          className="img-fallback w-full h-full flex-col items-center justify-center bg-muted text-muted-foreground gap-2"
           style={{ display: listing.imageUrl ? "none" : "flex" }}
         >
-          No Image
+          <Car className="h-10 w-10 opacity-25" />
+          <span className="text-xs opacity-40 font-medium">{listing.brand ?? "Golf Cart"}</span>
         </div>
         <div className="absolute top-2 left-2">
           <DealBadge rating={listing.dealRating} />
