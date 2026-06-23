@@ -1209,5 +1209,61 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
+  // POST /api/admin/detect-source — queue a crawl4ai platform-detection job
+  app.post("/api/admin/detect-source", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { dealer_slug } = req.body as { dealer_slug?: string };
+      if (!dealer_slug) return res.status(400).json({ error: "dealer_slug is required" });
+
+      const { data: dealer, error: dealerErr } = await sb
+        .from("dealers")
+        .select("slug, website_url, adapter_key")
+        .eq("slug", dealer_slug)
+        .maybeSingle();
+      if (dealerErr) return res.status(500).json({ error: dealerErr.message });
+      if (!dealer) return res.status(404).json({ error: "Dealer not found" });
+      if (!dealer.website_url) return res.status(400).json({ error: "Dealer has no website_url" });
+      if (dealer.adapter_key) return res.status(400).json({ error: "Dealer already has adapter_key set" });
+
+      const { data: job, error: jobErr } = await sb
+        .from("detect_source_jobs")
+        .insert({ dealer_slug, status: "queued" })
+        .select("id")
+        .single();
+      if (jobErr) return res.status(500).json({ error: jobErr.message });
+
+      res.status(202).json({
+        job_id: job.id,
+        dealer_slug,
+        status: "queued",
+        message: "Detection job queued",
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/admin/detect-source-jobs?dealer_slug=:slug — recent detection jobs for a dealer
+  app.get("/api/admin/detect-source-jobs", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const dealer_slug = req.query.dealer_slug as string | undefined;
+      if (!dealer_slug) return res.status(400).json({ error: "dealer_slug is required" });
+      const { data, error } = await sb
+        .from("detect_source_jobs")
+        .select("*")
+        .eq("dealer_slug", dealer_slug)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (error) return res.status(500).json({ error: error.message });
+      res.json(data || []);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   return httpServer;
 }

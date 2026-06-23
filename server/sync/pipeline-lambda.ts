@@ -485,6 +485,79 @@ function computeDealRating(price: number | null | undefined, brand: string | nul
   return 'over_market';
 }
 
+// ─── GCR JSON-LD enrichment (HTTP only, no browser) ──────────────────────────
+
+export interface ListingEnrichment {
+  seating: number | null;
+  power_type: string | null;
+  lifted: boolean;
+  color: string | null;
+}
+
+function parseSeatingFromModel(model: string): number | null {
+  const m = model.match(/(\d+)\s*Passenger/i);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if ([2, 4, 6, 8].includes(n)) return n;
+  }
+  return null;
+}
+
+function parsePowerTypeFromModel(model: string): string | null {
+  if (/electric|lithium/i.test(model)) return 'electric';
+  if (/\bgas\b/i.test(model)) return 'gas';
+  return null;
+}
+
+/**
+ * Fetch a GCR/DX1 listing page and extract enrichment from its JSON-LD Product block.
+ * No Playwright — GCR pages are SSR. Never throws: returns {} on any failure.
+ */
+export async function enrichFromJsonLd(listingPageUrl: string): Promise<Partial<ListingEnrichment>> {
+  try {
+    const res = await fetch(listingPageUrl, {
+      headers: { 'User-Agent': 'CartIQ/1.0' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) {
+      console.warn(`[enrichFromJsonLd] ${listingPageUrl} returned ${res.status}`);
+      return {};
+    }
+    const html = await res.text();
+
+    const blocks = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g) || [];
+    let product: any = null;
+    for (const block of blocks) {
+      const jsonText = block.replace(/<script type="application\/ld\+json">/, '').replace(/<\/script>/, '').trim();
+      try {
+        const parsed = JSON.parse(jsonText);
+        const candidates = Array.isArray(parsed) ? parsed : (Array.isArray(parsed['@graph']) ? parsed['@graph'] : [parsed]);
+        for (const c of candidates) {
+          if (c && c['@type'] === 'Product') { product = c; break; }
+        }
+      } catch { /* skip malformed block */ }
+      if (product) break;
+    }
+
+    if (!product) {
+      console.warn(`[enrichFromJsonLd] No JSON-LD Product found at ${listingPageUrl}`);
+      return {};
+    }
+
+    const modelName: string = typeof product.model === 'string' ? product.model : '';
+
+    return {
+      seating: parseSeatingFromModel(modelName),
+      power_type: parsePowerTypeFromModel(modelName),
+      lifted: /lifted/i.test(modelName),
+      color: typeof product.color === 'string' ? (cleanText(product.color) || null) : null,
+    };
+  } catch (e: any) {
+    console.warn(`[enrichFromJsonLd] failed for ${listingPageUrl}: ${e?.message || e}`);
+    return {};
+  }
+}
+
 // ─── Slug generator ──────────────────────────────────────────────────────────
 function makeSlug(title: string, city: string | null, suffix: number): string {
   const base = [title, city].filter(Boolean).join(' ')
@@ -521,6 +594,19 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
   // until comps are verified via the CartIQ admin valuation workflow.
   const slug = makeSlug(title, city, Date.now() % 1000000);
 
+  // GCR JSON-LD enrichment — only for gcr_wordpress dealers, never fatal.
+  let enrichment: Partial<ListingEnrichment> = {};
+  if (imp.dealer_slug && imp.source_url) {
+    const { data: dealerRec } = await supabase
+      .from('dealers')
+      .select('platform_type')
+      .eq('slug', imp.dealer_slug)
+      .maybeSingle();
+    if (dealerRec?.platform_type === 'gcr_wordpress') {
+      enrichment = await enrichFromJsonLd(imp.source_url);
+    }
+  }
+
   const newListing = {
     title,
     slug,
@@ -543,6 +629,10 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
     status: 'active',
     public_listing: true,
     seller_type: 'dealer',
+    ...(enrichment.seating != null ? { seating: enrichment.seating } : {}),
+    ...(enrichment.power_type != null ? { power_type: enrichment.power_type } : {}),
+    ...(enrichment.lifted != null ? { lifted: enrichment.lifted } : {}),
+    ...(enrichment.color != null ? { color: enrichment.color } : {}),
   };
 
   result.processed++;

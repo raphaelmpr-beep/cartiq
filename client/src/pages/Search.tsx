@@ -108,7 +108,7 @@ const FILTER_LABELS: Record<string, (v: string) => string> = {
   state: (v) => ({ FL: "Florida", GA: "Georgia" }[v] ?? v),
   sellerType: (v) => ({ dealer: "Dealer", private: "Private Seller", retail: "Retail" }[v] ?? v),
   brands: (v) => `Brand: ${v}`,
-  seating: (v) => ({ "4": "4-Seat", "6plus": "6+ Seat" }[v] ?? v),
+  seating: (v) => ({ "2": "2-Seat", "4": "4-Seat", "6": "6-Seat", "8plus": "8+ Seat" }[v] ?? v),
   powerType: (v) => ({ electric: "Electric", gas: "Gas" }[v] ?? v),
   minPrice: (v) => `Min $${Number(v).toLocaleString()}`,
   maxPrice: (v) => `Max $${Number(v).toLocaleString()}`,
@@ -124,7 +124,7 @@ interface ClientFilters {
   state?: string;
   sellerType?: string;
   brands?: string;        // comma-separated brand list
-  seating?: string;       // "4" | "6plus"
+  seating?: string;       // "2" | "4" | "6" | "8plus"
   powerType?: string;     // "electric" | "gas"
   minPrice?: string;
   maxPrice?: string;
@@ -219,9 +219,11 @@ export default function Search() {
       );
       if (!match) return false;
     }
-    // Seating
-    if (filters.seating === "4" && (l.seating ?? 0) > 4) return false;
-    if (filters.seating === "6plus" && (l.seating ?? 0) < 6) return false;
+    // Seating — exact match for 2/4/6, 8+ for 8plus
+    if (filters.seating === "2" && l.seating !== 2) return false;
+    if (filters.seating === "4" && l.seating !== 4) return false;
+    if (filters.seating === "6" && l.seating !== 6) return false;
+    if (filters.seating === "8plus" && (l.seating ?? 0) < 8) return false;
     // Power type
     if (filters.powerType && l.powerType !== filters.powerType) return false;
     // Price
@@ -363,8 +365,10 @@ export default function Search() {
         <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">Seating</label>
         <div className="flex gap-2">
           {[
-            { label: "4-Seat", value: "4" },
-            { label: "6+ Seat", value: "6plus" },
+            { label: "2", value: "2" },
+            { label: "4", value: "4" },
+            { label: "6", value: "6" },
+            { label: "8+", value: "8plus" },
           ].map((o) => (
             <button
               key={o.value}
