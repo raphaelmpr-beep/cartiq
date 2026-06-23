@@ -1,6 +1,6 @@
 import { setSEO } from "@/lib/seo";
 import { useQuery } from "@tanstack/react-query";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { SlidersHorizontal, X, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -163,7 +163,6 @@ export default function Search() {
   const [sort, setSort] = useState("best_match");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [zipError, setZipError] = useState("");
-  const initializedRef = useRef(false);
 
   // SEO — must come after useState so filters is defined
   useEffect(() => {
@@ -176,16 +175,19 @@ export default function Search() {
     });
   }, [filters.brands, filters.state]);
 
-  // Parse URL params on first load
+  // Parse URL params on mount — reads hash synchronously (hashNav uses pushState+hashchange)
   useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-    const search = window.location.hash.split("?")[1] || "";
-    const params = new URLSearchParams(search);
-    const init: ClientFilters = {};
-    params.forEach((v, k) => { (init as any)[k] = v; });
-    if (init.q) { /* keyword captured in filters */ }
-    setFilters(init);
+    function readHash() {
+      const search = window.location.hash.split("?")[1] || "";
+      const params = new URLSearchParams(search);
+      const init: ClientFilters = {};
+      params.forEach((v, k) => { (init as any)[k] = v; });
+      setFilters(init);
+    }
+    readHash();
+    // Belt-and-suspenders: if hash wasn't committed yet, catch it on change
+    window.addEventListener("hashchange", readHash, { once: true });
+    return () => window.removeEventListener("hashchange", readHash);
   }, []);
 
   // Sync filters to URL

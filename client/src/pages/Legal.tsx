@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { setSEO } from "@/lib/seo";
 import { Link } from "wouter";
-import { ShieldCheck, ExternalLink, BookOpen, AlertCircle, Mail } from "lucide-react";
+import { ShieldCheck, ExternalLink, BookOpen, AlertCircle, Mail, Scale } from "lucide-react";
 
 const LAST_UPDATED = "June 23, 2026";
 
@@ -86,8 +86,9 @@ export default function Disclosure() {
               { id: "how-we-display-them",      label: "How We Display Them" },
               { id: "pricing-tools",            label: "Pricing Tools" },
               { id: "data-we-dont-use",         label: "Data We Don't Use" },
-              { id: "removal-requests",         label: "Removal Requests" },
-              { id: "contact",                  label: "Contact" },
+              { id: "copyright-and-factual-data", label: "Copyright & Factual Data" },
+              { id: "removal-requests",          label: "Removal Requests" },
+              { id: "contact",                   label: "Contact" },
             ].map(({ id, label }) => (
               <a
                 key={id}
@@ -200,7 +201,71 @@ export default function Disclosure() {
             </GreenBox>
           </Section>
 
-          {/* 5 — Removal requests */}
+          {/* 5 — Copyright & Factual Data */}
+          <Section
+            id="copyright-and-factual-data"
+            icon={<Scale className="h-5 w-5" />}
+            title="Copyright, Factual Data & Our Legal Basis"
+          >
+            <P>
+              Some dealer websites display broad copyright notices — for example, claiming that "content,
+              including images, displayed on this website is protected by copyright laws" and that
+              "downloading, republication, retransmission or reproduction" is prohibited.
+              CartIQ takes these notices seriously, and we operate well within the boundaries of
+              U.S. copyright law.
+            </P>
+
+            <GreenBox label="Facts are not copyrightable — U.S. Supreme Court">
+              In <em>Feist Publications, Inc. v. Rural Telephone Service Co.</em> (1991), the U.S. Supreme
+              Court held that facts — regardless of the effort required to compile them — are not protectable
+              by copyright. Copyright protects original creative expression, not facts, ideas, systems, or
+              methods of operation. The U.S. Copyright Office affirms this principle.
+            </GreenBox>
+
+            <P>
+              The information CartIQ indexes — cart brand, model, year, condition, asking price, and dealer
+              name — is factual data. These are not creative works. A dealer listing that states
+              "2024 Club Car Onward, 4-passenger, $11,995" conveys facts. Copyright does not
+              protect the underlying facts, only an author's original creative expression of those facts.
+            </P>
+
+            <P>
+              The relevant legal standards that define CartIQ's operating basis:
+            </P>
+            <Ul items={[
+              <>
+                <strong className="font-medium text-foreground">Feist v. Rural (1991)</strong> — The "sweat of the brow" doctrine does not create copyright in factual compilations. Facts remain in the public domain regardless of the effort required to gather them.
+              </>,
+              <>
+                <strong className="font-medium text-foreground">17 U.S.C. § 102(b)</strong> — U.S. copyright law explicitly excludes protection for "any idea, procedure, process, system, method of operation, concept, principle, or discovery" — which encompasses publicly listed pricing and specifications.
+              </>,
+              <>
+                <strong className="font-medium text-foreground">Thin copyright in compilations</strong> — A dealer's compiled product database may receive "thin" copyright protection only over original creative selection or arrangement — not the underlying facts. Accessing and displaying the individual facts is not infringement.
+              </>,
+              <>
+                <strong className="font-medium text-foreground">Images displayed from source</strong> — CartIQ does not download, host, or reproduce dealer images. Listing images are displayed by reference to the dealer's own publicly accessible URL (hotlinking from the original source), which is standard indexing practice and does not constitute reproduction or redistribution.
+              </>,
+              <>
+                <strong className="font-medium text-foreground">Registration requirement</strong> — Under 17 U.S.C. § 411, a copyright holder generally must register the work before filing an infringement suit for domestic works. Broad footer notices do not substitute for registration, and unregistered works are not eligible for statutory damages or attorney's fees.
+              </>,
+            ]} />
+
+            <P>
+              CartIQ does not copy, reproduce, or redistribute any dealer's original creative content —
+              including proprietary photography, original written descriptions, logos, or branded marketing
+              materials — without authorization. We index factual data and link users back to the dealer's
+              own website for all further engagement.
+            </P>
+
+            <P>
+              Dealers who prefer their inventory not be indexed by CartIQ may submit a removal request
+              using the contact information in the section below. We will remove listings promptly upon
+              a substantiated request. We also honor <code className="text-xs bg-muted px-1 py-0.5 rounded">X-Robots-Tag: noindex</code> and{" "}
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">robots.txt</code> directives where present.
+            </P>
+          </Section>
+
+          {/* 6 — Removal requests */}
           <Section
             id="removal-requests"
             icon={<Mail className="h-5 w-5" />}

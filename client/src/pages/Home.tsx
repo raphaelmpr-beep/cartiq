@@ -13,10 +13,15 @@ import { PriceDealsCarousel } from "@/components/PriceDealsCarousel";
 
 // Navigate to a hash route with query params encoded INSIDE the hash
 // e.g. hashNav("/search", { city: "Nocatee", state: "FL" })
-// → sets window.location.hash = "#/search?city=Nocatee&state=FL"
+// → navigates to  #/search?city=Nocatee&state=FL
+// Uses replace() so the hash is committed synchronously before the route component mounts.
 function hashNav(path: string, params: Record<string, string> = {}) {
   const qs = new URLSearchParams(params).toString();
-  window.location.hash = qs ? `#${path}?${qs}` : `#${path}`;
+  const target = qs ? `${path}?${qs}` : path;
+  // replaceState keeps the hash in sync without a full navigation, then
+  // dispatch hashchange so wouter re-renders the correct route.
+  window.history.pushState(null, "", `#${target}`);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
 
 export default function Home() {
