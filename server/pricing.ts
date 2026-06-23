@@ -99,6 +99,7 @@ const BRAND_TIERS: Record<string, { base: number; tier: string }> = {
   "epic":       { base: 12000, tier: "standard" },
   "evolution":  { base: 11000, tier: "standard" },
   "cushman":    { base: 12000, tier: "standard" },
+  "sierra":     { base: 12000, tier: "standard" },  // LSV/street-legal focus
   // Value — newer brands with growing FL/GA footprint
   "bintelli":   { base: 10500, tier: "value" },
   "madjax":     { base: 9500,  tier: "value" },

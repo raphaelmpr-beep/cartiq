@@ -25,6 +25,7 @@ const BRANDS = [
   "GEM",
   "ICON",
   "MadJax",
+  "Sierra",
   "Sivo",
   "Star EV",
   "Teko EV",
@@ -233,7 +234,7 @@ export default function Search() {
       const namedBrands = [
         "Bintelli", "Club Car", "Cushman", "DACH", "Denago EV", "E-Z-GO",
         "Epic", "Evolution", "GEM", "ICON", "MadJax",
-        "Sivo", "Star EV", "Teko EV", "Verdi", "Yamaha",
+        "Sierra", "Sivo", "Star EV", "Teko EV", "Verdi", "Yamaha",
       ];
       const match = selectedBrands.some((b) =>
         b === "Other"
