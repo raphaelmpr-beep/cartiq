@@ -99,6 +99,16 @@ export function ArticleDetail() {
 
   const faqs = parseJsonField<{ q: string; a: string }>(article.faqJson);
 
+  useEffect(() => {
+    if (article) {
+      setSEO({
+        title: article.title,
+        description: article.metaDescription || article.shortAnswer || undefined,
+        canonical: article.canonicalPath || `/buyer-guide/${article.slug}`,
+      });
+    }
+  }, [article]);
+
   // Render simple markdown-ish body (bold, headers, paragraphs, lists, tables)
   function renderBody(body: string) {
     const lines = body.split("\n");
