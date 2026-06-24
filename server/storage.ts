@@ -111,7 +111,7 @@ class SupabaseStorage implements IStorage {
       .eq("status", "active")
       .eq("public_listing", true)
       .order("created_at", { ascending: false })
-      .limit(hardLimit);
+      .range(0, hardLimit - 1);  // explicit range bypasses Supabase 1000-row default cap
 
     if (filters.state)       q = q.eq("state", filters.state);
     if (filters.brand)       q = q.ilike("brand", filters.brand as string);
