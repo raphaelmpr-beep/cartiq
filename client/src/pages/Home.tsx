@@ -67,58 +67,44 @@ export default function Home() {
 
   return (
     <div className="min-h-screen">
-      {/* ─── Hero ─────────────────────────────────────────────────────────────── */}
+      {/* ─── Hero + Hot Deals (above the fold) ─────────────────────────────── */}
       <section className="bg-gradient-to-br from-gray-50 to-white border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 py-5 md:py-8">
-          <div className="grid md:grid-cols-2 gap-10 items-center">
-            {/* Copy */}
-            <div className="space-y-6">
+        {/* Top bar: headline + search */}
+        <div className="max-w-7xl mx-auto px-4 pt-5 pb-4 md:pt-7 md:pb-5">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+            <div className="space-y-2 md:space-y-3">
               <div className="inline-flex items-center gap-2 bg-green-50 text-green-700 border border-green-200 px-3 py-1 rounded-full text-xs font-semibold">
-                Florida & Georgia Golf Cart Intelligence
+                Florida &amp; Georgia Golf Cart Intelligence
               </div>
-              <h1 className="text-4xl md:text-5xl font-extrabold leading-tight tracking-tight text-foreground">
-                Know the Right Cart.<br />
+              <h1 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-tight text-foreground">
+                Know the Right Cart.{" "}
                 <span className="text-green-600">Pay the Right Price.</span>
               </h1>
-              <p className="text-base text-muted-foreground max-w-lg">
-                Browse new &amp; used golf carts across FL &amp; GA. Compare prices, battery setup, warranty, and delivery before you buy.
-              </p>
-              {/* Hero search input */}
-              <form onSubmit={handleHeroSearch} className="flex gap-2 max-w-md">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    className="pl-9"
-                    placeholder="Brand, model, city…"
-                    value={heroSearch}
-                    onChange={(e) => setHeroSearch(e.target.value)}
-                    data-testid="hero-search-input"
-                  />
-                </div>
-                <Button type="submit" className="gap-2 shrink-0" data-testid="hero-search-btn">
-                  <Search className="h-4 w-4" /> Search
-                </Button>
-              </form>
-              <div className="flex flex-wrap gap-3">
-                <Link href="/deal-checker" className="inline-flex">
-                  <Button size="lg" variant="outline" className="gap-2" data-testid="hero-deal-checker-btn">
-                    <ClipboardCheck className="h-4 w-4" /> Check a Deal
-                  </Button>
-                </Link>
+            </div>
+            {/* Search bar — right-aligned on desktop, full-width on mobile */}
+            <form onSubmit={handleHeroSearch} className="flex gap-2 w-full md:max-w-sm shrink-0">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  placeholder="Brand, model, city…"
+                  value={heroSearch}
+                  onChange={(e) => setHeroSearch(e.target.value)}
+                  data-testid="hero-search-input"
+                />
               </div>
-
-            </div>
-
-            {/* Market Compare Card */}
-            <div className="flex justify-center md:justify-end">
-              <MarketCompareCard listing={sampleCompare} />
-            </div>
+              <Button type="submit" className="gap-2 shrink-0" data-testid="hero-search-btn">
+                <Search className="h-4 w-4" /> Search
+              </Button>
+            </form>
           </div>
         </div>
-      </section>
 
-      {/* ─── Price Deals Carousel ─────────────────────────────────────────────── */}
-      <PriceDealsCarousel />
+        {/* ── Hot Deals strip — NO section gap, directly under headline ── */}
+        <div className="border-t border-border">
+          <PriceDealsCarousel inline />
+        </div>
+      </section>
 
       {/* ─── Featured Listings ────────────────────────────────────────────────── */}
       {featured.length > 0 && (
