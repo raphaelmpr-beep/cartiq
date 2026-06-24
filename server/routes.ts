@@ -75,15 +75,20 @@ function enrichListingWithPricing(data: Record<string, any>): Record<string, any
 
 // Async (comp-aware) pricing — used for single listing create/update
 async function enrichListingWithComps(data: Record<string, any>, excludeId?: number): Promise<Record<string, any>> {
-  const brand     = data.brand ?? data.brand;
-  const model     = data.model ?? data.model;
+  const brand     = data.brand;
+  const model     = data.model;
   const year      = data.year ?? new Date().getFullYear();
   const condition = data.condition ?? "new";
   let comps: any[] = [];
+  let brandComps: any[] = [];
   if (brand && model) {
     comps = await storage.getCompsForListing(brand, model, year, condition, excludeId);
   }
-  const pricing = enrichListing(data, comps);
+  // Brand-only fallback when exact model returns no comps
+  if (comps.length === 0 && brand) {
+    brandComps = await storage.getBrandCompsForListing(brand, year, condition, excludeId);
+  }
+  const pricing = enrichListing(data, comps, brandComps);
   return { ...data, ...pricing };
 }
 
@@ -721,24 +726,38 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
   // Backfills cartiq_estimated_value, deal_rating, deal_delta, buyer_score,
   // price_confidence, valuation_confidence for every active public listing.
   // Uses comp-based IMV engine. Safe to call multiple times (idempotent).
+  //
+  // Chunked mode (avoids Vercel 10s timeout):
+  //   POST /api/admin/reprice-all { "offset": 0,   "limit": 150 }  → processes listings 0–149
+  //   POST /api/admin/reprice-all { "offset": 150, "limit": 150 }  → processes listings 150–299
+  //   ... repeat until hasMore === false
+  // If offset/limit are omitted, processes ALL listings (backward-compatible).
   app.post("/api/admin/reprice-all", requireAdmin, async (req, res) => {
-    const BATCH = 100;
-    let offset = 0;
+    const body = req.body as any;
+    const isChunked = body?.offset !== undefined && body?.limit !== undefined;
+    const chunkOffset: number = isChunked ? Number(body.offset) : 0;
+    const chunkLimit:  number = isChunked ? Number(body.limit)  : 0;
+
+    const BATCH = isChunked ? chunkLimit : 100;
+    let offset  = chunkOffset;
     let processed = 0;
     let updated = 0;
+    let totalCount = 0;
     const errors: string[] = [];
 
     try {
-      const totalCount = await storage.getListingCount();
-      console.log(`[reprice-all] Starting — ${totalCount} listings`);
+      totalCount = await storage.getListingCount();
+      console.log(`[reprice-all] Starting — offset=${offset} limit=${isChunked ? chunkLimit : 'all'} total=${totalCount}`);
 
       while (true) {
-        const batch = await storage.getAllListingsForReprice(offset, BATCH);
+        const fetchLimit = isChunked ? chunkLimit : BATCH;
+        const batch = await storage.getAllListingsForReprice(offset, fetchLimit);
         if (!batch.length) break;
 
         // Fetch comps for each unique brand+model+year+condition group once
         type CompKey = string;
-        const compCache = new Map<CompKey, any[]>();
+        const compCache      = new Map<CompKey, any[]>();
+        const brandCompCache = new Map<string, any[]>();
 
         for (const listing of batch) {
           processed++;
@@ -757,7 +776,20 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
             }
 
             const comps = compCache.get(key)!;
-            const pricing = enrichListing(listing, comps);
+
+            // Brand-only fallback: when exact model has 0 comps, try brand-level
+            let brandComps: any[] = [];
+            if (comps.length === 0 && brand) {
+              const brandKey = `${brand}||${year}||${condition}`;
+              if (!brandCompCache.has(brandKey)) {
+                brandComps = await storage.getBrandCompsForListing(brand, year, condition, listing.id);
+                brandCompCache.set(brandKey, brandComps);
+              } else {
+                brandComps = brandCompCache.get(brandKey)!;
+              }
+            }
+
+            const pricing = enrichListing(listing, comps, brandComps);
 
             // Only write fields managed by the pricing engine
             const patch: Record<string, any> = {
@@ -778,13 +810,16 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
           }
         }
 
-        offset += BATCH;
+        offset += batch.length;
         console.log(`[reprice-all] Progress: ${processed} processed, ${updated} updated`);
-        if (batch.length < BATCH) break;
+
+        // In chunked mode: always stop after one pass (caller drives pagination)
+        if (isChunked || batch.length < fetchLimit) break;
       }
 
-      console.log(`[reprice-all] Done — ${updated}/${processed} updated, ${errors.length} errors`);
-      res.json({ processed, updated, errors: errors.slice(0, 20) });
+      const hasMore = isChunked ? (chunkOffset + chunkLimit) < totalCount : false;
+      console.log(`[reprice-all] Done — ${updated}/${processed} updated, ${errors.length} errors, hasMore=${hasMore}`);
+      res.json({ ok: true, processed, updated, offset: chunkOffset, limit: isChunked ? chunkLimit : totalCount, hasMore, total: totalCount, errors: errors.slice(0, 20) });
     } catch (e: any) {
       res.status(500).json({ error: e.message, processed, updated });
     }

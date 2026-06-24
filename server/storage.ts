@@ -57,6 +57,7 @@ export interface IStorage {
   updateRetailSource(id: number, data: Partial<InsertRetailSource>): Promise<RetailSource | undefined>;
 
   getCompsForListing(brand: string, model: string, year: number, condition: string, excludeId?: number): Promise<any[]>;
+  getBrandCompsForListing(brand: string, year: number, condition: string, excludeId?: number): Promise<any[]>;
   getAllListingsForReprice(offset: number, limit: number): Promise<any[]>;
   getListingCount(): Promise<number>;
 
@@ -227,6 +228,29 @@ class SupabaseStorage implements IStorage {
       .eq("public_listing", true)
       .eq("brand", brand)
       .eq("model", model)
+      .eq("condition", condition)
+      .gte("year", year - 1)
+      .lte("year", year + 1)
+      .not("asking_price", "is", null)
+      .limit(60);
+    if (excludeId) q = q.neq("id", excludeId);
+    const { data } = await q;
+    return (data ?? []) as any[];
+  }
+
+  // ─── Brand-only comp fallback (same brand, any model, year±1, same condition) ─
+  async getBrandCompsForListing(
+    brand: string,
+    year: number,
+    condition: string,
+    excludeId?: number
+  ): Promise<any[]> {
+    let q = db()
+      .from("listings")
+      .select("asking_price,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available")
+      .eq("status", "active")
+      .eq("public_listing", true)
+      .eq("brand", brand)
       .eq("condition", condition)
       .gte("year", year - 1)
       .lte("year", year + 1)

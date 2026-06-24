@@ -85,36 +85,47 @@ export interface PricingResult {
 
 // =============================================================================
 // Brand Tier Bases (FL/GA dealer new cart market, 2026 baseline)
+// Calibrated from real listing medians — updated June 2026
 // =============================================================================
 const BRAND_TIERS: Record<string, { base: number; tier: string }> = {
-  // Premium — high resale, strong dealer network
-  "club car":   { base: 13500, tier: "premium" },
-  "e-z-go":     { base: 13000, tier: "premium" },
-  "ezgo":       { base: 13000, tier: "premium" },
-  "yamaha":     { base: 12500, tier: "premium" },
+  // Premium — highest resale, strongest dealer network
+  "star ev":    { base: 26000, tier: "premium" },  // real median: $26k (n=large)
+  "yamaha":     { base: 20500, tier: "premium" },  // real median: $20.5k
+  "atlas":      { base: 16500, tier: "premium" },  // new brand, strong price point
+  "epic":       { base: 16000, tier: "premium" },
   // Standard — solid market penetration, known brands
-  "icon":       { base: 11500, tier: "standard" },
-  "star ev":    { base: 11000, tier: "standard" },
+  "venom ev":   { base: 17000, tier: "standard" }, // Let's Go Carting median
+  "venom":      { base: 17000, tier: "standard" }, // alt name match
+  "rover":      { base: 13000, tier: "standard" }, // 12 listings
+  "e-z-go":     { base: 14500, tier: "standard" },
+  "ezgo":       { base: 14500, tier: "standard" },
+  "club car":   { base: 14000, tier: "standard" },
+  "sivo":       { base: 15000, tier: "standard" },
+  "madjax":     { base: 14500, tier: "standard" },
+  "dach":       { base: 14500, tier: "standard" },
+  "bintelli":   { base: 14000, tier: "standard" },
+  "icon":       { base: 13400, tier: "standard" },
+  "cushman":    { base: 12600, tier: "standard" },
   "advanced ev":{ base: 11000, tier: "standard" },
-  "epic":       { base: 12000, tier: "standard" },
   "evolution":  { base: 11000, tier: "standard" },
-  "cushman":    { base: 12000, tier: "standard" },
-  "sierra":     { base: 12000, tier: "standard" },  // LSV/street-legal focus
-  // Value — newer brands with growing FL/GA footprint
-  "bintelli":   { base: 10500, tier: "value" },
-  "madjax":     { base: 9500,  tier: "value" },
-  "teko ev":    { base: 10500, tier: "value" },
-  "teko":       { base: 10000, tier: "value" },
-  "dach":       { base: 10500, tier: "value" },
-  "sivo":       { base: 10000, tier: "value" },
-  "tara":       { base: 9500,  tier: "value" },
-  "verdi":      { base: 9500,  tier: "value" },
-  "whisper":    { base: 9000,  tier: "value" },
-  "venom":      { base: 9000,  tier: "value" },
+  "sierra":     { base: 12000, tier: "standard" }, // LSV/street-legal focus
+  "lion":       { base: 11000, tier: "standard" },
+  // Value — newer or emerging brands
+  "teko ev":    { base: 12000, tier: "value" },
+  "teko":       { base: 11500, tier: "value" },
+  "denago ev":  { base: 11000, tier: "value" },
+  "denago":     { base: 11000, tier: "value" },
+  "verdi":      { base: 10000, tier: "value" },
+  "amped":      { base: 10000, tier: "value" },
+  "honor":      { base: 10000, tier: "value" },
   "gem":        { base: 10000, tier: "value" },
+  "royal ev":   { base: 9500,  tier: "value" },
   "blue cell":  { base: 9500,  tier: "value" },
-  "denago":     { base: 9500,  tier: "value" },
+  "tara":       { base: 9500,  tier: "value" },
   "star":       { base: 10000, tier: "value" },
+  "moxi":       { base: 9000,  tier: "value" },
+  "monster":    { base: 9000,  tier: "value" },
+  "whisper":    { base: 9000,  tier: "value" },
 };
 const BUDGET_BASE = 7500;
 const UNKNOWN_BASE = 8000;
@@ -189,8 +200,9 @@ function featureAdjustments(input: PricingInput): number {
 // =============================================================================
 // computeIMV — Tiered comp-based market value
 // comps: array of active listings with same brand+model, year±1, same condition
+// brandComps: brand-only fallback comps (different model, same brand+year+condition)
 // =============================================================================
-export function computeIMV(input: PricingInput, comps: CompListing[]): IMVResult {
+export function computeIMV(input: PricingInput, comps: CompListing[], brandComps?: CompListing[]): IMVResult {
   const validComps = comps.filter(c => c.asking_price > 500 && c.asking_price < 100000);
 
   // ── Tier 1: ≥3 direct comps — use trimmed median ─────────────────────────
@@ -215,6 +227,30 @@ export function computeIMV(input: PricingInput, comps: CompListing[]): IMVResult
     // 60% comp / 40% formula when few comps
     const imv = Math.round(compAvg * 0.60 + formulaIMV * 0.40);
     return { imv, priceConfidence: "medium", compCount: validComps.length, compTier: 2 };
+  }
+
+  // ── Tier 2b: Brand-only fallback — same brand, any model, year±1 ─────────
+  // Used when no exact brand+model comps exist (e.g., rare model or new brand)
+  const validBrandComps = (brandComps ?? []).filter(c => c.asking_price > 500 && c.asking_price < 100000);
+  if (validBrandComps.length >= 3) {
+    const prices = validBrandComps.map(c => c.asking_price).sort((a, b) => a - b);
+    const trim = Math.floor(prices.length * 0.10);
+    const trimmed = prices.slice(trim, prices.length - trim || undefined);
+    const imv = Math.round(median(trimmed));
+    // Brand-only comps are less precise — confidence capped at medium
+    return {
+      imv,
+      priceConfidence: "medium",
+      compCount: validBrandComps.length,
+      compTier: 2,
+    };
+  }
+
+  if (validBrandComps.length >= 1) {
+    const compAvg = validBrandComps.reduce((s, c) => s + c.asking_price, 0) / validBrandComps.length;
+    const formulaIMV = computeFormulaIMV(input);
+    const imv = Math.round(compAvg * 0.50 + formulaIMV * 0.50);
+    return { imv, priceConfidence: "medium", compCount: validBrandComps.length, compTier: 2 };
   }
 
   // ── Tier 3: No comps — pure formula ──────────────────────────────────────
@@ -325,10 +361,12 @@ export function computeBuyerScore(input: PricingInput, dealRating: string): numb
 // =============================================================================
 // enrichListing — Main entry point called at write time and in reprice-all
 // Returns the pricing fields to persist to Supabase
+// brandComps: optional brand-only fallback comps (pass when no exact model comps)
 // =============================================================================
 export function enrichListing(
   listing: Record<string, any>,
-  comps: CompListing[]
+  comps: CompListing[],
+  brandComps?: CompListing[]
 ): {
   cartiq_estimated_value: number;
   deal_rating: string;
@@ -355,7 +393,7 @@ export function enrichListing(
     };
   }
 
-  const { imv, priceConfidence, compTier } = computeIMV(input, comps);
+  const { imv, priceConfidence, compTier } = computeIMV(input, comps, brandComps);
 
   // Delivery cost for TDC
   const offersDelivery = listing.delivery_available === true || listing.delivery_included === true;
