@@ -227,7 +227,7 @@ export default function Search() {
   // Fetch ALL FL+GA listings — no server-side filters beyond active/public
   const { data: allListings = [], isLoading } = useQuery<Listing[]>({
     queryKey: ["/api/listings/all"],
-    queryFn: () => apiRequest("GET", "/api/listings?limit=500").then((r) => r.json()),
+    queryFn: () => apiRequest("GET", "/api/listings?limit=3000").then((r) => r.json()),
     staleTime: 60_000,
   });
 
