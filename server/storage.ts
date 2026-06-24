@@ -105,29 +105,44 @@ class SupabaseStorage implements IStorage {
 
   async getListings(filters: Record<string, unknown> = {}): Promise<Listing[]> {
     const hardLimit = typeof filters.limit === "number" ? filters.limit : 5000;
-    let q = db()
-      .from("listings")
-      .select("*")
-      .eq("status", "active")
-      .eq("public_listing", true)
-      .order("created_at", { ascending: false })
-      .range(0, hardLimit - 1);  // explicit range bypasses Supabase 1000-row default cap
+    // Supabase REST API caps at 1000 rows per request regardless of range.
+    // Paginate internally with PAGE_SIZE=1000 to fetch all rows up to hardLimit.
+    const PAGE_SIZE = 1000;
 
-    if (filters.state)       q = q.eq("state", filters.state);
-    if (filters.brand)       q = q.ilike("brand", filters.brand as string);
-    if (filters.sellerType)  q = q.eq("seller_type", filters.sellerType);
-    if (filters.batteryType) q = q.eq("battery_type", filters.batteryType);
-    if (filters.dealRating)  q = q.eq("deal_rating", filters.dealRating);
-    if (filters.warrantyIncluded) q = q.eq("warranty_included", filters.warrantyIncluded);
-    if (filters.minPrice)    q = q.gte("asking_price", filters.minPrice);
-    if (filters.maxPrice)    q = q.lte("asking_price", filters.maxPrice);
-    if (filters.streetLegal === true) q = q.eq("street_legal_claimed", true);
-    if (filters.lifted === true)      q = q.eq("lifted", true);
-    if (filters.city)        q = q.ilike("city", filters.city as string);
+    function buildQuery(from: number, to: number) {
+      let q = db()
+        .from("listings")
+        .select("*")
+        .eq("status", "active")
+        .eq("public_listing", true)
+        .order("created_at", { ascending: false })
+        .range(from, to);
+      if (filters.state)       q = q.eq("state", filters.state);
+      if (filters.brand)       q = q.ilike("brand", filters.brand as string);
+      if (filters.sellerType)  q = q.eq("seller_type", filters.sellerType);
+      if (filters.batteryType) q = q.eq("battery_type", filters.batteryType);
+      if (filters.dealRating)  q = q.eq("deal_rating", filters.dealRating);
+      if (filters.warrantyIncluded) q = q.eq("warranty_included", filters.warrantyIncluded);
+      if (filters.minPrice)    q = q.gte("asking_price", filters.minPrice);
+      if (filters.maxPrice)    q = q.lte("asking_price", filters.maxPrice);
+      if (filters.streetLegal === true) q = q.eq("street_legal_claimed", true);
+      if (filters.lifted === true)      q = q.eq("lifted", true);
+      if (filters.city)        q = q.ilike("city", filters.city as string);
+      return q;
+    }
 
-    const { data, error } = await q;
-    if (error) throw new Error(error.message);
-    return (data ?? []) as Listing[];
+    let all: Listing[] = [];
+    let offset = 0;
+    while (all.length < hardLimit) {
+      const to = Math.min(offset + PAGE_SIZE - 1, hardLimit - 1);
+      const { data, error } = await buildQuery(offset, to);
+      if (error) throw new Error(error.message);
+      const batch = (data ?? []) as Listing[];
+      all = all.concat(batch);
+      if (batch.length < PAGE_SIZE) break; // no more rows
+      offset += PAGE_SIZE;
+    }
+    return all.slice(0, hardLimit);
   }
 
   async getHotDeals(limit = 20): Promise<Listing[]> {
