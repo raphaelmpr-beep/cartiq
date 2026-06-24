@@ -240,6 +240,154 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
       res.status(500).json({ error: e.message });
     }
   });
+  // ─── Daily price refresh ────────────────────────────────────────────────────
+  // Called by cron every day at 6 AM EDT.
+  // Fetches the source page for each hot-deal listing that has a specific product URL,
+  // extracts the current price, and updates asking_price + updated_at if it changed.
+  app.post("/api/admin/daily-price-refresh", async (req, res) => {
+    const token = req.headers["x-admin-token"];
+    if (token !== "cartiq2024") return res.status(401).json({ error: "Unauthorized" });
+
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      // Fetch all active hot-deal listings with a non-category source_url
+      const { data: candidates, error } = await db
+        .from("listings")
+        .select("id, title, asking_price, source_url, deal_rating, dealer_id, updated_at")
+        .eq("status", "active")
+        .eq("public_listing", true)
+        .in("deal_rating", ["great_deal", "good_deal"])
+        .not("source_url", "is", null)
+        .not("asking_price", "is", null);
+
+      if (error) throw new Error(error.message);
+
+      // Filter to listings with specific product-level URLs (not category/listing pages)
+      // A product URL typically has a slug/ID at the end, not just /inventory or /products
+      const CATEGORY_PATTERNS = [
+        /\/inventory\/?$/i,
+        /\/products\/?$/i,
+        /\/for-sale\/?$/i,
+        /\/shop\/?$/i,
+        /\/golf-carts\/?$/i,
+        /--inventory/i,
+      ];
+      const isProductUrl = (url: string) =>
+        url && !CATEGORY_PATTERNS.some((p) => p.test(url));
+
+      const toCheck = (candidates ?? []).filter((l: any) => isProductUrl(l.source_url));
+
+      const results = { checked: 0, updated: 0, unchanged: 0, errors: 0, skipped: 0 };
+      results.skipped = (candidates?.length ?? 0) - toCheck.length;
+
+      // Price extraction: look for common patterns in page HTML
+      const extractPrice = (html: string): number | null => {
+        // Matches: $9,999  $9999  9,999.00  9999
+        const patterns = [
+          /\$([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?)/g,
+          /"price"\s*:\s*"?([0-9]{3,6}(?:\.[0-9]{2})?)"?/gi,
+          /data-price="([0-9]{3,6})"/gi,
+          /class="[^"]*price[^"]*"[^>]*>\s*\$?([0-9]{1,3}(?:,[0-9]{3})*)/gi,
+        ];
+        const found: number[] = [];
+        for (const pattern of patterns) {
+          let m;
+          while ((m = pattern.exec(html)) !== null) {
+            const n = parseFloat(m[1].replace(/,/g, ""));
+            if (n >= 500 && n <= 80000) found.push(n);
+          }
+        }
+        if (!found.length) return null;
+        // Return the most-frequently-occurring price
+        const freq: Record<number, number> = {};
+        for (const p of found) freq[p] = (freq[p] || 0) + 1;
+        return Number(Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]);
+      };
+
+      // Process in small batches to avoid timeout
+      const BATCH = 5;
+      for (let i = 0; i < Math.min(toCheck.length, 30); i += BATCH) {
+        const batch = toCheck.slice(i, i + BATCH);
+        await Promise.all(
+          batch.map(async (listing: any) => {
+            try {
+              results.checked++;
+              const resp = await fetch(listing.source_url, {
+                signal: AbortSignal.timeout(8000),
+                headers: {
+                  "User-Agent":
+                    "Mozilla/5.0 (compatible; CartIQ-PriceBot/1.0; +https://cartiq-chi.vercel.app)",
+                },
+              });
+              if (!resp.ok) { results.errors++; return; }
+
+              const html = await resp.text();
+              const livePrice = extractPrice(html);
+              if (!livePrice) { results.errors++; return; }
+
+              const currentPrice = listing.asking_price;
+              const delta = Math.abs(livePrice - currentPrice);
+              const pctChange = delta / currentPrice;
+
+              // Only update if price changed by >1% (noise filter)
+              if (pctChange > 0.01) {
+                await db
+                  .from("listings")
+                  .update({
+                    asking_price: livePrice,
+                    price_scraped: livePrice,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", listing.id);
+                results.updated++;
+              } else {
+                // Re-stamp updated_at to confirm price was checked today
+                await db
+                  .from("listings")
+                  .update({ updated_at: new Date().toISOString() })
+                  .eq("id", listing.id);
+                results.unchanged++;
+              }
+            } catch {
+              results.errors++;
+            }
+          })
+        );
+      }
+
+      res.json({
+        ok: true,
+        date: new Date().toISOString().slice(0, 10),
+        ...results,
+        total_candidates: candidates?.length ?? 0,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Last-refresh status endpoint (public — used by carousel header)
+  app.get("/api/listings/hot-deals-meta", async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { data } = await db
+        .from("listings")
+        .select("updated_at")
+        .in("deal_rating", ["great_deal", "good_deal"])
+        .eq("status", "active")
+        .eq("public_listing", true)
+        .order("updated_at", { ascending: false })
+        .limit(1);
+
+      const lastUpdated = data?.[0]?.updated_at ?? null;
+      res.json({ lastUpdated });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
   app.get("/api/listings", async (req, res) => {
     try {
