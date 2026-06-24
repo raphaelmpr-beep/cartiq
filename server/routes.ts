@@ -979,7 +979,17 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
     const baseSlug = slugify(`${imp.make || "cart"}-${imp.model || "listing"}-${imp.location_city || imp.dealer_slug || "fl"}`);
     const slug = `${baseSlug}-${Date.now()}`;
 
+    // Pre-fetch max id to work around broken sequence (avoids duplicate key violations)
+    const { data: maxRow } = await sb
+      .from("listings")
+      .select("id")
+      .order("id", { ascending: false })
+      .limit(1)
+      .single();
+    const nextId: number = (maxRow?.id ?? 0) + 1;
+
     const newListing = {
+      id:                 nextId,
       slug,
       title,
       year:               imp.year        ?? null,
