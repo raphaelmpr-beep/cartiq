@@ -403,6 +403,8 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
       if (req.query.maxPrice) filters.maxPrice = parseFloat(req.query.maxPrice as string);
       if (req.query.streetLegal === "true") filters.streetLegal = true;
       if (req.query.lifted === "true") filters.lifted = true;
+      if (req.query.limit) filters.limit = Math.min(parseInt(req.query.limit as string) || 500, 5000);
+      else filters.limit = 500; // default cap for /api/listings (search page)
       const listings = await storage.getListings(filters);
       res.json(normList(listings.map(suppressDeliveryIfUnavailable)));
     } catch (e: any) {

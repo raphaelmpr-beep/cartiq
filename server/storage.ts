@@ -104,13 +104,14 @@ class SupabaseStorage implements IStorage {
   // ─── Listings ───────────────────────────────────────────────────────────────
 
   async getListings(filters: Record<string, unknown> = {}): Promise<Listing[]> {
+    const hardLimit = typeof filters.limit === "number" ? filters.limit : 5000;
     let q = db()
       .from("listings")
       .select("*")
       .eq("status", "active")
       .eq("public_listing", true)
       .order("created_at", { ascending: false })
-      .limit(500);
+      .limit(hardLimit);
 
     if (filters.state)       q = q.eq("state", filters.state);
     if (filters.brand)       q = q.ilike("brand", filters.brand as string);
