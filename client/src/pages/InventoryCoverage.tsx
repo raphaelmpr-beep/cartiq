@@ -120,15 +120,16 @@ const ACTION_META: Record<string, { label: string; color: string }> = {
 
 type DiscoveryBtnState = "idle" | "running" | "done" | "error";
 
-function DiscoveryButton({ row, btnState, onRun }: {
+function DiscoveryButton({ row, btnState, onRun, onDetect }: {
   row: DealerRow;
   btnState: DiscoveryBtnState;
   onRun: (slug: string) => void;
+  onDetect: (slug: string) => void;
 }) {
   const running = btnState === "running";
 
   if (row.adapterKey) {
-    // State 1: adapter configured — Run Discovery (blue)
+    // State 1: adapter configured — Run Discovery (calls /api/admin/sync)
     return (
       <Button
         size="sm" variant="outline"
@@ -143,16 +144,16 @@ function DiscoveryButton({ row, btnState, onRun }: {
   }
 
   if (row.websiteUrl || row.inventorySourceUrl) {
-    // State 2: has URL but no adapter — Detect Source (neutral)
+    // State 2: has URL but no adapter — Detect Source (calls /api/admin/detect-source)
     return (
       <Button
         size="sm" variant="outline"
         className="text-xs h-6 px-2 gap-1 text-gray-700 border-gray-300 hover:bg-gray-50"
         disabled={running}
-        onClick={() => onRun(row.dealerSlug)}
+        onClick={() => onDetect(row.dealerSlug)}
       >
         {running ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
-        {running ? "Detecting…" : btnState === "done" ? "✓ Done" : "Detect Source"}
+        {running ? "Detecting…" : btnState === "done" ? "✓ Queued" : "Detect Source"}
       </Button>
     );
   }
@@ -448,6 +449,24 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
     }
   }
 
+  // Detect Source: queues a platform-detection job via /api/admin/detect-source
+  // Used when dealer has a website_url but no adapter_key yet
+  async function handleDetectSource(dealerSlug: string) {
+    setDiscoverState(s => ({ ...s, [dealerSlug]: "running" }));
+    setDiscoverResult(s => ({ ...s, [dealerSlug]: "" }));
+    try {
+      const resp = await apiRequest("POST", "/api/admin/detect-source",
+        { dealer_slug: dealerSlug }, ADMIN_HEADERS);
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || "Detect source failed");
+      setDiscoverState(s => ({ ...s, [dealerSlug]: "done" }));
+      setDiscoverResult(s => ({ ...s, [dealerSlug]: `✓ Job queued (${result.job_id?.slice(0,8) ?? "?"}...) — detection running in background` }));
+    } catch (e: any) {
+      setDiscoverState(s => ({ ...s, [dealerSlug]: "error" }));
+      setDiscoverResult(s => ({ ...s, [dealerSlug]: e.message || "Unknown error" }));
+    }
+  }
+
   const { data, isLoading, error, refetch, isFetching } = useQuery<{ totals: ReconciliationTotals; byDealer: DealerRow[] }>({
     queryKey: ["/api/admin/inventory-reconciliation"],
     queryFn: () => apiRequest("GET", "/api/admin/inventory-reconciliation", undefined, ADMIN_HEADERS).then(r => r.json()),
@@ -719,7 +738,7 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
                     <p className="text-xs text-muted-foreground">{[row.city, row.state].filter(Boolean).join(", ")}</p>
                   </div>
                   <div className="flex items-center gap-1">
-                    <DiscoveryButton row={row} btnState={ds} onRun={handleRunDiscovery} />
+                    <DiscoveryButton row={row} btnState={ds} onRun={handleRunDiscovery} onDetect={handleDetectSource} />
                     <button
                       onClick={() => toggleDiag(row.dealerSlug)}
                       className="p-1 text-gray-400 hover:text-gray-600"
@@ -767,7 +786,7 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
                       </td>
                       <td className="p-2 border border-border">
                         <div className="flex items-center gap-1">
-                          <DiscoveryButton row={row} btnState={ds} onRun={handleRunDiscovery} />
+                          <DiscoveryButton row={row} btnState={ds} onRun={handleRunDiscovery} onDetect={handleDetectSource} />
                           <button
                             onClick={() => toggleDiag(row.dealerSlug)}
                             className="p-0.5 text-gray-400 hover:text-gray-600"
