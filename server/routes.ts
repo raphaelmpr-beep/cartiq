@@ -1515,6 +1515,55 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
     }
   });
 
+  // POST /api/admin/fix-sequence — reset listings.id sequence to avoid duplicate key errors
+  app.post("/api/admin/fix-sequence", requireAdmin, async (_req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      // Step 1: Get current max id from listings
+      const { data: maxRow, error: maxErr } = await sb
+        .from("listings")
+        .select("id")
+        .order("id", { ascending: false })
+        .limit(1)
+        .single();
+      if (maxErr && maxErr.code !== "PGRST116") {
+        return res.status(500).json({ error: `Failed to get max id: ${maxErr.message}` });
+      }
+      const maxId: number = maxRow?.id ?? 0;
+      const nextVal = maxId + 1;
+
+      // Step 2: Use pg directly to run setval — service key is the Postgres JWT password
+      const { Client } = await import("pg");
+      const supabaseUrl = process.env.SUPABASE_URL!; // https://aagwrcdvhuuzwrglamrt.supabase.co
+      const projectRef = supabaseUrl.replace("https://", "").replace(".supabase.co", "");
+      const serviceKey = process.env.SUPABASE_KEY!;
+
+      const client = new Client({
+        host: `db.${projectRef}.supabase.co`,
+        port: 5432,
+        database: "postgres",
+        user: "postgres",
+        password: serviceKey,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+      });
+
+      await client.connect();
+      const result = await client.query(
+        `SELECT setval(pg_get_serial_sequence('public.listings', 'id'), $1)`,
+        [nextVal]
+      );
+      await client.end();
+
+      const newSeqVal = result.rows[0]?.setval ?? nextVal;
+      res.json({ ok: true, maxId, nextVal, sequenceSetTo: newSeqVal });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // PATCH /api/admin/dealers/:slug/source-registry — update source registry fields
   app.patch("/api/admin/dealers/:slug/source-registry", requireAdmin, async (req, res) => {
     try {
