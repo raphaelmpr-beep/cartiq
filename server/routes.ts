@@ -1587,6 +1587,75 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
     }
   });
 
+  // POST /api/admin/cache-image — fetch image URL, upload to Supabase Storage, patch listing
+  app.post("/api/admin/cache-image", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      const { id, imageUrl } = req.body as { id: number; imageUrl: string };
+      if (!id || !imageUrl) return res.status(400).json({ error: "id and imageUrl are required" });
+
+      // Fetch the image — try direct first, then weserv.nl if 4xx/5xx
+      let imgBuffer: Buffer | null = null;
+      let contentType = "image/jpeg";
+
+      async function fetchBuf(url: string): Promise<{ buf: Buffer; ct: string } | null> {
+        try {
+          const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+          if (!r.ok) return null;
+          const ct = r.headers.get("content-type") ?? "image/jpeg";
+          const arr = await r.arrayBuffer();
+          return { buf: Buffer.from(arr), ct };
+        } catch { return null; }
+      }
+
+      let fetched = await fetchBuf(imageUrl);
+      if (!fetched) {
+        const weserv = `https://images.weserv.nl/?url=${encodeURIComponent(imageUrl)}&w=400&h=300&output=webp&fit=inside`;
+        fetched = await fetchBuf(weserv);
+        if (fetched) contentType = "image/webp";
+      } else {
+        contentType = fetched.ct.split(";")[0].trim();
+      }
+
+      if (!fetched) return res.status(422).json({ error: "Could not fetch image from origin or weserv" });
+      imgBuffer = fetched.buf;
+
+      // Determine extension
+      const extMap: Record<string, string> = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+        "image/gif": "gif",
+      };
+      const ext = extMap[contentType] ?? "jpg";
+      const filePath = `${id}.${ext}`;
+
+      // Upload to Supabase Storage
+      const { error: uploadErr } = await sb.storage
+        .from("listing-images")
+        .upload(filePath, imgBuffer, { contentType, upsert: true });
+
+      if (uploadErr) return res.status(500).json({ error: uploadErr.message });
+
+      // Build public URL
+      const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/listing-images/${filePath}`;
+
+      // Patch listing image_url
+      const { error: patchErr } = await sb
+        .from("listings")
+        .update({ image_url: publicUrl, updated_at: new Date().toISOString() })
+        .eq("id", id);
+
+      if (patchErr) return res.status(500).json({ error: patchErr.message });
+
+      res.json({ ok: true, url: publicUrl });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GET /api/admin/detect-source-jobs?dealer_slug=:slug — recent detection jobs for a dealer
   app.get("/api/admin/detect-source-jobs", requireAdmin, async (req, res) => {
     try {

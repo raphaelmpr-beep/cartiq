@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { useState, useCallback } from "react";
 import { MapPin, Users, Phone, Store, ExternalLink, Car } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,37 +14,65 @@ interface ListingCardProps {
   compact?: boolean;
 }
 
+function weservUrl(url: string) {
+  return `https://images.weserv.nl/?url=${encodeURIComponent(url)}&w=400&h=300&output=webp&fit=inside`;
+}
+
+function triggerCacheImage(id: number, imageUrl: string) {
+  // Fire-and-forget: cache image to Supabase Storage
+  fetch("/api/admin/cache-image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-admin-token": "cartiq2024" },
+    body: JSON.stringify({ id, imageUrl }),
+  }).catch(() => {/* silent */});
+}
+
 export function ListingCard({ listing, compact }: ListingCardProps) {
   const effectivePrice = listing.salePrice ?? listing.askingPrice ?? listing.regularPrice;
+
+  // Image fallback chain: original → weserv.nl proxy → placeholder
+  type ImgStage = "original" | "weserv" | "failed";
+  const [imgStage, setImgStage] = useState<ImgStage>(listing.imageUrl ? "original" : "failed");
+  const [imgSrc, setImgSrc] = useState<string | null>(listing.imageUrl ?? null);
+
+  const handleImgError = useCallback(() => {
+    if (imgStage === "original" && listing.imageUrl) {
+      // Try weserv.nl proxy
+      setImgSrc(weservUrl(listing.imageUrl));
+      setImgStage("weserv");
+    } else {
+      // Both failed — show placeholder
+      setImgStage("failed");
+    }
+  }, [imgStage, listing.imageUrl]);
+
+  const handleImgLoad = useCallback(() => {
+    if (imgStage === "weserv" && listing.imageUrl) {
+      // weserv succeeded — cache to Supabase Storage in background
+      triggerCacheImage(listing.id, listing.imageUrl);
+    }
+  }, [imgStage, listing.id, listing.imageUrl]);
 
   return (
     <Card className="overflow-hidden hover:shadow-md transition-shadow bg-card" data-testid={`card-listing-${listing.id}`}>
       {/* Image */}
       <div className="relative aspect-[16/9] bg-muted overflow-hidden">
-        {listing.imageUrl ? (
+        {imgStage !== "failed" && imgSrc ? (
           <img
-            src={listing.imageUrl}
+            src={imgSrc}
             alt={listing.title}
             className="w-full h-full object-cover"
             loading="lazy"
-            onError={(e) => {
-              const t = e.currentTarget;
-              t.onerror = null;
-              t.style.display = "none";
-              // Show the fallback sibling regardless of initial state
-              const parent = t.parentElement;
-              const fallback = parent?.querySelector<HTMLElement>(".img-fallback");
-              if (fallback) fallback.style.display = "flex";
-            }}
+            onError={handleImgError}
+            onLoad={handleImgLoad}
           />
         ) : null}
-        <div
-          className="img-fallback w-full h-full flex-col items-center justify-center bg-muted text-muted-foreground gap-2"
-          style={{ display: listing.imageUrl ? "none" : "flex" }}
-        >
-          <Car className="h-10 w-10 opacity-25" />
-          <span className="text-xs opacity-40 font-medium">{listing.brand ?? "Golf Cart"}</span>
-        </div>
+        {imgStage === "failed" && (
+          <div className="w-full h-full flex flex-col items-center justify-center bg-muted text-muted-foreground gap-2">
+            <Car className="h-10 w-10 opacity-25" />
+            <span className="text-xs opacity-40 font-medium">{listing.brand ?? "Golf Cart"}</span>
+          </div>
+        )}
         <div className="absolute top-2 left-2">
           <DealBadge rating={listing.dealRating} />
         </div>
