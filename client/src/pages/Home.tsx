@@ -69,7 +69,7 @@ export default function Home() {
     <div className="min-h-screen">
       {/* ─── Hero ─────────────────────────────────────────────────────────────── */}
       <section className="bg-gradient-to-br from-gray-50 to-white border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 py-12 md:py-20">
+        <div className="max-w-7xl mx-auto px-4 py-5 md:py-8">
           <div className="grid md:grid-cols-2 gap-10 items-center">
             {/* Copy */}
             <div className="space-y-6">
@@ -80,8 +80,8 @@ export default function Home() {
                 Know the Right Cart.<br />
                 <span className="text-green-600">Pay the Right Price.</span>
               </h1>
-              <p className="text-lg text-muted-foreground max-w-lg">
-                Compare dealer, private, Facebook-submitted, and retail golf cart deals. Check fair value, battery setup, warranty, and delivery-adjusted pricing before you buy.
+              <p className="text-base text-muted-foreground max-w-lg">
+                Browse new &amp; used golf carts across FL &amp; GA. Compare prices, battery setup, warranty, and delivery before you buy.
               </p>
               {/* Hero search input */}
               <form onSubmit={handleHeroSearch} className="flex gap-2 max-w-md">
@@ -107,41 +107,6 @@ export default function Home() {
                 </Link>
               </div>
 
-              {/* Quick search module */}
-              <div className="bg-white border border-border rounded-xl p-4 shadow-sm space-y-3 max-w-md">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Quick Search</p>
-                <div className="flex flex-wrap gap-2">
-                  {["Nocatee, FL", "The Villages, FL", "Jacksonville, FL", "Orlando, FL", "Atlanta, GA", "Peachtree City, GA"].map((loc) => {
-                    const [city, state] = loc.split(", ");
-                    return (
-                      <button
-                        key={loc}
-                        onClick={() => navWithParams("/search", { city, state })}
-                        className="text-xs px-2.5 py-1.5 rounded-full border border-border hover:bg-secondary transition-colors cursor-pointer"
-                      >
-                        {loc}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span>Filter by:</span>
-                  {([
-                    ["Lithium", { batteryType: "lithium" }],
-                    ["Dealer", { sellerType: "dealer" }],
-                    ["Street Legal", { streetLegal: "true" }],
-                    ["With Warranty", { warrantyIncluded: "yes" }],
-                  ] as [string, Record<string, string>][]).map(([label, params]) => (
-                    <button
-                      key={label}
-                      onClick={() => navWithParams("/search", params)}
-                      className="text-green-700 hover:underline cursor-pointer"
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
 
             {/* Market Compare Card */}
@@ -151,6 +116,28 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* ─── Price Deals Carousel ─────────────────────────────────────────────── */}
+      <PriceDealsCarousel />
+
+      {/* ─── Featured Listings ────────────────────────────────────────────────── */}
+      {featured.length > 0 && (
+        <section className="bg-gray-50 border-b border-border">
+          <div className="max-w-7xl mx-auto px-4 py-10">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">Recent Listings</h2>
+              <Link href="/search" className="text-sm text-green-700 hover:underline flex items-center gap-1">
+                See all <ChevronRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {featured.map((l) => (
+                <ListingCard key={l.id} listing={l} />
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ─── Value Props ──────────────────────────────────────────────────────── */}
       <section className="border-b border-border bg-white">
@@ -185,28 +172,67 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ─── Price Deals Carousel ─────────────────────────────────────────────── */}
-      <PriceDealsCarousel />
-
-      {/* ─── Featured Listings ────────────────────────────────────────────────── */}
-      {featured.length > 0 && (
-        <section className="bg-gray-50 border-b border-border">
-          <div className="max-w-7xl mx-auto px-4 py-10">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold">Recent Listings</h2>
-              <Link href="/search" className="text-sm text-green-700 hover:underline flex items-center gap-1">
-                See all <ChevronRight className="h-3.5 w-3.5" />
-              </Link>
+      {/* ─── Popular Markets + Quick Search ────────────────────────────────── */}
+      <section className="border-b border-border bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <h2 className="text-sm font-bold">Popular Golf Cart Markets</h2>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: "The Villages, FL",     slug: "the-villages-fl" },
+                  { label: "Wildwood, FL",          slug: "wildwood-fl" },
+                  { label: "Lady Lake, FL",         slug: "lady-lake-fl" },
+                  { label: "Nocatee, FL",           slug: "nocatee-fl" },
+                  { label: "Panama City Beach, FL", slug: "panama-city-beach-fl" },
+                  { label: "Peachtree City, GA",    slug: "peachtree-city-ga" },
+                  { label: "Jacksonville, FL",      slug: "jacksonville-fl" },
+                  { label: "Clearwater, FL",        slug: "clearwater-fl" },
+                ].map(({ label, slug }) => (
+                  <Link key={slug} href={`/golf-carts-for-sale/${slug}`}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-border text-xs hover:bg-secondary hover:border-green-200 transition-colors">
+                    <MapPin className="h-3 w-3 text-green-600" />{label}
+                  </Link>
+                ))}
+              </div>
             </div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {featured.map((l) => (
-                <ListingCard key={l.id} listing={l} />
-              ))}
+            <div className="space-y-3">
+              <h2 className="text-sm font-bold">Quick Search</h2>
+              <div className="flex flex-wrap gap-2">
+                {["Nocatee, FL", "The Villages, FL", "Jacksonville, FL", "Orlando, FL", "Atlanta, GA", "Peachtree City, GA"].map((loc) => {
+                  const [city, state] = loc.split(", ");
+                  return (
+                    <button
+                      key={loc}
+                      onClick={() => navWithParams("/search", { city, state })}
+                      className="text-xs px-2.5 py-1.5 rounded-full border border-border hover:bg-secondary transition-colors cursor-pointer"
+                    >
+                      {loc}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <span>Filter by:</span>
+                {([
+                  ["Lithium", { batteryType: "lithium" }],
+                  ["Dealer", { sellerType: "dealer" }],
+                  ["Street Legal", { streetLegal: "true" }],
+                  ["With Warranty", { warrantyIncluded: "yes" }],
+                ] as [string, Record<string, string>][]).map(([label, params]) => (
+                  <button
+                    key={label}
+                    onClick={() => navWithParams("/search", params)}
+                    className="text-green-700 hover:underline cursor-pointer"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        </section>
-      )}
-
+        </div>
+      </section>
       {/* ─── Buyer Guide Cards ────────────────────────────────────────────────── */}
       {guideCards.length > 0 && (
         <section className="bg-white border-b border-border">
@@ -241,52 +267,29 @@ export default function Home() {
       )}
 
 
-      {/* ─── Popular Markets + Buyer Guides ─────────────────────────────────────── */}
+      {/* ─── Popular Buyer Guides ───────────────────────────────────────── */}
       <section className="border-b border-border bg-white">
-        <div className="max-w-7xl mx-auto px-4 py-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="space-y-3">
-              <h2 className="text-sm font-bold">Popular Golf Cart Markets</h2>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { label: "The Villages, FL",     slug: "the-villages-fl" },
-                  { label: "Wildwood, FL",          slug: "wildwood-fl" },
-                  { label: "Lady Lake, FL",         slug: "lady-lake-fl" },
-                  { label: "Nocatee, FL",           slug: "nocatee-fl" },
-                  { label: "Panama City Beach, FL", slug: "panama-city-beach-fl" },
-                  { label: "Peachtree City, GA",    slug: "peachtree-city-ga" },
-                  { label: "Jacksonville, FL",      slug: "jacksonville-fl" },
-                  { label: "Clearwater, FL",        slug: "clearwater-fl" },
-                ].map(({ label, slug }) => (
-                  <Link key={slug} href={`/golf-carts-for-sale/${slug}`}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-border text-xs hover:bg-secondary hover:border-green-200 transition-colors">
-                    <MapPin className="h-3 w-3 text-green-600" />{label}
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="space-y-3">
+            <h2 className="text-sm font-bold">Popular Buyer Guides</h2>
+            <ul className="flex flex-wrap gap-x-6 gap-y-1.5">
+              {[
+                { label: "Lithium vs Lead-Acid Batteries",            href: "/golf-cart-batteries/lithium-vs-lead-acid" },
+                { label: "105Ah vs 150Ah — Which Range Do You Need?",  href: "/golf-cart-batteries/105ah-vs-150ah" },
+                { label: "Does a Used Golf Cart Include a Charger?",    href: "/golf-cart-batteries/charger-included" },
+                { label: "E-Z-GO Golf Carts — Buyer Guide",              href: "/brands/ezgo" },
+                { label: "How CartIQ Scores Listings",                 href: "/how-it-works" },
+              ].map(({ label, href }) => (
+                <li key={href}>
+                  <Link href={href} className="text-sm text-green-700 hover:underline flex items-center gap-1">
+                    <ChevronRight className="h-3 w-3" />{label}
                   </Link>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-3">
-              <h2 className="text-sm font-bold">Popular Buyer Guides</h2>
-              <ul className="space-y-1.5">
-                {[
-                  { label: "Lithium vs Lead-Acid Batteries",           href: "/golf-cart-batteries/lithium-vs-lead-acid" },
-                  { label: "105Ah vs 150Ah — Which Range Do You Need?", href: "/golf-cart-batteries/105ah-vs-150ah" },
-                  { label: "Does a Used Golf Cart Include a Charger?",   href: "/golf-cart-batteries/charger-included" },
-                  { label: "E-Z-GO Golf Carts — Buyer Guide",            href: "/brands/ezgo" },
-                  { label: "How CartIQ Scores Listings",                href: "/how-it-works" },
-                ].map(({ label, href }) => (
-                  <li key={href}>
-                    <Link href={href} className="text-sm text-green-700 hover:underline flex items-center gap-1">
-                      <ChevronRight className="h-3 w-3" />{label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       </section>
-
       {/* ─── Bottom CTA ───────────────────────────────────────────────────────── */}
       <section className="bg-foreground text-background">
         <div className="max-w-3xl mx-auto px-4 py-14 text-center space-y-6">
