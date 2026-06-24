@@ -169,6 +169,33 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
         { path: "/sell-my-cart",  priority: "0.5", changefreq: "monthly" },
         { path: "/how-it-works",   priority: "0.7", changefreq: "monthly" },
         { path: "/disclosure",     priority: "0.3", changefreq: "yearly"  },
+        // City landing pages
+        { path: "/golf-carts-for-sale/the-villages-fl",      priority: "0.8", changefreq: "daily" },
+        { path: "/golf-carts-for-sale/wildwood-fl",          priority: "0.8", changefreq: "daily" },
+        { path: "/golf-carts-for-sale/lady-lake-fl",         priority: "0.8", changefreq: "daily" },
+        { path: "/golf-carts-for-sale/nocatee-fl",           priority: "0.8", changefreq: "daily" },
+        { path: "/golf-carts-for-sale/st-augustine-fl",      priority: "0.8", changefreq: "daily" },
+        { path: "/golf-carts-for-sale/jacksonville-fl",      priority: "0.8", changefreq: "daily" },
+        { path: "/golf-carts-for-sale/clearwater-fl",        priority: "0.8", changefreq: "daily" },
+        { path: "/golf-carts-for-sale/port-orange-fl",       priority: "0.7", changefreq: "daily" },
+        { path: "/golf-carts-for-sale/panama-city-beach-fl", priority: "0.7", changefreq: "daily" },
+        { path: "/golf-carts-for-sale/peachtree-city-ga",    priority: "0.8", changefreq: "daily" },
+        { path: "/golf-carts-for-sale/atlanta-ga",           priority: "0.8", changefreq: "daily" },
+        // Brand pages
+        { path: "/brands/ezgo",       priority: "0.8", changefreq: "weekly" },
+        { path: "/brands/club-car",   priority: "0.8", changefreq: "weekly" },
+        { path: "/brands/yamaha",     priority: "0.7", changefreq: "weekly" },
+        { path: "/brands/icon",       priority: "0.7", changefreq: "weekly" },
+        { path: "/brands/evolution",  priority: "0.7", changefreq: "weekly" },
+        { path: "/brands/venom-ev",   priority: "0.7", changefreq: "weekly" },
+        { path: "/brands/bintelli",   priority: "0.6", changefreq: "weekly" },
+        { path: "/brands/epic",       priority: "0.6", changefreq: "weekly" },
+        { path: "/brands/denago",     priority: "0.6", changefreq: "weekly" },
+        // Battery guide pages
+        { path: "/golf-cart-batteries",                        priority: "0.8", changefreq: "monthly" },
+        { path: "/golf-cart-batteries/lithium-vs-lead-acid",   priority: "0.8", changefreq: "monthly" },
+        { path: "/golf-cart-batteries/105ah-vs-150ah",         priority: "0.7", changefreq: "monthly" },
+        { path: "/golf-cart-batteries/charger-included",       priority: "0.7", changefreq: "monthly" },
       ];
       const urls = [
         ...staticPages.map(p =>

@@ -33,6 +33,9 @@ import Admin from "@/pages/Admin";
 import MyGarage from "@/pages/MyGarage";
 import Disclosure from "@/pages/Legal";
 import HowItWorks from "@/pages/HowItWorks";
+import CityPage from "@/pages/seo/CityPage";
+import BrandPage from "@/pages/seo/BrandPage";
+import { BatteryOverviewPage, LithiumVsLeadAcidPage, AhComparePage, ChargerIncludedPage } from "@/pages/seo/BatteryPages";
 
 function NotFound() {
   return (
@@ -76,6 +79,13 @@ function AppRoutes() {
           <Route path="/admin" component={Admin} />
           <Route path="/disclosure" component={Disclosure} />
           <Route path="/how-it-works" component={HowItWorks} />
+          {/* SEO landing pages */}
+          <Route path="/golf-carts-for-sale/:slug" component={CityPage} />
+          <Route path="/brands/:slug" component={BrandPage} />
+          <Route path="/golf-cart-batteries/lithium-vs-lead-acid" component={LithiumVsLeadAcidPage} />
+          <Route path="/golf-cart-batteries/105ah-vs-150ah" component={AhComparePage} />
+          <Route path="/golf-cart-batteries/charger-included" component={ChargerIncludedPage} />
+          <Route path="/golf-cart-batteries" component={BatteryOverviewPage} />
           <Route component={NotFound} />
         </Switch>
       </main>

@@ -1,7 +1,7 @@
 import { Link } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Search, ClipboardCheck, TrendingDown, ShieldCheck, Truck, BookOpen, ChevronRight } from "lucide-react";
+import { ArrowRight, Search, ClipboardCheck, TrendingDown, ShieldCheck, Truck, BookOpen, ChevronRight, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ListingCard } from "@/components/ListingCard";
@@ -239,6 +239,53 @@ export default function Home() {
           </div>
         </section>
       )}
+
+
+      {/* ─── Popular Markets + Buyer Guides ─────────────────────────────────────── */}
+      <section className="border-b border-border bg-white">
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-3">
+              <h2 className="text-sm font-bold">Popular Golf Cart Markets</h2>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: "The Villages, FL",     slug: "the-villages-fl" },
+                  { label: "Wildwood, FL",          slug: "wildwood-fl" },
+                  { label: "Lady Lake, FL",         slug: "lady-lake-fl" },
+                  { label: "Nocatee, FL",           slug: "nocatee-fl" },
+                  { label: "Panama City Beach, FL", slug: "panama-city-beach-fl" },
+                  { label: "Peachtree City, GA",    slug: "peachtree-city-ga" },
+                  { label: "Jacksonville, FL",      slug: "jacksonville-fl" },
+                  { label: "Clearwater, FL",        slug: "clearwater-fl" },
+                ].map(({ label, slug }) => (
+                  <Link key={slug} href={`/golf-carts-for-sale/${slug}`}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-border text-xs hover:bg-secondary hover:border-green-200 transition-colors">
+                    <MapPin className="h-3 w-3 text-green-600" />{label}
+                  </Link>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-3">
+              <h2 className="text-sm font-bold">Popular Buyer Guides</h2>
+              <ul className="space-y-1.5">
+                {[
+                  { label: "Lithium vs Lead-Acid Batteries",           href: "/golf-cart-batteries/lithium-vs-lead-acid" },
+                  { label: "105Ah vs 150Ah — Which Range Do You Need?", href: "/golf-cart-batteries/105ah-vs-150ah" },
+                  { label: "Does a Used Golf Cart Include a Charger?",   href: "/golf-cart-batteries/charger-included" },
+                  { label: "E-Z-GO Golf Carts — Buyer Guide",            href: "/brands/ezgo" },
+                  { label: "How CartIQ Scores Listings",                href: "/how-it-works" },
+                ].map(({ label, href }) => (
+                  <li key={href}>
+                    <Link href={href} className="text-sm text-green-700 hover:underline flex items-center gap-1">
+                      <ChevronRight className="h-3 w-3" />{label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* ─── Bottom CTA ───────────────────────────────────────────────────────── */}
       <section className="bg-foreground text-background">
