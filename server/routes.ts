@@ -1536,9 +1536,9 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
 
       // Step 2: Use pg directly to run setval — service key is the Postgres JWT password
       const { Client } = await import("pg");
-      const supabaseUrl = process.env.SUPABASE_URL!; // https://aagwrcdvhuuzwrglamrt.supabase.co
-      const projectRef = supabaseUrl.replace("https://", "").replace(".supabase.co", "");
-      const serviceKey = process.env.SUPABASE_KEY!;
+      const supabaseUrl = (process.env.SUPABASE_URL || "").trim();
+      const projectRef = supabaseUrl.replace(/^https:\/\//, "").replace(/\.supabase\.co.*$/, "").trim();
+      const serviceKey = (process.env.SUPABASE_KEY || "").trim();
 
       const client = new Client({
         host: `db.${projectRef}.supabase.co`,
