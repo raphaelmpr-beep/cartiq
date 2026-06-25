@@ -5,7 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ChevronLeft, ChevronRight, Tag, MapPin, Users, Zap, RefreshCw, TrendingDown } from "lucide-react";
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { DealBadge } from "./Badges";
 import { formatPrice } from "@/lib/utils";
 import type { Listing } from "@/lib/types";
@@ -148,7 +148,9 @@ export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
   const SCROLL_AMT = 280;
+  const AUTO_INTERVAL_MS = 5000;
 
   const scroll = useCallback((dir: "left" | "right") => {
     const el = trackRef.current;
@@ -162,6 +164,22 @@ export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
     setCanLeft(el.scrollLeft > 8);
     setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 8);
   }, []);
+
+  // Auto-advance every 5 seconds; wraps back to start when at the end
+  useEffect(() => {
+    if (isPaused || !deals.length) return;
+    const id = setInterval(() => {
+      const el = trackRef.current;
+      if (!el) return;
+      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 8;
+      if (atEnd) {
+        el.scrollTo({ left: 0, behavior: "smooth" });
+      } else {
+        el.scrollBy({ left: SCROLL_AMT, behavior: "smooth" });
+      }
+    }, AUTO_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [isPaused, deals.length]);
 
   const padClass = inline ? "px-4 py-4" : "px-4 py-8";
 
@@ -195,7 +213,7 @@ export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
-            onClick={() => scroll("left")}
+            onClick={() => { scroll("left"); setIsPaused(true); setTimeout(() => setIsPaused(false), AUTO_INTERVAL_MS); }}
             disabled={!canLeft}
             className="p-1.5 rounded-full border border-border hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             aria-label="Scroll left"
@@ -204,7 +222,7 @@ export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
             <ChevronLeft className="h-4 w-4" />
           </button>
           <button
-            onClick={() => scroll("right")}
+            onClick={() => { scroll("right"); setIsPaused(true); setTimeout(() => setIsPaused(false), AUTO_INTERVAL_MS); }}
             disabled={!canRight}
             className="p-1.5 rounded-full border border-border hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             aria-label="Scroll right"
@@ -219,6 +237,10 @@ export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
       <div
         ref={trackRef}
         onScroll={onScroll}
+        onMouseEnter={() => setIsPaused(true)}
+        onMouseLeave={() => setIsPaused(false)}
+        onTouchStart={() => setIsPaused(true)}
+        onTouchEnd={() => setIsPaused(false)}
         className="flex gap-3 overflow-x-auto pb-2 scroll-smooth"
         style={{ scrollSnapType: "x mandatory", scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
