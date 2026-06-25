@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { calculateCartIQValue, enrichListing } from "./pricing";
+import { calculateGolfCartWiseValue, enrichListing } from "./pricing";
 import { parseCsv, csvRowToListing } from "./csvParser";
 
 // ─── snake_case → camelCase normalizer ───────────────────────────────────────
@@ -106,8 +106,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
   // ─── SEO: robots.txt ────────────────────────────────────────────────────────
   app.get("/robots.txt", (_req, res) => {
-    res.type("text/plain").send(`# CartIQ — Florida & Georgia Golf Cart Price Intelligence
-# https://cartiq-chi.vercel.app
+    res.type("text/plain").send(`# GolfCartWise — Florida & Georgia Golf Cart Price Intelligence
+# https://golfcartwise.app
 
 User-agent: *
 Allow: /
@@ -135,18 +135,18 @@ Allow: /
 Disallow: /admin
 Disallow: /api/
 
-Sitemap: https://cartiq-chi.vercel.app/sitemap.xml`);
+Sitemap: https://golfcartwise.app/sitemap.xml`);
   });
 
   // ─── SEO: llms.txt (AI crawler guidance) ────────────────────────────────────
   app.get("/llms.txt", (_req, res) => {
-    res.type("text/plain").send(`# CartIQ — Florida & Georgia Golf Cart Price Intelligence
-# https://cartiq-chi.vercel.app
+    res.type("text/plain").send(`# GolfCartWise — Florida & Georgia Golf Cart Price Intelligence
+# https://golfcartwise.app
 
-## About CartIQ
-CartIQ is a golf cart market intelligence platform for Florida and Georgia.
+## About GolfCartWise
+GolfCartWise is a golf cart market intelligence platform for Florida and Georgia.
 It aggregates 1,300+ listings from dealers, applies comp-based pricing (CarGurus-style),
-and provides deal ratings, buyer scores, and delivery-adjusted pricing.
+and provides Wise Deal Ratings, buyer scores, and delivery-adjusted pricing.
 
 ## Allowed for AI indexing
 - Public listing pages (/listing/*)
@@ -156,7 +156,7 @@ and provides deal ratings, buyer scores, and delivery-adjusted pricing.
 - /admin, /api/*, /my-garage
 
 ## Attribution
-Source: CartIQ (cartiq-chi.vercel.app)`);
+Source: GolfCartWise (golfcartwise.app)`);
   });
 
   // ─── SEO: sitemap.xml (dynamic) ─────────────────────────────────────────────
@@ -164,7 +164,7 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
     try {
       const listings = await storage.getListings({ status: "active", public_listing: true });
       const articles = await storage.getSeoArticles() as any[];
-      const base = "https://cartiq-chi.vercel.app";
+      const base = "https://golfcartwise.app";
       const today = new Date().toISOString().split("T")[0];
       const staticPages = [
         { path: "/",             priority: "1.0", changefreq: "weekly" },
@@ -323,7 +323,7 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
                 signal: AbortSignal.timeout(8000),
                 headers: {
                   "User-Agent":
-                    "Mozilla/5.0 (compatible; CartIQ-PriceBot/1.0; +https://cartiq-chi.vercel.app)",
+                    "Mozilla/5.0 (compatible; GolfCartWise-PriceBot/1.0; +https://golfcartwise.app)",
                 },
               });
               if (!resp.ok) { results.errors++; return; }
@@ -500,9 +500,9 @@ Source: CartIQ (cartiq-chi.vercel.app)`);
       const deliveryCost = data.deliveryCost ?? data.estimatedDeliveryCost ?? null;
       let pilotWarning: string | null = null;
       if (data.state && !PILOT_STATES.includes(data.state?.toUpperCase())) {
-        pilotWarning = "CartIQ pilot coverage is currently Florida and Georgia. Market estimates outside this area may be limited.";
+        pilotWarning = "GolfCartWise pilot coverage is currently Florida and Georgia. Market estimates outside this area may be limited.";
       }
-      const pricing = calculateCartIQValue({
+      const pricing = calculateGolfCartWiseValue({
         askingPrice: data.askingPrice,
         regularPrice: data.regularPrice,
         salePrice: data.salePrice,

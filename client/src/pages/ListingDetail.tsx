@@ -10,7 +10,7 @@ import { parseJsonField } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DealBadge, SourceBadge, BuyerScoreBadge, WarrantyBadge, BatteryRiskBadge, StreetLegalBadge, DeliveryCostBadge, RetailSourceBadge } from "@/components/Badges";
+import { DealBadge, SourceBadge, WiseScoreBadge, WarrantyBadge, BatteryRiskBadge, StreetLegalBadge, DeliveryCostBadge, RetailSourceBadge } from "@/components/Badges";
 import { MarketCompareCard } from "@/components/MarketCompareCard";
 import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText } from "@/lib/utils";
 import type { Listing, Dealer } from "@/lib/types";
@@ -46,15 +46,15 @@ export default function ListingDetail() {
     if (!listing) return;
     setSEO({
       title: listing.title,
-      description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"} — CartIQ deal rating: ${listing.dealRating ?? "unknown"}.`,
+      description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"} — GolfCartWise Wise Deal Rating: ${listing.dealRating ?? "unknown"}.`,
       image: listing.imageUrl ?? undefined,
-      canonical: `https://cartiq-chi.vercel.app/listing/${listing.slug ?? listing.id}`,
+      canonical: `https://golfcartwise.app/listing/${listing.slug ?? listing.id}`,
       jsonLd: [
         listingToProductSchema(listing),
         breadcrumbSchema([
-          { name: "CartIQ", url: "https://cartiq-chi.vercel.app/" },
-          { name: "Search", url: "https://cartiq-chi.vercel.app/search" },
-          { name: listing.title, url: `https://cartiq-chi.vercel.app/listing/${listing.slug ?? listing.id}` },
+          { name: "GolfCartWise", url: "https://golfcartwise.app/" },
+          { name: "Search", url: "https://golfcartwise.app/search" },
+          { name: listing.title, url: `https://golfcartwise.app/listing/${listing.slug ?? listing.id}` },
         ]),
       ],
     });
@@ -160,7 +160,7 @@ export default function ListingDetail() {
                   <div className="text-2xl font-bold">{formatPrice(effectivePrice)}</div>
                 )}
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">CartIQ Estimated Value</span>
+                  <span className="text-muted-foreground">GolfCartWise Value</span>
                   <span className="font-semibold">{formatPrice(listing.cartiqEstimatedValue)}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
@@ -307,7 +307,7 @@ export default function ListingDetail() {
             {listing.sellerType === "retail" && (
               <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-sm text-purple-800 space-y-1">
                 <p className="font-semibold">Retail / {listing.retailerName || "Retailer"} Listing</p>
-                <p>CartIQ does not guarantee retailer price or availability. Retail prices, availability, shipping, delivery, warranty, and state eligibility may change. Verify all details on the retailer site before purchase.</p>
+                <p>GolfCartWise does not guarantee retailer price or availability. Retail prices, availability, shipping, delivery, warranty, and state eligibility may change. Verify all details on the retailer site before purchase.</p>
                 {listing.retailerProductUrl && (
                   <a href={listing.retailerProductUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-purple-700 font-medium hover:underline text-xs mt-1">
                     View on {listing.retailerName || "Retailer"} <ExternalLink className="h-3 w-3" />
@@ -360,7 +360,7 @@ export default function ListingDetail() {
           {/* Sidebar */}
           <div className="space-y-5">
             <MarketCompareCard listing={listing} />
-            <BuyerScoreBadge score={listing.buyerScore} className="text-lg" />
+            <WiseScoreBadge score={listing.buyerScore} className="text-lg" />
             <a href="/#/how-it-works" className="block text-xs text-green-700 hover:underline text-right -mt-3">
               How is this score calculated? →
             </a>

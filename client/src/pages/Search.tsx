@@ -46,7 +46,7 @@ const SORT_OPTIONS = [
   { label: "Lowest Price", value: "lowest_cost" },
   { label: "Best Deal", value: "best_deal" },
   { label: "Newest", value: "newest" },
-  { label: "Highest Buyer Score", value: "buyer_score" },
+  { label: "Highest WiseScore", value: "buyer_score" },
   { label: "Warranty Included", value: "warranty" },
 ];
 const RADIUS_OPTIONS = [
@@ -171,8 +171,8 @@ export default function Search() {
     const loc = filters.state === "FL" ? " Florida" : filters.state === "GA" ? " Georgia" : " FL & GA";
     setSEO({
       title: `Golf Carts for Sale${brand}${loc}`,
-      description: `Browse ${loc.trim()} golf cart listings on CartIQ. Compare prices, deal ratings, and buyer scores from top dealers.`,
-      canonical: "https://cartiq-chi.vercel.app/search",
+      description: `Browse ${loc.trim()} golf cart listings on GolfCartWise. Compare prices, Wise Deal Ratings, and buyer scores from top dealers.`,
+      canonical: "https://golfcartwise.app/search",
     });
   }, [filters.brands, filters.state]);
 

@@ -55,7 +55,7 @@ function SellPage() {
       <div className="text-center max-w-md px-4">
         <h1 className="text-xl font-bold mb-2">Sell My Cart</h1>
         <p className="text-muted-foreground text-sm">
-          Seller-authorized listing import is coming soon. For now, contact us to list your cart on CartIQ.
+          Seller-authorized listing import is coming soon. For now, contact us to list your cart on GolfCartWise.
         </p>
       </div>
     </div>
@@ -94,8 +94,8 @@ function AppRoutes() {
           {/* Top row — brand + nav links */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-foreground">Cart<span className="text-green-600">IQ</span></span>
-              <span>Golf cart pricing intelligence — Florida &amp; Georgia</span>
+              <span className="font-bold text-foreground">GolfCart<span className="text-green-600">Wise</span></span>
+              <span>Know before you buy — Florida &amp; Georgia</span>
             </div>
             <div className="flex flex-wrap gap-4">
               <a href="/#/buyer-guide" className="hover:text-foreground">Buyer Guide</a>
@@ -108,7 +108,7 @@ function AppRoutes() {
           </div>
           {/* Bottom row — legal line */}
           <div className="border-t border-border pt-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <p>© {new Date().getFullYear()} CartIQ · Independent golf cart research &amp; pricing platform. Not affiliated with Facebook, Costco, Club Car, E-Z-GO, Yamaha, or any manufacturer.</p>
+            <p>© {new Date().getFullYear()} GolfCartWise · GolfCartWise is a research, comparison, and lead-referral platform. We do not sell golf carts or complete transactions. Buyers should confirm all details directly with the dealer or seller.</p>
             <a href="/#/disclosure" className="hover:text-foreground underline whitespace-nowrap">Information Disclosure</a>
           </div>
         </div>

@@ -21,8 +21,8 @@ export function DealDeltaBadge({ delta, className }: { delta?: number | null; cl
   );
 }
 
-// ── BuyerScoreBadge ───────────────────────────────────────────────────────────
-export function BuyerScoreBadge({ score, className }: { score?: number | null; className?: string }) {
+// ── WiseScoreBadge ───────────────────────────────────────────────────────────
+export function WiseScoreBadge({ score, className }: { score?: number | null; className?: string }) {
   return (
     <div className={cn("flex items-center gap-1", className)}>
       <Star className="h-3.5 w-3.5" />

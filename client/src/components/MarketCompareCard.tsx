@@ -8,7 +8,7 @@ export function MarketCompareCard({ listing }: { listing: Partial<Listing> }) {
   return (
     <div className="bg-white border border-border rounded-xl p-4 shadow-sm space-y-3 max-w-sm w-full" data-testid="market-compare-card">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">CartIQ Market Compare</span>
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">GolfCartWise Market Compare</span>
         {listing.dealRating && (
           <span className={cn("px-2 py-0.5 rounded-full text-xs font-semibold", dealRatingClass(listing.dealRating))}>
             {dealRatingLabel(listing.dealRating)}
@@ -22,7 +22,7 @@ export function MarketCompareCard({ listing }: { listing: Partial<Listing> }) {
           <span className="font-medium">{formatPrice(effectivePrice)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-muted-foreground">CartIQ Value</span>
+          <span className="text-muted-foreground">GolfCartWise Value</span>
           <span className="font-semibold">{formatPrice(listing.cartiqEstimatedValue)}</span>
         </div>
         <div className="flex justify-between">

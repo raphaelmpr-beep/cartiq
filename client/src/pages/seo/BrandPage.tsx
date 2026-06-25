@@ -62,7 +62,7 @@ export default function BrandPage() {
 
   useEffect(() => {
     if (!cfg) return;
-    setSEO({ title: cfg.title, description: cfg.metaDescription, canonical: `https://cartiq-chi.vercel.app/brands/${cfg.slug}` });
+    setSEO({ title: cfg.title, description: cfg.metaDescription, canonical: `https://golfcartwise.app/brands/${cfg.slug}` });
     const brandName = BRAND_NAME_MAP[cfg.slug] ?? cfg.name;
     setLoading(true);
     fetchBrandListings(brandName).then(data => {
@@ -90,7 +90,7 @@ export default function BrandPage() {
 
         {/* Breadcrumb */}
         <nav className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Link href="/" className="hover:text-foreground">CartIQ</Link>
+          <Link href="/" className="hover:text-foreground">GolfCartWise</Link>
           <ChevronRight className="h-3 w-3" />
           <span>Brands</span>
           <ChevronRight className="h-3 w-3" />
@@ -155,7 +155,7 @@ export default function BrandPage() {
             <div className="rounded-xl border border-border bg-white p-8 text-center space-y-3">
               <AlertTriangle className="h-6 w-6 text-amber-500 mx-auto" />
               <p className="font-semibold text-sm">No verified {cfg.name} listings found right now.</p>
-              <p className="text-xs text-muted-foreground">CartIQ is building coverage for this brand. Check back soon or browse all listings.</p>
+              <p className="text-xs text-muted-foreground">GolfCartWise is building coverage for this brand. Check back soon or browse all listings.</p>
               <a href="/#/search" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm hover:bg-secondary transition-colors">
                 Browse All Listings <ChevronRight className="h-4 w-4" />
               </a>
@@ -202,7 +202,7 @@ export default function BrandPage() {
 
         {/* Other brands */}
         <div className="space-y-3">
-          <h2 className="font-bold text-sm text-muted-foreground uppercase tracking-wide">Other Brands on CartIQ</h2>
+          <h2 className="font-bold text-sm text-muted-foreground uppercase tracking-wide">Other Brands on GolfCartWise</h2>
           <div className="flex flex-wrap gap-2">
             {BRAND_CONFIGS.filter(b => b.slug !== cfg.slug).map(b => (
               <Link key={b.slug} href={`/brands/${b.slug}`}

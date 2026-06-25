@@ -77,7 +77,7 @@ export default function CityPage() {
 
   useEffect(() => {
     if (!cfg) return;
-    setSEO({ title: cfg.title, description: cfg.metaDescription, canonical: `https://cartiq-chi.vercel.app/golf-carts-for-sale/${cfg.slug}` });
+    setSEO({ title: cfg.title, description: cfg.metaDescription, canonical: `https://golfcartwise.app/golf-carts-for-sale/${cfg.slug}` });
     setLoading(true);
     fetchCityListings(cfg).then(data => {
       setListings(data);
@@ -105,7 +105,7 @@ export default function CityPage() {
 
         {/* Breadcrumb */}
         <nav className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Link href="/" className="hover:text-foreground">CartIQ</Link>
+          <Link href="/" className="hover:text-foreground">GolfCartWise</Link>
           <ChevronRight className="h-3 w-3" />
           <span>Golf Carts For Sale</span>
           <ChevronRight className="h-3 w-3" />
@@ -159,7 +159,7 @@ export default function CityPage() {
           ) : listings.length === 0 ? (
             <div className="rounded-xl border border-border bg-white p-8 text-center space-y-3">
               <AlertTriangle className="h-6 w-6 text-amber-500 mx-auto" />
-              <p className="font-semibold text-sm">CartIQ is still building verified inventory coverage in this area.</p>
+              <p className="font-semibold text-sm">GolfCartWise is still building verified inventory coverage in this area.</p>
               <p className="text-xs text-muted-foreground max-w-sm mx-auto">
                 Expand your search or use Deal Checker to evaluate any outside listing.
               </p>
@@ -202,7 +202,7 @@ export default function CityPage() {
         {/* Deal Checker CTA */}
         <div className="rounded-2xl border border-border bg-white p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <p className="font-bold text-sm">Found a listing outside CartIQ?</p>
+            <p className="font-bold text-sm">Found a listing outside GolfCartWise?</p>
             <p className="text-xs text-muted-foreground mt-0.5">Paste any URL — Facebook, Craigslist, or dealer site — and get an instant market comparison.</p>
           </div>
           <a href="/#/deal-checker"

@@ -16,8 +16,8 @@ export default function Home() {
   useEffect(() => {
     setSEO({
       title: "Know the Right Cart. Pay the Right Price.",
-      description: "CartIQ is Florida & Georgia's golf cart price intelligence platform. Compare dealer prices, check fair value, and find great deals on new and used golf carts.",
-      canonical: "https://cartiq-chi.vercel.app/",
+      description: "GolfCartWise helps buyers compare golf carts, prices, dealers, battery types, warranties, delivery options, and deal ratings across Florida and Georgia.",
+      canonical: "https://golfcartwise.app/",
     });
   }, []);
   const [dealUrl, setDealUrl] = useState("");
@@ -74,11 +74,11 @@ export default function Home() {
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
             <div className="space-y-2 md:space-y-3">
               <div className="inline-flex items-center gap-2 bg-green-50 text-green-700 border border-green-200 px-3 py-1 rounded-full text-xs font-semibold">
-                Florida &amp; Georgia Golf Cart Intelligence
+                Know before you buy.
               </div>
               <h1 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-tight text-foreground">
-                Know the Right Cart.{" "}
-                <span className="text-green-600">Pay the Right Price.</span>
+                Find the right golf cart{" "}
+                <span className="text-green-600">at the right price.</span>
               </h1>
             </div>
             {/* Search bar — right-aligned on desktop, full-width on mobile */}
@@ -87,14 +87,14 @@ export default function Home() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   className="pl-9"
-                  placeholder="Brand, model, city…"
+                  placeholder="Brand, model, city, zip…"
                   value={heroSearch}
                   onChange={(e) => setHeroSearch(e.target.value)}
                   data-testid="hero-search-input"
                 />
               </div>
               <Button type="submit" className="gap-2 shrink-0" data-testid="hero-search-btn">
-                <Search className="h-4 w-4" /> Search
+                <Search className="h-4 w-4" /> Search Golf Carts
               </Button>
             </form>
           </div>
@@ -264,7 +264,7 @@ export default function Home() {
                 { label: "105Ah vs 150Ah — Which Range Do You Need?",  href: "/golf-cart-batteries/105ah-vs-150ah" },
                 { label: "Does a Used Golf Cart Include a Charger?",    href: "/golf-cart-batteries/charger-included" },
                 { label: "E-Z-GO Golf Carts — Buyer Guide",              href: "/brands/ezgo" },
-                { label: "How CartIQ Scores Listings",                 href: "/how-it-works" },
+                { label: "How GolfCartWise Works",                 href: "/how-it-works" },
               ].map(({ label, href }) => (
                 <li key={href}>
                   <Link href={href} className="text-sm text-green-700 hover:underline flex items-center gap-1">
@@ -279,9 +279,9 @@ export default function Home() {
       {/* ─── Bottom CTA ───────────────────────────────────────────────────────── */}
       <section className="bg-foreground text-background">
         <div className="max-w-3xl mx-auto px-4 py-14 text-center space-y-6">
-          <h2 className="text-2xl font-bold">Check Any Golf Cart Deal in Seconds</h2>
+          <h2 className="text-2xl font-bold">Check Any Cart's Value in Seconds</h2>
           <p className="text-sm text-muted opacity-80">
-            Find a cart on Facebook, Craigslist, a dealer site, or Costco. Paste the link, enter the details, and get your CartIQ report.
+            Enter a cart's details and get an instant GolfCartWise Value estimate, Wise Deal Rating, WiseScore, and buyer checklist.
           </p>
           <form onSubmit={handleDealCheck} className="flex flex-col sm:flex-row gap-3 max-w-lg mx-auto">
             <Input

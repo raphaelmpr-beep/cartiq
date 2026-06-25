@@ -1,4 +1,4 @@
-// CartIQ Pricing Engine — Comp-Based IMV
+// GolfCartWise Pricing Engine — Comp-Based IMV
 // =============================================================================
 // Inspired by CarGurus' Instant Market Value (IMV) approach:
 //   1. Use REAL comps from the DB as the primary price anchor
@@ -301,9 +301,9 @@ export function computeDealRating(
 }
 
 // =============================================================================
-// computeBuyerScore — 0–100 composite (CarGurus-inspired)
+// computeWiseScore — 0–100 composite (CarGurus-inspired)
 // =============================================================================
-export function computeBuyerScore(input: PricingInput, dealRating: string): number {
+export function computeWiseScore(input: PricingInput, dealRating: string): number {
   let score = 0;
 
   // ── Deal component (50 pts) ───────────────────────────────────────────────
@@ -404,7 +404,7 @@ export function enrichListing(
   }
 
   const { dealRating, dealDelta, tdc } = computeDealRating(effectivePrice, imv, deliveryCost);
-  const buyerScore = computeBuyerScore(input, dealRating);
+  const buyerScore = computeWiseScore(input, dealRating);
 
   const valConfidence: string =
     compTier === 1 ? "high" :
@@ -424,10 +424,10 @@ export function enrichListing(
 }
 
 // =============================================================================
-// calculateCartIQValue — Legacy single-listing API (Deal Checker)
+// calculateGolfCartWiseValue — Legacy single-listing API (Deal Checker)
 // Now uses the same IMV engine but with no comp data (pure formula fallback)
 // =============================================================================
-export function calculateCartIQValue(input: PricingInput): PricingResult {
+export function calculateGolfCartWiseValue(input: PricingInput): PricingResult {
   const redFlags: string[] = [];
   const questionsToAsk: string[] = [];
 
@@ -450,7 +450,7 @@ export function calculateCartIQValue(input: PricingInput): PricingResult {
   const { imv: cartiqMarketValue, priceConfidence } = computeIMV(input, []);
   const { dealRating, dealDelta } = computeDealRating(effectivePrice, cartiqMarketValue, estimatedDeliveryCost);
   const dealDeltaPercent = cartiqMarketValue > 0 ? dealDelta / cartiqMarketValue : 0;
-  const buyerScore = computeBuyerScore(input, dealRating);
+  const buyerScore = computeWiseScore(input, dealRating);
 
   // Battery risk
   const batteryType = (input.batteryType || "unknown").toLowerCase();

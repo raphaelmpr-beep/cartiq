@@ -1,5 +1,5 @@
 /**
- * CartIQ Seed — PRODUCTION MODE
+ * GolfCartWise Seed — PRODUCTION MODE
  *
  * Synthetic data removed. The database is now Supabase/Postgres and persists
  * across deployments. Data enters via:

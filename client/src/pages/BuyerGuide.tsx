@@ -136,9 +136,9 @@ const RELATED_MAP: Record<string, string[]> = {
 export function BuyerGuideIndex() {
   useEffect(() => {
     setSEO({
-      title: "Golf Cart Buyer Guide | CartIQ",
+      title: "Golf Cart Buyer Guide | GolfCartWise",
       description: "Everything you need to know before buying a golf cart in Florida or Georgia — battery types, brands, pricing, street legal rules, and dealer vs. private seller.",
-      canonical: "https://cartiq-chi.vercel.app/buyer-guide",
+      canonical: "https://golfcartwise.app/buyer-guide",
     });
   }, []);
 
@@ -153,7 +153,7 @@ export function BuyerGuideIndex() {
         <div className="mb-10">
           <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
             <ShieldCheck className="h-4 w-4 text-green-600" />
-            <span>Written by the CartIQ team · Florida &amp; Georgia golf cart market data</span>
+            <span>Written by the GolfCartWise team · Florida &amp; Georgia golf cart market data</span>
           </div>
           <h1 className="text-3xl font-bold tracking-tight">Golf Cart Buyer Guide</h1>
           <p className="text-muted-foreground mt-2 text-sm max-w-xl">
@@ -202,7 +202,7 @@ export function BuyerGuideIndex() {
         <div className="mt-10 bg-foreground text-background rounded-xl p-6 text-center">
           <h2 className="font-bold text-lg mb-2">Ready to check a deal?</h2>
           <p className="text-sm opacity-80 mb-4">
-            Found a cart on Facebook, Craigslist, or a dealer site? Get your free CartIQ analysis in seconds.
+            Found a cart on Facebook, Craigslist, or a dealer site? Get your free GolfCartWise analysis in seconds.
           </p>
           <Link href="/deal-checker">
             <Button variant="secondary" size="lg">Check a Deal Free</Button>
@@ -247,7 +247,7 @@ export function ArticleDetail() {
 
   useEffect(() => {
     if (!article) return;
-    const BASE = "https://cartiq-chi.vercel.app";
+    const BASE = "https://golfcartwise.app";
     const canonicalUrl = `${BASE}${article.canonicalPath || `/buyer-guide/${article.slug}`}`;
     const faqData = parseJsonField<{ q: string; a: string }>(article.faqJson);
 
@@ -259,8 +259,8 @@ export function ArticleDetail() {
       "url": canonicalUrl,
       "datePublished": article.createdAt,
       "dateModified": article.updatedAt || article.createdAt,
-      "author": { "@type": "Organization", "name": "CartIQ", "url": BASE },
-      "publisher": { "@type": "Organization", "name": "CartIQ", "url": BASE },
+      "author": { "@type": "Organization", "name": "GolfCartWise", "url": BASE },
+      "publisher": { "@type": "Organization", "name": "GolfCartWise", "url": BASE },
       "mainEntityOfPage": canonicalUrl,
       "inLanguage": "en-US",
       "keywords": [
@@ -279,7 +279,7 @@ export function ArticleDetail() {
     } : null;
 
     const crumbs = breadcrumbSchema([
-      { name: "CartIQ", url: BASE },
+      { name: "GolfCartWise", url: BASE },
       { name: "Buyer Guide", url: `${BASE}/buyer-guide` },
       { name: article.title, url: canonicalUrl },
     ]);
@@ -323,7 +323,7 @@ export function ArticleDetail() {
 
         {/* Breadcrumb */}
         <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-6" aria-label="Breadcrumb">
-          <Link href="/" className="hover:text-foreground transition-colors">CartIQ</Link>
+          <Link href="/" className="hover:text-foreground transition-colors">GolfCartWise</Link>
           <ChevronRight className="h-3 w-3" />
           <Link href="/buyer-guide" className="hover:text-foreground transition-colors">Buyer Guide</Link>
           <ChevronRight className="h-3 w-3" />
@@ -340,7 +340,7 @@ export function ArticleDetail() {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground mb-5">
             <span className="flex items-center gap-1">
               <ShieldCheck className="h-3.5 w-3.5 text-green-600" />
-              CartIQ Research Team
+              GolfCartWise Research Team
             </span>
             <span className="flex items-center gap-1">
               <Clock className="h-3.5 w-3.5" />
@@ -384,7 +384,7 @@ export function ArticleDetail() {
           <div className="flex-1">
             <p className="font-bold text-base mb-1">Check any golf cart deal — free</p>
             <p className="text-sm opacity-75">
-              CartIQ compares your cart against 1,300+ FL/GA listings. Get a deal rating and fair market value in seconds.
+              GolfCartWise compares your cart against 1,300+ FL/GA listings. Get a Wise Deal Rating and fair market value in seconds.
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2 shrink-0">
@@ -432,7 +432,7 @@ export function ArticleDetail() {
             Back to Buyer Guide
           </Link>
           <p className="text-xs text-muted-foreground mt-2">
-            Last updated: {publishDate} · CartIQ covers 50+ FL/GA golf cart dealers.
+            Last updated: {publishDate} · GolfCartWise covers 50+ FL/GA golf cart dealers.
           </p>
         </div>
 

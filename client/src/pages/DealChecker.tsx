@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DealBadge, BuyerScoreBadge, DeliveryCostBadge, DealDeltaBadge } from "@/components/Badges";
+import { DealBadge, WiseScoreBadge, DeliveryCostBadge, DealDeltaBadge } from "@/components/Badges";
 import { formatPrice, dealRatingLabel, parseJsonField } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import type { DealCheck } from "@/lib/types";
@@ -74,9 +74,9 @@ export default function DealChecker() {
   // SEO
   useEffect(() => {
     setSEO({
-      title: "Golf Cart Deal Checker",
-      description: "Check if a golf cart price is fair before you buy. CartIQ's Deal Checker compares your cart against real dealer comps in Florida and Georgia.",
-      canonical: "https://cartiq-chi.vercel.app/deal-checker",
+      title: "Golf Cart CartCheck — Deal Checker",
+      description: "Check if a golf cart price is fair before you buy. GolfCartWise's CartCheck — Deal Checker compares your cart against real dealer comps in Florida and Georgia.",
+      canonical: "https://golfcartwise.app/deal-checker",
     });
   }, []);
   const [step, setStep] = useState(1);
@@ -137,8 +137,8 @@ export default function DealChecker() {
     <div className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="mb-6">
-          <h1 className="text-xl font-bold">Deal Checker</h1>
-          <p className="text-sm text-muted-foreground mt-1">Get a private CartIQ analysis on any golf cart listing.</p>
+          <h1 className="text-xl font-bold">CartCheck — Deal Checker</h1>
+          <p className="text-sm text-muted-foreground mt-1">Get a private GolfCartWise analysis on any golf cart listing.</p>
         </div>
 
         {/* Progress steps */}
@@ -181,7 +181,7 @@ export default function DealChecker() {
                     <Info className="h-4 w-4 shrink-0 mt-0.5 text-amber-700" />
                     <div>
                       <p className="font-semibold mb-1">Important: Facebook Marketplace Notice</p>
-                      <p>CartIQ does not automatically import, scrape, or republish Facebook Marketplace listings. Enter the listing details yourself. CartIQ analyzes the details you provide for your private shopping evaluation. The original listing remains on Facebook and may require Facebook login.</p>
+                      <p>GolfCartWise does not automatically import, scrape, or republish Facebook Marketplace listings. Enter the listing details yourself. GolfCartWise analyzes the details you provide for your private shopping evaluation. The original listing remains on Facebook and may require Facebook login.</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
@@ -203,7 +203,7 @@ export default function DealChecker() {
                 <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 text-sm text-purple-900">
                   <div className="flex gap-2">
                     <Info className="h-4 w-4 shrink-0 mt-0.5 text-purple-700" />
-                    <p>CartIQ does not guarantee retailer price or availability. Retail prices, availability, shipping, delivery, warranty, and state eligibility may change. Verify all details on the retailer site before purchase.</p>
+                    <p>GolfCartWise does not guarantee retailer price or availability. Retail prices, availability, shipping, delivery, warranty, and state eligibility may change. Verify all details on the retailer site before purchase.</p>
                   </div>
                 </div>
               )}
@@ -418,7 +418,7 @@ export default function DealChecker() {
                   <ArrowLeft className="h-4 w-4" /> Back
                 </Button>
                 <Button type="submit" className="flex-1 gap-2" disabled={mutation.isPending} data-testid="btn-submit-deal-check">
-                  {mutation.isPending ? "Analyzing…" : "Get My CartIQ Report"} <ArrowRight className="h-4 w-4" />
+                  {mutation.isPending ? "Analyzing…" : "Get My GolfCartWise Report"} <ArrowRight className="h-4 w-4" />
                 </Button>
               </div>
               {mutation.isError && (
@@ -433,10 +433,10 @@ export default function DealChecker() {
           <div className="space-y-5" data-testid="deal-check-report">
             <Card className="border-green-200 bg-green-50">
               <CardContent className="pt-5 space-y-2">
-                <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">Your Private CartIQ Report</p>
+                <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">Your Private GolfCartWise Report</p>
                 <div className="flex items-center gap-3">
                   <DealBadge rating={result.dealRating} />
-                  <BuyerScoreBadge score={result.buyerScore} />
+                  <WiseScoreBadge score={result.buyerScore} />
                 </div>
               </CardContent>
             </Card>
@@ -452,7 +452,7 @@ export default function DealChecker() {
               <CardContent className="space-y-3 text-sm">
                 {[
                   ["Asking Price", formatPrice(result.askingPrice)],
-                  ["CartIQ Market Value", formatPrice(result.cartiqMarketValue ?? result.cartiqEstimatedValue)],
+                  ["GolfCartWise Value", formatPrice(result.cartiqMarketValue ?? result.cartiqEstimatedValue)],
                   ["Total Delivered Cost", result.totalDeliveredCost ? formatPrice(result.totalDeliveredCost) : "Delivery cost unknown"],
                 ].map(([label, value]) => (
                   <div key={label} className="flex justify-between">

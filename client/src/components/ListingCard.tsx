@@ -3,7 +3,7 @@ import { useState, useCallback } from "react";
 import { MapPin, Users, Phone, Store, ExternalLink, Car } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DealBadge, SourceBadge, BuyerScoreBadge, WarrantyBadge, DeliveryCostBadge, BatteryRiskBadge, DealDeltaBadge, StreetLegalBadge, RetailSourceBadge } from "./Badges";
+import { DealBadge, SourceBadge, WiseScoreBadge, WarrantyBadge, DeliveryCostBadge, BatteryRiskBadge, DealDeltaBadge, StreetLegalBadge, RetailSourceBadge } from "./Badges";
 import { formatPrice, batteryTypeLabel } from "@/lib/utils";
 import SaveButton from "./SaveButton";
 import WatchButton from "./WatchButton";
@@ -123,10 +123,10 @@ export function ListingCard({ listing, compact }: ListingCardProps) {
             <div>
               <div className="text-lg font-bold text-foreground" data-testid={`text-price-${listing.id}`}>{formatPrice(effectivePrice)}</div>
               {listing.cartiqEstimatedValue && (
-                <div className="text-xs text-muted-foreground">CartIQ Value: {formatPrice(listing.cartiqEstimatedValue)}</div>
+                <div className="text-xs text-muted-foreground">GolfCartWise Value: {formatPrice(listing.cartiqEstimatedValue)}</div>
               )}
             </div>
-            <BuyerScoreBadge score={listing.buyerScore} />
+            <WiseScoreBadge score={listing.buyerScore} />
           </div>
           <div className="flex items-center justify-between text-xs">
             <DeliveryCostBadge

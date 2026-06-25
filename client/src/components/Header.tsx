@@ -22,12 +22,12 @@ export function Header() {
         {/* Logo */}
         <Link href="/">
           <a className="flex items-center gap-2">
-            <svg viewBox="0 0 32 32" className="h-8 w-8" fill="none" aria-label="CartIQ logo">
+            <svg viewBox="0 0 32 32" className="h-8 w-8" fill="none" aria-label="GolfCartWise logo">
               <rect width="32" height="32" rx="8" fill="hsl(220,13%,13%)" />
               <path d="M6 20L12 10L18 16L22 12L26 20" stroke="hsl(142,76%,56%)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
               <circle cx="12" cy="10" r="2" fill="hsl(142,76%,56%)" />
             </svg>
-            <span className="font-bold text-xl tracking-tight text-foreground">Cart<span className="text-green-600">IQ</span></span>
+            <span className="font-bold text-xl tracking-tight text-foreground">GolfCart<span className="text-green-600">Wise</span></span>
           </a>
         </Link>
 
@@ -76,7 +76,7 @@ export function Header() {
           </SheetTrigger>
           <SheetContent side="right" className="w-72">
             <div className="flex items-center justify-between mb-6">
-              <span className="font-bold text-lg">Cart<span className="text-green-600">IQ</span></span>
+              <span className="font-bold text-lg">GolfCart<span className="text-green-600">Wise</span></span>
               <button onClick={() => setMobileOpen(false)}><X className="h-5 w-5" /></button>
             </div>
             <div className="flex items-center gap-1 text-sm text-muted-foreground mb-4 px-1">

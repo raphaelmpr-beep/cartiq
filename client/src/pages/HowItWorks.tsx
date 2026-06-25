@@ -7,8 +7,8 @@ import {
 } from "lucide-react";
 
 const SECTIONS = [
-  { id: "buyer-score",    label: "Buyer Score" },
-  { id: "deal-rating",    label: "Deal Rating" },
+  { id: "buyer-score",    label: "WiseScore" },
+  { id: "deal-rating",    label: "Wise Wise Deal Rating" },
   { id: "battery",        label: "Battery" },
   { id: "warranty",       label: "Warranty" },
   { id: "charger",        label: "Charger" },
@@ -127,10 +127,10 @@ function ScoreBar({ score, label }: { score: number; label: string }) {
 export default function HowItWorks() {
   useEffect(() => {
     setSEO({
-      title: "How CartIQ Scores Golf Cart Listings | Buyer Score, Deal Rating & More",
+      title: "How GolfCartWise Scores Golf Cart Listings | WiseScore, Wise Wise Deal Rating & More",
       description:
-        "Understand how CartIQ calculates Buyer Score, Deal Rating, battery quality, warranty value, charger inclusion, and delivery to help you find the best golf cart deal in Florida and Georgia.",
-      canonical: "https://cartiq-chi.vercel.app/how-it-works",
+        "Understand how GolfCartWise calculates WiseScore, Wise Wise Deal Rating, battery quality, warranty value, charger inclusion, and delivery to help you find the best golf cart deal in Florida and Georgia.",
+      canonical: "https://golfcartwise.app/how-it-works",
     });
   }, []);
 
@@ -142,11 +142,11 @@ export default function HowItWorks() {
         <div className="mb-10">
           <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
             <Info className="h-4 w-4 text-green-600" />
-            <span>CartIQ Scoring Guide</span>
+            <span>GolfCartWise Scoring Guide</span>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight mb-2">How CartIQ Scores Listings</h1>
+          <h1 className="text-2xl font-bold tracking-tight mb-2">How GolfCartWise Scores Listings</h1>
           <p className="text-sm text-muted-foreground max-w-xl leading-relaxed">
-            Every golf cart listing on CartIQ gets a set of signals to help you compare deals quickly.
+            Every golf cart listing on GolfCartWise gets a set of signals to help you compare deals quickly.
             This page explains exactly what each score and badge means — and how to use them.
           </p>
           <JumpNav />
@@ -158,11 +158,11 @@ export default function HowItWorks() {
           <Section
             id="buyer-score"
             icon={<Star className="h-5 w-5" />}
-            title="Buyer Score (0–100)"
+            title="WiseScore (0–100)"
             subtitle="A single composite number that captures price, battery, warranty, charger, and delivery in one view."
           >
             <p className="text-sm text-muted-foreground leading-relaxed">
-              The Buyer Score is CartIQ's overall value signal. It combines five independent factors into
+              The WiseScore is GolfCartWise's overall value signal. It combines five independent factors into
               a score from 0 to 100. A score of 75+ means the listing is a strong buy on all dimensions —
               well-priced, lithium battery, warranty included, charger included, and delivery available.
               A low score doesn't necessarily mean a bad cart — it often just means data is missing or
@@ -179,7 +179,7 @@ export default function HowItWorks() {
             <Table
               headers={["Component", "Max Points", "How Points Are Earned"]}
               rows={[
-                ["Deal Rating", "50 pts", "great_deal=50, good_deal=40, fair_price=30, high_price=15, over_market=5, unknown=22"],
+                ["Wise Wise Deal Rating", "50 pts", "great_deal=50, good_deal=40, fair_price=30, high_price=15, over_market=5, unknown=22"],
                 ["Battery", "20 pts", "Lithium <12 months=20, Lithium unknown age=15, Gas=10, Lead-acid new=8, Unknown=6"],
                 ["Warranty", "15 pts", "Included + 36 months=15, Included <36 months=10, Unknown=5, No warranty=0"],
                 ["Charger", "10 pts", "Included=10, Unknown=5, Not included=0"],
@@ -198,17 +198,17 @@ export default function HowItWorks() {
           <Section
             id="deal-rating"
             icon={<TrendingDown className="h-5 w-5" />}
-            title="Deal Rating"
-            subtitle="How the asking price compares to CartIQ's estimated market value for that cart."
+            title="Wise Wise Deal Rating"
+            subtitle="How the asking price compares to GolfCartWise's estimated market value for that cart."
           >
             <p className="text-sm text-muted-foreground leading-relaxed">
-              CartIQ calculates a CartIQ Value (IMV — Implied Market Value) for each listing based on
+              GolfCartWise calculates a GolfCartWise Value (IMV — Implied Market Value) for each listing based on
               comparable carts currently in the database: same brand, model, year, condition, and region.
-              The Deal Rating reflects how the asking price sits relative to that estimate.
+              The Wise Wise Deal Rating reflects how the asking price sits relative to that estimate.
             </p>
 
             <Table
-              headers={["Rating", "What It Means", "Buyer Score Points"]}
+              headers={["Rating", "What It Means", "WiseScore Points"]}
               rows={[
                 [<span className="inline-flex items-center gap-1.5 font-semibold text-green-700"><BadgeCheck className="h-3.5 w-3.5" />Great Deal</span>, "Asking price is meaningfully below market value — strong buy signal", "50"],
                 [<span className="font-semibold text-emerald-600">Good Deal</span>, "Priced below market — solid value, worth acting on", "40"],
@@ -220,7 +220,7 @@ export default function HowItWorks() {
               ]}
             />
 
-            <AmberBox label="CartIQ Value is an estimate, not an appraisal">
+            <AmberBox label="GolfCartWise Value is an estimate, not an appraisal">
               Deal ratings are based on listings in our database at the time of scoring. Niche brands,
               limited-production models, and very new releases may show "Unknown" until enough comps exist.
               Always confirm pricing directly with the dealer.
@@ -236,7 +236,7 @@ export default function HowItWorks() {
           >
             <p className="text-sm text-muted-foreground leading-relaxed">
               Battery technology is the most important spec on a used golf cart — and often the least
-              clearly disclosed. CartIQ surfaces battery type, chemistry, and age wherever confirmed
+              clearly disclosed. GolfCartWise surfaces battery type, chemistry, and age wherever confirmed
               by the dealer or manufacturer spec sheet.
             </p>
 
@@ -271,7 +271,7 @@ export default function HowItWorks() {
             subtitle="Confirmed warranty coverage is one of the clearest signals of dealer confidence in a listing."
           >
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Warranty terms vary significantly between dealers and brands. CartIQ records whether a
+              Warranty terms vary significantly between dealers and brands. GolfCartWise records whether a
               warranty is included, the length in months, and the provider — whether that's the dealer,
               the manufacturer, or a third-party warranty company.
             </p>
@@ -326,11 +326,11 @@ export default function HowItWorks() {
             id="delivery"
             icon={<Truck className="h-5 w-5" />}
             title="Delivery"
-            subtitle="Delivery cost is part of the true price — CartIQ factors it into the total delivered cost where available."
+            subtitle="Delivery cost is part of the true price — GolfCartWise factors it into the total delivered cost where available."
           >
             <p className="text-sm text-muted-foreground leading-relaxed">
               A $10,500 cart from a dealer 150 miles away may cost more delivered than an $11,000 cart
-              nearby. CartIQ calculates an estimated delivery cost based on distance and shows a
+              nearby. GolfCartWise calculates an estimated delivery cost based on distance and shows a
               Total Delivered Cost where dealer delivery information is available.
             </p>
 
@@ -344,7 +344,7 @@ export default function HowItWorks() {
             />
 
             <GreenBox label="Delivery-adjusted pricing">
-              When delivery information is available, CartIQ's Deal Checker adds the estimated delivery
+              When delivery information is available, GolfCartWise's Deal Checker adds the estimated delivery
               cost to the asking price to show a Total Delivered Cost. Use this to compare listings
               from dealers at different distances — the closer dealer may be the better deal even at a
               higher sticker price.
@@ -357,7 +357,7 @@ export default function HowItWorks() {
         <div className="mt-14 rounded-2xl border border-border bg-white p-6 text-center space-y-3">
           <p className="font-bold text-foreground">Ready to find your cart?</p>
           <p className="text-sm text-muted-foreground">
-            Use CartIQ's filters to search by deal rating, battery type, warranty, and more across
+            Use GolfCartWise's filters to search by Wise Wise Deal Rating, battery type, warranty, and more across
             Florida and Georgia.
           </p>
           <div className="flex flex-wrap justify-center gap-3 pt-1">
@@ -377,7 +377,7 @@ export default function HowItWorks() {
         {/* Bottom nav */}
         <div className="mt-10 pt-6 border-t border-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} CartIQ · Florida &amp; Georgia Golf Cart Price Intelligence
+            © {new Date().getFullYear()} GolfCartWise · Florida &amp; Georgia Golf Cart Price Intelligence
           </p>
           <div className="flex gap-4 text-xs text-muted-foreground">
             <Link href="/buyer-guide" className="hover:text-foreground transition-colors">Buyer Guide</Link>

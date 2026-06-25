@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    /* CartIQ: clean, grayscale-first with green/red/orange deal signals */
+    /* GolfCartWise: clean, grayscale-first with green/red/orange deal signals */
     --background: 0 0% 98%;
     --foreground: 220 13% 13%;
     --card: 0 0% 100%;
