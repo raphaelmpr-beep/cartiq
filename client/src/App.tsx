@@ -90,21 +90,27 @@ function AppRoutes() {
         </Switch>
       </main>
       <footer className="border-t border-border bg-white mt-8">
-        <div className="max-w-7xl mx-auto px-4 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-foreground">Cart<span className="text-green-600">IQ</span></span>
-            <span>Golf cart pricing intelligence — Florida & Georgia</span>
+        <div className="max-w-7xl mx-auto px-4 py-8 space-y-4 text-xs text-muted-foreground">
+          {/* Top row — brand + nav links */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-foreground">Cart<span className="text-green-600">IQ</span></span>
+              <span>Golf cart pricing intelligence — Florida &amp; Georgia</span>
+            </div>
+            <div className="flex flex-wrap gap-4">
+              <a href="/#/buyer-guide" className="hover:text-foreground">Buyer Guide</a>
+              <a href="/#/deal-checker" className="hover:text-foreground">Deal Checker</a>
+              <a href="/#/search" className="hover:text-foreground">Search</a>
+              <a href="/#/garage" className="hover:text-foreground">My Garage</a>
+              <a href="/#/how-it-works" className="hover:text-foreground">How It Works</a>
+              <a href="/#/disclosure" className="hover:text-foreground font-medium text-foreground/70">Disclosure</a>
+            </div>
           </div>
-          <div className="flex gap-4">
-            <a href="/#/buyer-guide" className="hover:text-foreground">Buyer Guide</a>
-            <a href="/#/deal-checker" className="hover:text-foreground">Deal Checker</a>
-            <a href="/#/search" className="hover:text-foreground">Search</a>
-            <a href="/#/garage" className="hover:text-foreground">My Garage</a>
-            <a href="/#/admin" className="hover:text-foreground">Admin</a>
-            <a href="/#/how-it-works" className="hover:text-foreground">How It Works</a>
-            <a href="/#/disclosure" className="hover:text-foreground">Disclosure</a>
+          {/* Bottom row — legal line */}
+          <div className="border-t border-border pt-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <p>© {new Date().getFullYear()} CartIQ · Independent golf cart research &amp; pricing platform. Not affiliated with Facebook, Costco, Club Car, E-Z-GO, Yamaha, or any manufacturer.</p>
+            <a href="/#/disclosure" className="hover:text-foreground underline whitespace-nowrap">Information Disclosure</a>
           </div>
-          <p>© {new Date().getFullYear()} CartIQ · Not affiliated with Facebook, Costco, or any manufacturer. <a href="/#/disclosure" className="hover:text-foreground underline">Information Disclosure</a></p>
         </div>
       </footer>
     </div>
