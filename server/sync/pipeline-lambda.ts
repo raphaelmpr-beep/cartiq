@@ -90,6 +90,121 @@ function parseSlug(url: string, dealer: string): { year: number | null; make: st
   return { year, make, model: modelSlug || null, condition };
 }
 
+
+// ─── DX1/Algolia inventory fetcher ────────────────────────────────────────────
+// Golf Rider (and future DX1-platform dealers) use an Algolia-powered inventory
+// search. We query the API directly to get fully structured data — no page fetches.
+
+interface Dx1AlgoliaConfig {
+  appId: string;
+  apiKey: string;       // restricted key scoped to this dealer's org/site
+  indexName: string;    // e.g. 'prod_WebSellable'
+  baseUrl: string;      // e.g. 'https://www.golfrider.com'
+}
+
+interface Dx1Unit {
+  source_url: string;
+  raw_title: string;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  condition: string | null;
+  price: number | null;
+  image_url: string | null;
+  seating: number | null;
+  location_city: string | null;
+  location_state: string | null;
+}
+
+async function fetchDx1AlgoliaInventory(cfg: Dx1AlgoliaConfig): Promise<Dx1Unit[]> {
+  const endpoint = `https://${cfg.appId}-dsn.algolia.net/1/indexes/${cfg.indexName}/query`;
+  const units: Dx1Unit[] = [];
+  let page = 0;
+
+  while (true) {
+    const payload = JSON.stringify({ params: `hitsPerPage=100&page=${page}`, query: '' });
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'X-Algolia-Application-Id': cfg.appId,
+          'X-Algolia-API-Key': cfg.apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: payload,
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) {
+        console.warn(`[dx1] Algolia error: ${res.status} ${res.statusText}`);
+        break;
+      }
+      const data = await res.json() as any;
+      const hits: any[] = data.hits || [];
+
+      for (const h of hits) {
+        const showroomUrl: string = h.ShowroomUrl || '';
+        if (!showroomUrl) continue;
+
+        // Only include golf cart / utility vehicle categories (skip ATVs, PWC, snowmobiles)
+        const category: string = (h.ProductCategory || h.FriendlyProductCategory || '').toLowerCase();
+        const industry: string = ((h.IndustryNameLists || []) as string[]).join(' ').toLowerCase();
+        const isCart = /golf.cart|utility.vehic|electric.vehicle|low.speed|cart/i.test(category)
+          || /golf.cart|utility.vehic|electric.vehicle|low.speed/i.test(industry)
+          || /golf.cart|utility.vehic|electric/i.test(h.ProductType || '');
+        // E-Z-GO, Yamaha, Club Car, Cushman, Alset are always golf cart brands
+        const cartBrands = ['e-z-go','yamaha','club car','cushman','alset','star ev','icon','bintelli','epic','venom'];
+        const mfr = (h.Manufacturer || '').toLowerCase();
+        const isBrand = cartBrands.some(b => mfr.includes(b));
+        if (!isCart && !isBrand) continue;
+
+        const year = h.Year ? parseInt(h.Year) : null;
+        const make = h.Manufacturer || null;
+        const model = h.ProductName || null;
+        const cond = (h.Condition || '').toLowerCase() === 'used' ? 'used' : 'new';
+        const price = h.Price || h.SalePrice || h.Msrp || null;
+        const photos: string[] = h.PhotoLists || [];
+        const image_url = photos.length > 0 ? photos[0] : null;
+
+        // Seating from ProductType string (e.g. "4 Passenger", "6 Passenger")
+        const ptMatch = (h.ProductType || '').match(/^(\d+)/);
+        const seating = ptMatch ? parseInt(ptMatch[1]) : null;
+
+        const title = [year, make, model].filter(Boolean).join(' ');
+
+        units.push({
+          source_url: showroomUrl,
+          raw_title: title,
+          year,
+          make,
+          model,
+          condition: cond,
+          price: price ? parseFloat(String(price)) : null,
+          image_url,
+          seating,
+          location_city: h.City || null,
+          location_state: h.StateProvinceCode || h.StateProvince || null,
+        });
+      }
+
+      if (page + 1 >= (data.nbPages || 1)) break;
+      page++;
+    } catch (e: any) {
+      console.warn(`[dx1] Fetch error page ${page}: ${e?.message}`);
+      break;
+    }
+  }
+
+  return units;
+}
+
+// Golf Rider DX1 config — extracted from their inventory page HTML
+const GOLF_RIDER_DX1: Dx1AlgoliaConfig = {
+  appId:     'RBG3H22Y5V',
+  apiKey:    'MTE0ODVhZDAzNjQ2Y2I0Mzg5MGUzMzQ4Yjg3NmQ5MTI2ZmQ0Y2YwNjVkNDEzYmRkMDhjZjdjZTE3YzdlZWUwZGF0dHJpYnV0ZXNUb1JldHJpZXZlPSomYXR0cmlidXRlc1RvSGlnaGxpZ2h0PU1hbnVmYWN0dXJlcixQcm9kdWN0TmFtZSxQcm9kdWN0VHlwZSZmYWNldEZpbHRlcnM9JTVCJTVCJTIyT3JnYW5pemF0aW9uSWQlM0E2MGU4MzUyYi01MWU5LTRhNzQtYmE0Yi0xYzc3ZjFkY2MzZDIlMjIlNUQlMkMlNUIlMjJTaXRlR3VpZExpc3RzJTNBMTk3ZGI4ZjUtMGVhMy00OGQxLTgxZGEtMTA4N2I4ZGUzNTY3JTIyJTVEJTVEJmFuYWx5dGljcz10cnVlJmFuYWx5dGljc1RhZ3M9R29sZitSaWRlciUyQytJbmMuJm51bWVyaWNGaWx0ZXJzPSU1QiU1QiUyMkhhc0RhdGVTb2xkJTNEMCUyMiUyQyUyMlNvbGRVbml0c0V4cGlyZURhdGUlM0UlM0QxNzgyMzQ1NjAwJTIyJTVEJTVEJnJlc3RyaWN0SW5kaWNlcz1wcm9kX1dlYlNlbGxhYmxlLHByb2RfV2ViU2VsbGFibGVfUHJpY2VfQXNjLHByb2RfV2ViU2VsbGFibGVfUHJpY2VfRGVzYyxwcm9kX1dlYlNlbGxhYmxlX1llYXJfQXNjLHByb2RfV2ViU2VsbGFibGVfWWVhcl9EZXNjLHByb2RfV2ViU2VsbGFibGVfQWdlX0FzYyxwcm9kX1dlYlNlbGxhYmxlX0FnZV9EZXNjJnZhbGlkVW50aWw9MTc4MjM5MjAzMA==',
+  indexName: 'prod_WebSellable',
+  baseUrl:   'https://www.golfrider.com',
+};
+
 // ─── Main sync entry point (Lambda-safe) ─────────────────────────────────────
 
 export interface SyncOptions {
@@ -206,6 +321,13 @@ const ADAPTER_OVERRIDES: Record<string, () => Promise<string[]>> = {
   botero: () => getBoteroSitemapUrls(true),
   jax:    () => getJaxSitemapUrls(),
 };
+
+// Rich adapters return pre-parsed Dx1Unit[] rows (full metadata, no slug-parsing needed)
+const RICH_ADAPTER_OVERRIDES: Record<string, (dealer: DealerSourceRecord) => Promise<Dx1Unit[]>> = {
+  golf_rider: () => fetchDx1AlgoliaInventory(GOLF_RIDER_DX1),
+};
+
+
 
 /** Write discovery status back to dealers.last_discovery_* */
 async function writeDiscoveryStatus(
@@ -355,8 +477,67 @@ async function runDiscoverSitemap(
   // ── Resolve listing URLs ──────────────────────────────────────────────────
   let sitemapUrls: string[] = [];
 
-  if (adapterKey && ADAPTER_OVERRIDES[adapterKey]) {
-    // Hardcoded override (botero, jax)
+  if (adapterKey && RICH_ADAPTER_OVERRIDES[adapterKey]) {
+    // Rich adapter — returns fully structured rows (no slug-parsing needed)
+    const units = await RICH_ADAPTER_OVERRIDES[adapterKey](dealer);
+    if (!units.length) {
+      const msg = `[${slug}] Rich adapter returned 0 units`;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
+      return;
+    }
+
+    // Diff against known URLs
+    const [{ data: existing }, { data: pendingKnown }] = await Promise.all([
+      supabase.from('listings').select('source_listing_url').eq('sync_source', slug).not('source_listing_url', 'is', null),
+      supabase.from('pending_imports').select('source_url').eq('dealer_slug', slug),
+    ]);
+    const knownUrls = new Set([
+      ...(existing || []).map((r: any) => r.source_listing_url),
+      ...(pendingKnown || []).map((r: any) => r.source_url),
+    ]);
+
+    const newUnits = units.filter(u => !knownUrls.has(u.source_url));
+    result.already_known = units.length - newUnits.length;
+    result.summary.push(`[${slug}] ${units.length} in API | ${result.already_known} known | ${newUnits.length} new`);
+
+    const toInsert = newUnits.slice(0, limit).map(u => ({
+      dealer_slug: slug,
+      source_url:  u.source_url,
+      raw_title:   u.raw_title,
+      year:        u.year,
+      make:        u.make,
+      model:       u.model,
+      condition:   u.condition,
+      price:       u.price,
+      image_url:   u.image_url,
+      location_city:  u.location_city,
+      location_state: u.location_state,
+      status: 'pending',
+    }));
+
+    result.processed = toInsert.length;
+
+    if (!dry_run && toInsert.length > 0) {
+      const { error } = await supabase.from('pending_imports').upsert(toInsert, { onConflict: 'source_url', ignoreDuplicates: true });
+      if (error) {
+        result.errors++;
+        result.summary.push(`[${slug}] DB error: ${error.message}`);
+        await writeDiscoveryStatus(supabase, slug, 'error', error.message);
+      } else {
+        result.new_queued = toInsert.length;
+        await writeDiscoveryStatus(supabase, slug, 'ok', `Queued ${toInsert.length} new units from DX1 API (${units.length} total, ${result.already_known} already known)`);
+        result.summary.push(`[${slug}] Queued ${toInsert.length} new listings`);
+      }
+    } else if (dry_run) {
+      result.new_queued = toInsert.length;
+      result.summary.push(`[${slug}] [DRY RUN] Would queue ${toInsert.length} listings`);
+      toInsert.slice(0, 5).forEach(r => result.summary.push(`  → ${r.raw_title} ($${r.price ?? 'N/A'}) ${r.source_url}`));
+    }
+    return;
+
+  } else if (adapterKey && ADAPTER_OVERRIDES[adapterKey]) {
+    // URL-only override (botero, jax)
     sitemapUrls = await ADAPTER_OVERRIDES[adapterKey]();
   } else if (strategy === 'gcr_sitemap' && dealer.inventory_source_url) {
     // GCR sitemap via registered inventory_source_url
