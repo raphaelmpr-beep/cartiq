@@ -111,6 +111,59 @@ function zipToLatLng(zip: string): [number, number] | null {
   return ZIP_CENTROIDS[zip] ?? null;
 }
 
+// ─── City centroid lookup — covers all cities that appear in CartIQ listings ──
+// Keys are lowercase normalized city names for fuzzy matching
+const CITY_CENTROIDS: Record<string, [number, number]> = {
+  // Florida
+  "jacksonville":        [30.332, -81.656],
+  "atlantic beach":      [30.334, -81.396],
+  "ponte vedra beach":   [30.240, -81.386],
+  "ponte vedra":         [30.240, -81.386],
+  "lakeland":            [28.040, -81.950],
+  "ocala":               [29.187, -82.140],
+  "clearwater":          [27.966, -82.800],
+  "the villages":        [28.925, -82.003],
+  "lady lake":           [28.918, -81.924],
+  "pensacola":           [30.421, -87.217],
+  "delray beach":        [26.462, -80.073],
+  "fort lauderdale":     [26.122, -80.137],
+  "melbourne":           [28.083, -80.608],
+  "tampa":               [27.951, -82.457],
+  "naples":              [26.142, -81.795],
+  "sarasota":            [27.336, -82.531],
+  "bradenton":           [27.498, -82.575],
+  "fort myers":          [26.641, -81.872],
+  // Georgia
+  "peachtree city":      [33.397, -84.599],
+  "cumming":             [34.207, -84.140],
+  "woodstock":           [34.101, -84.520],
+  "tifton":              [31.451, -83.509],
+  "valdosta":            [30.833, -83.279],
+  "covington":           [33.597, -83.860],
+  "douglas":             [31.509, -82.851],
+  "savannah":            [32.084, -81.100],
+  "augusta":             [33.474, -82.011],
+  "macon":               [32.841, -83.632],
+  "columbus":            [32.461, -84.988],
+};
+
+// Normalize messy city strings like "Carts In Covington" → "covington"
+function normalizeCityKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/\bcarts?\s+in\b/g, "")
+    .replace(/\bgolf\s+carts?\s+in\b/g, "")
+    .replace(/\bvehicles?\s+in\b/g, "")
+    .replace(/[^a-z ]/g, "")
+    .trim();
+}
+
+function cityToLatLng(city: string | null | undefined, _state?: string | null): [number, number] | null {
+  if (!city) return null;
+  const key = normalizeCityKey(city);
+  return CITY_CENTROIDS[key] ?? null;
+}
+
 // ─── Sort helper ──────────────────────────────────────────────────────────────
 function sortListings(listings: Listing[], sort: string): Listing[] {
   const copy = [...listings];
@@ -281,9 +334,10 @@ export default function Search() {
     if (filters.zip && filters.radius) {
       const userCoords = zipToLatLng(filters.zip);
       if (userCoords) {
-        const listingCoords = l.lat != null && l.lng != null
-          ? [l.lat, l.lng] as [number, number]
-          : l.zip ? zipToLatLng(l.zip) : null;
+        const listingCoords: [number, number] | null =
+          l.lat != null && l.lng != null
+            ? [l.lat, l.lng]
+            : l.zip ? zipToLatLng(l.zip) : cityToLatLng(l.city, l.state);
         if (listingCoords) {
           const dist = haversine(userCoords[0], userCoords[1], listingCoords[0], listingCoords[1]);
           if (dist > Number(filters.radius)) return false;
