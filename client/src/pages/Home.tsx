@@ -263,7 +263,7 @@ export default function Home() {
                 { label: "Lithium vs Lead-Acid Batteries",            href: "/golf-cart-batteries/lithium-vs-lead-acid" },
                 { label: "105Ah vs 150Ah — Which Range Do You Need?",  href: "/golf-cart-batteries/105ah-vs-150ah" },
                 { label: "Does a Used Golf Cart Include a Charger?",    href: "/golf-cart-batteries/charger-included" },
-                { label: "E-Z-GO Golf Carts — Buyer Guide",              href: "/brands/ezgo" },
+                { label: "E-Z-GO Golf Carts — Buyer Guide",              href: "/brands/e-z-go" },
                 { label: "How GolfCartWise Works",                 href: "/how-it-works" },
               ].map(({ label, href }) => (
                 <li key={href}>

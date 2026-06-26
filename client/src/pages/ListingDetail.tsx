@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { setSEO, listingToProductSchema, breadcrumbSchema } from "@/lib/seo";
+import { getBrandWikiByDbName } from "@/lib/brand-wiki-data";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
 import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone, Mail, Store, User, Truck, ShieldCheck } from "lucide-react";
@@ -144,6 +145,14 @@ export default function ListingDetail() {
             <div>
               <h1 className="text-xl font-bold leading-snug">{listing.title}</h1>
               <p className="text-sm text-muted-foreground mt-1">{listing.city}{listing.city && listing.state ? ", " : ""}{listing.state}</p>
+              {listing.brand && (() => {
+                const wiki = getBrandWikiByDbName(listing.brand);
+                return wiki ? (
+                  <Link href={`/brands/${wiki.slug}`} className="inline-flex items-center gap-1 text-xs text-green-700 hover:underline mt-1">
+                    Learn more about {wiki.name} →
+                  </Link>
+                ) : null;
+              })()}
             </div>
 
             {/* Pricing block */}
