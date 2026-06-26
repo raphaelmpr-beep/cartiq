@@ -105,3 +105,65 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 // @vercel/node picks up the default export from CJS bundles
 export default handler;
+
+// ── SPA catch-all: inject per-route SEO meta then serve index.html ──────────
+// This runs AFTER all API/static routes are registered by registerRoutes().
+// On Vercel, this handler is the one that serves HTML pages — the CDN static
+// route in vercel.json has been replaced so all non-asset requests come here.
+import fs from "node:fs";
+import path from "node:path";
+import { getRouteMeta } from "./seo-meta";
+
+function escHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+app.use("/{*path}", (req: Request, res: Response) => {
+  // Skip requests that look like static file extensions we don't handle
+  const ext = path.extname(req.path);
+  if (ext && ext !== ".html") {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  // index.html lives at dist/public/index.html, one level up from dist/vercel-handler.cjs
+  const indexPath = path.resolve(__dirname, "public", "index.html");
+  let html: string;
+  try {
+    html = fs.readFileSync(indexPath, "utf-8");
+  } catch {
+    return res.status(500).send("Server error: could not read index.html");
+  }
+
+  const meta = getRouteMeta(req.path);
+
+  html = html.replace(/<title>[^<]*<\/title>/, `<title>${escHtml(meta.title)}</title>`);
+  html = html.replace(
+    /<meta\s+name="description"\s+content="[^"]*"\s*\/?>/,
+    `<meta name="description" content="${escHtml(meta.description)}" />`
+  );
+  html = html.replace(
+    /<link\s+rel="canonical"\s+href="[^"]*"\s*\/?>/,
+    `<link rel="canonical" href="${escHtml(meta.canonical)}" />`
+  );
+  html = html.replace(/(<meta\s+property="og:title"\s+content=")[^"]*(")/,       `$1${escHtml(meta.ogTitle)}$2`);
+  html = html.replace(/(<meta\s+property="og:description"\s+content=")[^"]*(")/,  `$1${escHtml(meta.ogDescription)}$2`);
+  html = html.replace(/(<meta\s+property="og:url"\s+content=")[^"]*(")/,          `$1${escHtml(meta.ogUrl)}$2`);
+  html = html.replace(/(<meta\s+property="og:image"\s+content=")[^"]*(")/,        `$1${escHtml(meta.ogImage)}$2`);
+  html = html.replace(/(<meta\s+name="twitter:title"\s+content=")[^"]*(")/,       `$1${escHtml(meta.ogTitle)}$2`);
+  html = html.replace(/(<meta\s+name="twitter:description"\s+content=")[^"]*(")/,`$1${escHtml(meta.ogDescription)}$2`);
+
+  if (meta.jsonLd) {
+    const jsonLdScript = `<script type="application/ld+json" data-server-injected>${JSON.stringify(meta.jsonLd)}</script>`;
+    html = html.replace(/<\/head>/, `${jsonLdScript}\n</head>`);
+  }
+
+  res
+    .set("Content-Type", "text/html; charset=utf-8")
+    .set("Cache-Control", "public, max-age=0, must-revalidate")
+    .send(html);
+});
