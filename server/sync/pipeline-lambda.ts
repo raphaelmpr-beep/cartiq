@@ -87,6 +87,26 @@ async function getJaxSitemapUrls(): Promise<string[]> {
   } catch { return []; }
 }
 
+// The Villages Golf Cars — 6 paginated product sitemaps, requires browser-like UA
+async function getVillagesGolfCarsSitemapUrls(): Promise<string[]> {
+  const UA = 'Mozilla/5.0 (compatible; GolfCartWise-Sync/1.0)';
+  const urls: string[] = [];
+  const suffixes = ['', '2', '3', '4', '5', '6'];
+  for (const suffix of suffixes) {
+    try {
+      const res = await fetch(
+        `https://www.thevillagesgolfcars.com/product-sitemap${suffix}.xml`,
+        { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(10000) }
+      );
+      if (!res.ok) break;
+      const xml = await res.text();
+      const matches = [...xml.matchAll(/<loc>(https:\/\/www\.thevillagesgolfcars\.com\/product\/[^<]+)<\/loc>/g)];
+      urls.push(...matches.map(m => m[1].trim()));
+    } catch { break; }
+  }
+  return urls;
+}
+
 // Quick title parser for slug-based metadata (no page fetch needed)
 function parseSlug(url: string, dealer: string): { year: number | null; make: string | null; model: string | null; condition: string | null } {
   const slug = url.split('/listing/')[1]?.replace(/\/$/, '') || '';
@@ -347,7 +367,8 @@ export async function runLambdaSync(opts: SyncOptions): Promise<SyncResult> {
 
 // Hardcoded overrides for adapter_keys needing special logic (multi-sitemap, filters)
 const ADAPTER_OVERRIDES: Record<string, () => Promise<string[]>> = {
-  jax: () => getJaxSitemapUrls(),
+  jax:                       () => getJaxSitemapUrls(),
+  'the-villages-golf-cars':  () => getVillagesGolfCarsSitemapUrls(),
   // NOTE: botero is handled via BOTERO_MULTI_ADAPTER (multi-location) — not in this map
 };
 
