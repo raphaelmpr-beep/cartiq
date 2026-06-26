@@ -228,7 +228,7 @@ Source: GolfCartIQ (golfcartiq.com)`);
 
   // ─── Auth middleware ─────────────────────────────────────────────────────────
   function requireAdmin(req: any, res: any, next: any) {
-    const token = req.headers["x-admin-token"] || req.query.adminToken;
+    const token = req.headers["x-admin-token"];
     if (token === ADMIN_PASSWORD) return next();
     return res.status(401).json({ error: "Unauthorized" });
   }
@@ -251,7 +251,7 @@ Source: GolfCartIQ (golfcartiq.com)`);
   // extracts the current price, and updates asking_price + updated_at if it changed.
   app.post("/api/admin/daily-price-refresh", async (req, res) => {
     const token = req.headers["x-admin-token"];
-    if (token !== "cartiq2024") return res.status(401).json({ error: "Unauthorized" });
+    if (!token || token !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
 
     try {
       const { createClient } = await import("@supabase/supabase-js");
@@ -396,14 +396,17 @@ Source: GolfCartIQ (golfcartiq.com)`);
 
   app.get("/api/listings", async (req, res) => {
     try {
+      // Sanitize: cap string params to prevent large input abuse
+      const safeStr = (v: unknown, max = 100): string =>
+        typeof v === "string" ? v.slice(0, max).replace(/[<>'"`;]/g, "") : "";
       const filters: Record<string, unknown> = {};
-      if (req.query.state) filters.state = req.query.state as string;
-      if (req.query.city) filters.city = req.query.city as string;
-      if (req.query.brand) filters.brand = req.query.brand as string;
-      if (req.query.sellerType) filters.sellerType = req.query.sellerType as string;
-      if (req.query.batteryType) filters.batteryType = req.query.batteryType as string;
-      if (req.query.dealRating) filters.dealRating = req.query.dealRating as string;
-      if (req.query.warrantyIncluded) filters.warrantyIncluded = req.query.warrantyIncluded as string;
+      if (req.query.state) filters.state = safeStr(req.query.state);
+      if (req.query.city) filters.city = safeStr(req.query.city);
+      if (req.query.brand) filters.brand = safeStr(req.query.brand);
+      if (req.query.sellerType) filters.sellerType = safeStr(req.query.sellerType);
+      if (req.query.batteryType) filters.batteryType = safeStr(req.query.batteryType);
+      if (req.query.dealRating) filters.dealRating = safeStr(req.query.dealRating);
+      if (req.query.warrantyIncluded) filters.warrantyIncluded = safeStr(req.query.warrantyIncluded);
       if (req.query.minPrice) filters.minPrice = parseFloat(req.query.minPrice as string);
       if (req.query.maxPrice) filters.maxPrice = parseFloat(req.query.maxPrice as string);
       if (req.query.streetLegal === "true") filters.streetLegal = true;
@@ -1546,7 +1549,7 @@ Source: GolfCartIQ (golfcartiq.com)`);
       const { query } = req.body;
       if (!query || typeof query !== "string") return res.status(400).json({ error: "query required" });
       // Only allow DDL (ALTER, CREATE, CREATE INDEX, COMMENT)
-      const allowed = /^\s*(ALTER|CREATE|COMMENT|DROP INDEX|DO \$\$)/i.test(query);
+      const allowed = /^\s*(ALTER TABLE|ALTER COLUMN|CREATE TABLE|CREATE INDEX|CREATE UNIQUE INDEX|COMMENT ON|DO \$\$)/i.test(query);
       if (!allowed) return res.status(403).json({ error: "Only DDL statements allowed" });
       const { error } = await sb.rpc("exec_ddl", { ddl: query }).single();
       if (error) {
@@ -1689,6 +1692,22 @@ Source: GolfCartIQ (golfcartiq.com)`);
 
       const { id, imageUrl } = req.body as { id: number; imageUrl: string };
       if (!id || !imageUrl) return res.status(400).json({ error: "id and imageUrl are required" });
+
+      // SSRF protection: only allow http/https to public hosts
+      try {
+        const parsedUrl = new URL(imageUrl);
+        if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+          return res.status(400).json({ error: "Invalid image URL — only http/https allowed" });
+        }
+        // Block private/internal IP ranges and localhost
+        const host = parsedUrl.hostname.toLowerCase();
+        const blocklist = [/^localhost$/i, /^127\./, /^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, /^::1$/, /^0\.0\.0\.0$/];
+        if (blocklist.some(r => r.test(host))) {
+          return res.status(400).json({ error: "Invalid image URL — internal addresses not allowed" });
+        }
+      } catch {
+        return res.status(400).json({ error: "Invalid image URL format" });
+      }
 
       // Fetch the image — try direct first, then weserv.nl if 4xx/5xx
       let imgBuffer: Buffer | null = null;

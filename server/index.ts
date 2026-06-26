@@ -11,10 +11,21 @@ import { createServer } from "node:http";
 const app = express();
 const httpServer = createServer(app);
 
-// Security headers
+// ─── Security headers ─────────────────────────────────────────────────────────
+// CSP intentionally disabled (SPA with inline scripts); all other helmet defaults apply:
+// X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy, etc.
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// Rate limiting — public deal-check form: 30 requests per 15 min per IP
+// Prevent browsers from sniffing MIME types
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
+
+// ─── Rate limiting ────────────────────────────────────────────────────────────
+// Public deal-check form: 30 req / 15 min / IP
 const dealCheckLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
@@ -24,6 +35,18 @@ const dealCheckLimiter = rateLimit({
 });
 app.use("/api/deal-checks", dealCheckLimiter);
 
+// General API: 300 req / 1 min / IP (blocks scrapers, not real users)
+const generalApiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path.startsWith("/api/admin"), // admin uses token auth
+  message: { message: "Too many requests. Please slow down." },
+});
+app.use("/api", generalApiLimiter);
+
+// ─── Body size limit (prevent large-payload DoS) ─────────────────────────────
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -32,14 +55,16 @@ declare module "http" {
 
 app.use(
   express.json({
+    limit: "256kb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: "256kb" }));
 
+// ─── Request logging ──────────────────────────────────────────────────────────
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -69,7 +94,6 @@ app.use((req, res, next) => {
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
-
       log(logLine);
     }
   });
@@ -81,44 +105,35 @@ app.use((req, res, next) => {
   let initError: Error | null = null;
 
   try {
-    // Initialize storage (no-op for Supabase)
     await initStorage();
-
     await registerRoutes(httpServer, app);
   } catch (e: any) {
     initError = e;
-    console.error("[INIT ERROR]", e?.message, e?.stack);
-    // Register a catch-all that surfaces the real error — Lambda won't crash silently
+    console.error("[INIT ERROR]", e?.message);
     app.use((_req: Request, res: Response) => {
+      // Never expose stack traces in production
+      const isProd = process.env.NODE_ENV === "production";
       res.status(500).json({
         error: "init_failed",
-        message: initError?.message ?? "Unknown init error",
-        stack: initError?.stack?.split("\n").slice(0, 6),
-        env: {
-          VERCEL: process.env.VERCEL,
-          NODE_ENV: process.env.NODE_ENV,
-          cwd: process.cwd(),
-        },
+        message: isProd ? "Service unavailable" : (initError?.message ?? "Unknown init error"),
+        ...(isProd ? {} : { stack: initError?.stack?.split("\n").slice(0, 6) }),
       });
     });
   }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    const isProd = process.env.NODE_ENV === "production";
+    console.error("Internal Server Error:", err?.message);
 
-    console.error("Internal Server Error:", err);
+    if (res.headersSent) return next(err);
 
-    if (res.headersSent) {
-      return next(err);
-    }
-
-    return res.status(status).json({ message });
+    // Never expose raw error details in production
+    return res.status(status).json({
+      message: isProd ? "Internal Server Error" : (err.message || "Internal Server Error"),
+    });
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
   if (!initError) {
     if (process.env.NODE_ENV === "production") {
       serveStatic(app);
@@ -128,19 +143,9 @@ app.use((req, res, next) => {
     }
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
+    { port, host: "0.0.0.0", reusePort: true },
+    () => { log(`serving on port ${port}`); },
   );
 })();
