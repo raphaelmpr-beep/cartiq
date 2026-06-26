@@ -1695,39 +1695,191 @@ Source: GolfCartIQ (golfcartiq.com)`);
     }
   });
 
-  // POST /api/admin/detect-source — queue a crawl4ai platform-detection job
+  // POST /api/admin/detect-source — inline synchronous platform detection
+  // Executes detection immediately within the request; no separate worker process needed.
+  // Returns full detection result synchronously. Writes an audit row to detect_source_jobs.
   app.post("/api/admin/detect-source", requireAdmin, async (req, res) => {
+    const DETECT_TIMEOUT_MS = 20_000; // 20s — safe within Vercel's 30s limit
+
+    /** Heuristic platform fingerprinting from fetched HTML. Mirrors detect_source.py in TS. */
+    function detectPlatform(html: string, url: string): {
+      adapter_key: string;
+      platform_type: string;
+      discovery_strategy: string;
+      site_platform: string;
+    } {
+      const h = html.toLowerCase();
+
+      // Managed dealer platforms
+      if (h.includes("dealerspike.com") || h.includes("xinventorypageslist") || h.includes("/inventory/v1/"))
+        return { adapter_key: "dealerspike",       platform_type: "dealerspike",       discovery_strategy: "browser_inventory", site_platform: "dealer_spike"   };
+      if (h.includes("dealersocket") || h.includes("ds.dealersocket"))
+        return { adapter_key: "dealer_socket",     platform_type: "dealer_socket",     discovery_strategy: "browser_inventory", site_platform: "dealer_socket"  };
+      if (h.includes("lightspeed") && (h.includes("evo") || h.includes("lsretail")))
+        return { adapter_key: "lightspeed",        platform_type: "lightspeed",        discovery_strategy: "api_inventory",     site_platform: "lightspeed"     };
+      if (h.includes("cdk") && h.includes("digital"))
+        return { adapter_key: "cdk",               platform_type: "cdk",               discovery_strategy: "api_inventory",     site_platform: "cdk"            };
+      if (h.includes("motility") || h.includes("motilitysoftware"))
+        return { adapter_key: "motility",          platform_type: "motility",          discovery_strategy: "browser_inventory", site_platform: "motility"       };
+
+      // GCR / DX1 WordPress (most common for golf cart dealers)
+      if (
+        h.includes("dx1.com") || h.includes("dx1framework") ||
+        h.includes("gcr.com/wp-content") ||
+        (h.includes("/inventory/") && h.includes("wp-content")) ||
+        /"@type"\s*:\s*"product"/i.test(html)
+      )
+        return { adapter_key: "gcr_wordpress",     platform_type: "gcr_wordpress",     discovery_strategy: "json_ld",           site_platform: "wordpress"      };
+
+      // Website builders
+      if (h.includes("cdn.shopify.com") || h.includes("shopify"))
+        return { adapter_key: "generic_css",       platform_type: "shopify",           discovery_strategy: "css_extraction",    site_platform: "shopify"        };
+      if (h.includes("wixstatic") || h.includes("_wixcidx") || h.includes("wix.com"))
+        return { adapter_key: "generic_css",       platform_type: "wix",               discovery_strategy: "css_extraction",    site_platform: "wix"            };
+      if (h.includes("squarespace.com") || h.includes("static1.squarespace"))
+        return { adapter_key: "generic_css",       platform_type: "squarespace",       discovery_strategy: "css_extraction",    site_platform: "squarespace"    };
+      if (h.includes("webflow.io") || h.includes("webflow.com"))
+        return { adapter_key: "generic_css",       platform_type: "webflow",           discovery_strategy: "css_extraction",    site_platform: "webflow"        };
+
+      // Generic WordPress
+      if (h.includes("wp-content") || h.includes("wp-includes") || h.includes("/wp-json/") || h.includes("easydealersite"))
+        return { adapter_key: "generic_wordpress", platform_type: "generic_wordpress", discovery_strategy: "css_extraction",    site_platform: "wordpress"      };
+
+      // Custom / unknown fallback
+      return   { adapter_key: "generic_css",       platform_type: "custom",            discovery_strategy: "css_extraction",    site_platform: "custom"         };
+    }
+
+    let jobId: string | null = null;
+
     try {
       const { createClient } = await import("@supabase/supabase-js");
       const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
-      const { dealer_slug } = req.body as { dealer_slug?: string };
+      const { dealer_slug, force = false } = req.body as { dealer_slug?: string; force?: boolean };
+
+      // Input validation
       if (!dealer_slug) return res.status(400).json({ error: "dealer_slug is required" });
 
       const { data: dealer, error: dealerErr } = await sb
         .from("dealers")
-        .select("slug, website_url, adapter_key")
+        .select("slug, name, website_url, inventory_source_url, adapter_key, sync_enabled")
         .eq("slug", dealer_slug)
         .maybeSingle();
       if (dealerErr) return res.status(500).json({ error: dealerErr.message });
-      if (!dealer) return res.status(404).json({ error: "Dealer not found" });
-      if (!dealer.website_url) return res.status(400).json({ error: "Dealer has no website_url" });
-      if (dealer.adapter_key) return res.status(400).json({ error: "Dealer already has adapter_key set" });
+      if (!dealer)            return res.status(404).json({ error: "Dealer not found" });
+      if (!dealer.sync_enabled)
+        return res.status(400).json({ error: "Dealer sync is disabled — enable sync before running detection" });
+      if (!dealer.website_url)
+        return res.status(400).json({ error: "Dealer has no website_url" });
+      if (dealer.adapter_key && !force)
+        return res.status(400).json({ error: `Dealer already has adapter_key '${dealer.adapter_key}'. Pass force:true to re-detect.` });
 
+      // Create job immediately with status 'running' (no 'queued' limbo)
+      const startedAt = new Date().toISOString();
       const { data: job, error: jobErr } = await sb
         .from("detect_source_jobs")
-        .insert({ dealer_slug, status: "queued" })
+        .insert({ dealer_slug, status: "running", started_at: startedAt })
         .select("id")
         .single();
       if (jobErr) return res.status(500).json({ error: jobErr.message });
+      jobId = job.id;
 
-      res.status(202).json({
-        job_id: job.id,
+      // Fetch dealer site HTML
+      const targetUrl = dealer.inventory_source_url || dealer.website_url;
+      let html = "";
+      let fetchError: string | null = null;
+
+      try {
+        const controller = new AbortController();
+        const fetchTimer = setTimeout(() => controller.abort(), DETECT_TIMEOUT_MS);
+        const resp = await fetch(targetUrl, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (compatible; GolfCartIQ-Detect/1.0; +https://golfcartiq.com)",
+            "Accept": "text/html,application/xhtml+xml",
+          },
+        });
+        clearTimeout(fetchTimer);
+        html = resp.ok ? await resp.text() : "";
+        if (!resp.ok) fetchError = `HTTP ${resp.status} ${resp.statusText}`;
+      } catch (e: any) {
+        fetchError = e.name === "AbortError"
+          ? `Fetch timed out after ${DETECT_TIMEOUT_MS / 1000}s`
+          : e.message;
+      }
+
+      // If site unreachable — record and return cleanly (no hanging job)
+      if (fetchError || !html) {
+        await sb.from("dealers").update({
+          site_platform:          "unreachable",
+          last_discovery_status:  "unreachable",
+          last_discovery_message: `Site unreachable: ${fetchError}`,
+          last_discovery_at:      new Date().toISOString(),
+        }).eq("slug", dealer_slug);
+
+        await sb.from("detect_source_jobs").update({
+          status:      "failed",
+          finished_at: new Date().toISOString(),
+          error_msg:   `Site unreachable: ${fetchError}`,
+          result_json: JSON.stringify({ platform_type: "unreachable", fetch_error: fetchError }),
+        }).eq("id", jobId);
+
+        return res.status(200).json({
+          job_id: jobId, dealer_slug, dealer_name: dealer.name,
+          target_url: targetUrl, status: "failed", reason: "unreachable",
+          fetch_error: fetchError, adapter_key: null,
+          platform_type: "unreachable", site_platform: "unreachable",
+          message: `Site could not be reached: ${fetchError}`,
+        });
+      }
+
+      // Run heuristic platform detection
+      const detected = detectPlatform(html, targetUrl);
+      const finishedAt = new Date().toISOString();
+
+      // Persist to dealer record
+      await sb.from("dealers").update({
+        adapter_key:            detected.adapter_key,
+        platform_type:          detected.platform_type,
+        discovery_strategy:     detected.discovery_strategy,
+        site_platform:          detected.site_platform,
+        last_discovery_status:  "detected",
+        last_discovery_message: `Platform detected: ${detected.platform_type} (adapter: ${detected.adapter_key})`,
+        last_discovery_at:      finishedAt,
+      }).eq("slug", dealer_slug);
+
+      // Close job as done
+      await sb.from("detect_source_jobs").update({
+        status:      "done",
+        finished_at: finishedAt,
+        result_json: JSON.stringify({ ...detected, html_length: html.length }),
+      }).eq("id", jobId);
+
+      return res.status(200).json({
+        job_id:             jobId,
         dealer_slug,
-        status: "queued",
-        message: "Detection job queued",
+        dealer_name:        dealer.name,
+        target_url:         targetUrl,
+        status:             "done",
+        adapter_key:        detected.adapter_key,
+        platform_type:      detected.platform_type,
+        discovery_strategy: detected.discovery_strategy,
+        site_platform:      detected.site_platform,
+        html_length:        html.length,
+        message:            `Detection complete — platform: ${detected.platform_type} → adapter: ${detected.adapter_key}`,
       });
+
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      // Unexpected error — mark job failed if it was created
+      if (jobId) {
+        try {
+          const { createClient } = await import("@supabase/supabase-js");
+          const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+          await sb.from("detect_source_jobs").update({
+            status: "failed", finished_at: new Date().toISOString(), error_msg: e.message,
+          }).eq("id", jobId);
+        } catch (_) { /* best-effort */ }
+      }
+      return res.status(500).json({ error: e.message });
     }
   });
 
