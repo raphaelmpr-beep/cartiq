@@ -219,6 +219,7 @@ export default function Search() {
   const [sort, setSort] = useState("best_match");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [zipError, setZipError] = useState("");
+  const [visibleCount, setVisibleCount] = useState(48);
 
   // SEO — must come after useState so filters is defined
   useEffect(() => {
@@ -349,6 +350,11 @@ export default function Search() {
   });
 
   const sorted = sortListings(filtered, sort);
+  const visible = sorted.slice(0, visibleCount);
+
+  // Reset visible count whenever filters/sort change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setVisibleCount(48); }, [filters, sort]);
 
   // Active filter count for badge
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => v && k !== "q").length;
@@ -726,9 +732,19 @@ export default function Search() {
             </div>
           ) : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {sorted.map((l) => (
-                <ListingCard key={l.id} listing={l} />
+              {visible.map((l, idx) => (
+                <ListingCard key={l.id} listing={l} priority={idx < 3} />
               ))}
+              {sorted.length > visibleCount && (
+                <div className="col-span-full flex justify-center pt-4 pb-8">
+                  <Button
+                    variant="outline"
+                    onClick={() => setVisibleCount((c) => c + 48)}
+                  >
+                    Load more ({sorted.length - visibleCount} remaining)
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </main>

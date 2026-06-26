@@ -90,13 +90,8 @@ return fn.apply(this, arguments)
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="/favicon.png" />
 
-    <!-- Fonts: Inter only \u2014 DM Sans removed (unused) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Fonts: Inter variable \u2014 self-hosted, no render-blocking network request -->
+    <link rel="preload" href="/fonts/inter-variable.woff2" as="font" type="font/woff2" crossorigin />
 
     <!--
       NOTE: No base JSON-LD here. seo.ts injects all structured data
@@ -111,8 +106,8 @@ return fn.apply(this, arguments)
       gtag('js', new Date());
       gtag('config', 'G-6BXPEYSEB5');
     </script>
-    <script type="module" crossorigin src="/assets/index-CHf_PyvC.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-9IbSjAfb.css">
+    <script type="module" crossorigin src="/assets/index-CbKy8xwe.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BYgdb7le.css">
   </head>
   <body>
     <div id="root"></div>

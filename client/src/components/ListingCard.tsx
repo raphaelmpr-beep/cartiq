@@ -12,6 +12,7 @@ import type { Listing } from "@/lib/types";
 interface ListingCardProps {
   listing: Listing;
   compact?: boolean;
+  priority?: boolean; // true for above-the-fold cards (LCP)
 }
 
 function weservUrl(url: string) {
@@ -27,7 +28,7 @@ function triggerCacheImage(id: number, imageUrl: string) {
   }).catch(() => {/* silent */});
 }
 
-export function ListingCard({ listing, compact }: ListingCardProps) {
+export function ListingCard({ listing, compact, priority = false }: ListingCardProps) {
   const effectivePrice = listing.salePrice ?? listing.askingPrice ?? listing.regularPrice;
 
   // Image fallback chain: original → weserv.nl proxy → placeholder
@@ -62,7 +63,11 @@ export function ListingCard({ listing, compact }: ListingCardProps) {
             src={imgSrc}
             alt={listing.title}
             className="w-full h-full object-cover"
-            loading="lazy"
+            loading={priority ? "eager" : "lazy"}
+            fetchPriority={priority ? "high" : "auto"}
+            decoding={priority ? "sync" : "async"}
+            width={400}
+            height={225}
             onError={handleImgError}
             onLoad={handleImgLoad}
           />
