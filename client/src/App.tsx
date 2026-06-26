@@ -35,6 +35,7 @@ import Disclosure from "@/pages/Legal";
 import HowItWorks from "@/pages/HowItWorks";
 import CityPage from "@/pages/seo/CityPage";
 import BrandPage from "@/pages/seo/BrandPage";
+import BrandsIndex from "@/pages/seo/BrandsIndex";
 import { BatteryOverviewPage, LithiumVsLeadAcidPage, AhComparePage, ChargerIncludedPage } from "@/pages/seo/BatteryPages";
 
 function NotFound() {
@@ -81,6 +82,7 @@ function AppRoutes() {
           <Route path="/how-it-works" component={HowItWorks} />
           {/* SEO landing pages */}
           <Route path="/golf-carts-for-sale/:slug" component={CityPage} />
+          <Route path="/brands" component={BrandsIndex} />
           <Route path="/brands/:slug" component={BrandPage} />
           <Route path="/golf-cart-batteries/lithium-vs-lead-acid" component={LithiumVsLeadAcidPage} />
           <Route path="/golf-cart-batteries/105ah-vs-150ah" component={AhComparePage} />
