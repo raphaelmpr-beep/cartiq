@@ -282,6 +282,8 @@ export default function Search() {
       const saved = getSavedLocation();
       if (saved?.zip) {
         init.zip = saved.zip;
+        // Default radius to 25 miles if none set
+        if (!init.radius) init.radius = "25";
         // Pre-populate zipCoords from saved location
         setZipCoords([saved.lat, saved.lng]);
       }
@@ -402,6 +404,30 @@ export default function Search() {
   // Reset visible count whenever filters/sort change
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setVisibleCount(48); }, [filters, sort]);
+
+  // Listen for location saved from Header while user is already on this page
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key !== "gciq_user_location" || !e.newValue) return;
+      try {
+        const saved = JSON.parse(e.newValue);
+        if (!saved?.zip) return;
+        setFilters((prev) => {
+          if (prev.zip) return prev; // user already has a zip set — don't overwrite
+          const next = { ...prev, zip: saved.zip, radius: prev.radius ?? "25" };
+          // sync URL
+          const params = new URLSearchParams();
+          Object.entries(next).forEach(([k, v]) => { if (v) params.set(k, v as string); });
+          const qs = params.toString();
+          window.history.replaceState(null, "", `#/search${qs ? `?${qs}` : ""}`);
+          return next;
+        });
+        setZipCoords([saved.lat, saved.lng]);
+      } catch {}
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // Active filter count for badge
   const activeFilterCount = Object.entries(filters).filter(([k, v]) => v && k !== "q").length;
