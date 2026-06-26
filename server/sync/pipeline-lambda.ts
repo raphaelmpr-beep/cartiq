@@ -779,6 +779,9 @@ export interface ListingEnrichment {
   power_type: string | null;
   lifted: boolean;
   color: string | null;
+  warranty_included?: boolean | string | null;
+  warranty_months?: number | null;
+  warranty_notes?: string | null;
 }
 
 function parseSeatingFromModel(model: string): number | null {
@@ -826,9 +829,12 @@ export async function enrichFromJsonLd(listingPageUrl: string): Promise<Partial<
       if (product) break;
     }
 
+    // ── Warranty enrichment from page HTML (works for all dealers, not just JSON-LD) ──
+    const warrantyEnrichment = parseWarrantyFromHtml(html);
+
     if (!product) {
       console.warn(`[enrichFromJsonLd] No JSON-LD Product found at ${listingPageUrl}`);
-      return {};
+      return warrantyEnrichment;
     }
 
     const modelName: string = typeof product.model === 'string' ? product.model : '';
@@ -838,11 +844,48 @@ export async function enrichFromJsonLd(listingPageUrl: string): Promise<Partial<
       power_type: parsePowerTypeFromModel(modelName),
       lifted: /lifted/i.test(modelName),
       color: typeof product.color === 'string' ? (cleanText(product.color) || null) : null,
+      ...warrantyEnrichment,
     };
   } catch (e: any) {
     console.warn(`[enrichFromJsonLd] failed for ${listingPageUrl}: ${e?.message || e}`);
     return {};
   }
+}
+
+// ─── Warranty parser ─────────────────────────────────────────────────────────
+function parseWarrantyFromHtml(html: string): Partial<ListingEnrichment> {
+  // Lifetime warranty
+  if (/lifetime\s+(?:lithium\s+)?(?:battery\s+)?warranty/i.test(html)) {
+    return {
+      warranty_included: true,
+      warranty_notes: 'Lifetime Lithium battery warranty',
+    };
+  }
+  // N-Year warranty
+  const yearMatch = html.match(/(\d+)\s*[-\s]?[Yy]ear\s+(?:Eco\s+Battery\s+)?(?:Manufacturer\s+)?Warranty/i);
+  if (yearMatch) {
+    const years = parseInt(yearMatch[1], 10);
+    return {
+      warranty_included: true,
+      warranty_months: years * 12,
+      warranty_notes: `${years}-Year manufacturer warranty`,
+    };
+  }
+  // Factory / Manufacturer warranty
+  if (/(?:factory|manufacturer)\s+warranty/i.test(html)) {
+    return {
+      warranty_included: true,
+      warranty_notes: 'Manufacturer warranty included',
+    };
+  }
+  // Generic warranty mention
+  if (/\bwarranty\b/i.test(html)) {
+    return {
+      warranty_included: true,
+      warranty_notes: 'Warranty available',
+    };
+  }
+  return {};
 }
 
 // ─── Slug generator ──────────────────────────────────────────────────────────
@@ -925,6 +968,9 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
     ...(enrichment.power_type != null ? { power_type: enrichment.power_type } : {}),
     ...(enrichment.lifted != null ? { lifted: enrichment.lifted } : {}),
     ...(enrichment.color != null ? { color: enrichment.color } : {}),
+    ...(enrichment.warranty_included != null ? { warranty_included: enrichment.warranty_included } : {}),
+    ...(enrichment.warranty_months != null ? { warranty_months: enrichment.warranty_months } : {}),
+    ...(enrichment.warranty_notes != null ? { warranty_notes: enrichment.warranty_notes } : {}),
   };
 
   result.processed++;
