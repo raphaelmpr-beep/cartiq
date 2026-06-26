@@ -27,24 +27,53 @@ function getSupabase() {
 
 // ─── Sitemap fetchers (HTTP only, no browser) ─────────────────────────────────
 
-async function getBoteroSitemapUrls(flGaOnly = true): Promise<string[]> {
+// Maps URL keyword → { dealer_slug, city, state } for all Botero locations
+const BOTERO_LOCATION_MAP: Array<{ keywords: string[]; dealer_slug: string; city: string; state: string }> = [
+  { keywords: ['jacksonville'],                  dealer_slug: 'botero-carts-jacksonville', city: 'Jacksonville',  state: 'FL' },
+  { keywords: ['ocala'],                         dealer_slug: 'botero-carts-ocala',        city: 'Ocala',         state: 'FL' },
+  { keywords: ['clearwater'],                    dealer_slug: 'botero-carts-clearwater',   city: 'Clearwater',    state: 'FL' },
+  { keywords: ['melbourne'],                     dealer_slug: 'botero-carts-melbourne',    city: 'Melbourne',     state: 'FL' },
+  { keywords: ['pensacola'],                     dealer_slug: 'botero-carts-pensacola',    city: 'Pensacola',     state: 'FL' },
+  { keywords: ['peachtree', 'peachtree-city'],   dealer_slug: 'botero-carts-peachtree-city', city: 'Peachtree City', state: 'GA' },
+  { keywords: ['cumming'],                       dealer_slug: 'botero-carts-cumming',      city: 'Cumming',       state: 'GA' },
+];
+
+interface BoteroRecord { url: string; dealer_slug: string; city: string; state: string; }
+
+/** Fetch all Botero sitemaps and return structured records with dealer_slug/city/state per URL */
+async function getBoteroLocationRecords(): Promise<BoteroRecord[]> {
   const sitemaps = [
     'https://boterocarts.com/glc_listing-sitemap.xml',
     'https://boterocarts.com/glc_listing-sitemap2.xml',
     'https://boterocarts.com/glc_listing-sitemap3.xml',
   ];
   const allUrls: string[] = [];
-  for (const url of sitemaps) {
+  for (const sm of sitemaps) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': 'CartIQ/1.0' }, signal: AbortSignal.timeout(10000) });
+      const res = await fetch(sm, { headers: { 'User-Agent': 'CartIQ/1.0' }, signal: AbortSignal.timeout(10000) });
+      if (!res.ok) continue;
       const xml = await res.text();
       const matches = [...xml.matchAll(/<loc>(https:\/\/boterocarts\.com\/listing\/[^<]+)<\/loc>/g)];
       allUrls.push(...matches.map(m => m[1].trim()));
     } catch { /* skip failed sitemaps */ }
   }
-  if (!flGaOnly) return allUrls;
-  const flGaKw = ['peachtree', 'cumming', 'ocala', 'jacksonville', 'gainesville', 'savannah', 'augusta', 'macon', '-fl-', '-ga-', 'florida', 'georgia'];
-  return allUrls.filter(u => flGaKw.some(kw => u.toLowerCase().includes(kw)));
+
+  const records: BoteroRecord[] = [];
+  for (const url of allUrls) {
+    const lower = url.toLowerCase();
+    const loc = BOTERO_LOCATION_MAP.find(l => l.keywords.some(kw => lower.includes(kw)));
+    if (loc) {
+      records.push({ url, dealer_slug: loc.dealer_slug, city: loc.city, state: loc.state });
+    }
+    // Skip URLs with no recognizable location (older slugs without city keyword)
+  }
+  return records;
+}
+
+// Legacy flat-URL helper (kept for back-compat, not used in main path)
+async function getBoteroSitemapUrls(flGaOnly = true): Promise<string[]> {
+  const records = await getBoteroLocationRecords();
+  return records.map(r => r.url);
 }
 
 async function getJaxSitemapUrls(): Promise<string[]> {
@@ -318,9 +347,12 @@ export async function runLambdaSync(opts: SyncOptions): Promise<SyncResult> {
 
 // Hardcoded overrides for adapter_keys needing special logic (multi-sitemap, filters)
 const ADAPTER_OVERRIDES: Record<string, () => Promise<string[]>> = {
-  botero: () => getBoteroSitemapUrls(true),
-  jax:    () => getJaxSitemapUrls(),
+  jax: () => getJaxSitemapUrls(),
+  // NOTE: botero is handled via BOTERO_MULTI_ADAPTER (multi-location) — not in this map
 };
+
+// Botero multi-location adapter — returns BoteroRecord[] per URL so each gets the right dealer_slug
+const BOTERO_MULTI_ADAPTER = getBoteroLocationRecords;
 
 // Rich adapters return pre-parsed Dx1Unit[] rows (full metadata, no slug-parsing needed)
 const RICH_ADAPTER_OVERRIDES: Record<string, (dealer: DealerSourceRecord) => Promise<Dx1Unit[]>> = {
@@ -536,8 +568,82 @@ async function runDiscoverSitemap(
     }
     return;
 
+  } else if (adapterKey === 'botero') {
+    // ── Botero multi-location adapter ───────────────────────────────────────
+    // Each URL carries its own dealer_slug/city/state — queue per-location correctly.
+    const allRecords = await BOTERO_MULTI_ADAPTER();
+    if (!allRecords.length) {
+      const msg = `[botero] Sitemap returned 0 location-tagged URLs`;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
+      return;
+    }
+
+    // Only process the target location (filter by dealer_slug) when called for a specific dealer
+    const targetSlug = dealer.slug; // e.g. 'botero-carts-jacksonville'
+    const isGenericBotero = targetSlug === 'botero'; // if somehow called with adapter slug directly
+    const relevantRecords = isGenericBotero
+      ? allRecords                                             // all locations
+      : allRecords.filter(r => r.dealer_slug === targetSlug); // just this location
+
+    if (!relevantRecords.length) {
+      const msg = `[${targetSlug}] No location-tagged URLs found for this dealer (${allRecords.length} total across all Botero locations)`;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
+      return;
+    }
+
+    // Diff against all known URLs across ALL botero dealers (source_url is globally unique)
+    const { data: pendingKnown } = await supabase.from('pending_imports').select('source_url');
+    const { data: existingListings } = await supabase.from('listings').select('source_listing_url').not('source_listing_url', 'is', null);
+    const knownUrls = new Set([
+      ...(pendingKnown || []).map((r: any) => r.source_url),
+      ...(existingListings || []).map((r: any) => r.source_listing_url),
+    ]);
+
+    const newRecords = relevantRecords.filter(r => !knownUrls.has(r.url));
+    result.already_known = relevantRecords.length - newRecords.length;
+    result.summary.push(`[${targetSlug}] ${relevantRecords.length} in sitemap | ${result.already_known} known | ${newRecords.length} new`);
+
+    const toProcess = newRecords.slice(0, limit);
+    const rows: any[] = [];
+    for (const rec of toProcess) {
+      result.processed++;
+      const meta = parseSlug(rec.url, rec.dealer_slug);
+      rows.push({
+        dealer_slug:    rec.dealer_slug,
+        source_url:     rec.url,
+        raw_title:      `${meta.year || ''} ${meta.make || ''} ${meta.model || ''}`.trim() || rec.url.split('/').pop(),
+        year:           meta.year,
+        make:           meta.make,
+        model:          meta.model,
+        condition:      meta.condition,
+        location_city:  rec.city,
+        location_state: rec.state,
+        status:         'pending',
+      });
+    }
+
+    if (!dry_run && rows.length > 0) {
+      const { error } = await supabase.from('pending_imports').upsert(rows, { onConflict: 'source_url', ignoreDuplicates: true });
+      if (error) {
+        result.errors++;
+        result.summary.push(`[${targetSlug}] DB insert error: ${error.message}`);
+        await writeDiscoveryStatus(supabase, slug, 'error', error.message);
+      } else {
+        result.new_queued = rows.length;
+        await writeDiscoveryStatus(supabase, slug, 'ok', `Queued ${rows.length} new listings for ${targetSlug} (${relevantRecords.length} total in sitemap, ${result.already_known} already known)`);
+        result.summary.push(`[${targetSlug}] Queued ${rows.length} new listings`);
+      }
+    } else if (dry_run) {
+      result.new_queued = rows.length;
+      result.summary.push(`[${targetSlug}] [DRY RUN] Would queue ${rows.length} listings`);
+      rows.slice(0, 5).forEach(r => result.summary.push(`  → ${r.raw_title || r.source_url} (${r.location_city}, ${r.location_state})`));
+    }
+    return;
+
   } else if (adapterKey && ADAPTER_OVERRIDES[adapterKey]) {
-    // URL-only override (botero, jax)
+    // URL-only override (jax)
     sitemapUrls = await ADAPTER_OVERRIDES[adapterKey]();
   } else if (strategy === 'gcr_sitemap' && dealer.inventory_source_url) {
     // GCR sitemap via registered inventory_source_url
@@ -775,16 +881,20 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
   // until comps are verified via the CartIQ admin valuation workflow.
   const slug = makeSlug(title, city, Date.now() % 1000000);
 
-  // GCR JSON-LD enrichment — only for gcr_wordpress dealers, never fatal.
+  // GCR JSON-LD enrichment + dealer_id lookup — only for gcr_wordpress dealers, never fatal.
   let enrichment: Partial<ListingEnrichment> = {};
+  let dealerId: number | null = null;
   if (imp.dealer_slug && imp.source_url) {
     const { data: dealerRec } = await supabase
       .from('dealers')
-      .select('platform_type')
+      .select('id,platform_type')
       .eq('slug', imp.dealer_slug)
       .maybeSingle();
-    if (dealerRec?.platform_type === 'gcr_wordpress') {
-      enrichment = await enrichFromJsonLd(imp.source_url);
+    if (dealerRec) {
+      dealerId = dealerRec.id ?? null;
+      if (dealerRec.platform_type === 'gcr_wordpress') {
+        enrichment = await enrichFromJsonLd(imp.source_url);
+      }
     }
   }
 
@@ -802,6 +912,7 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
     source_listing_url: imp.source_url,
     source_type: 'dealer_site',
     sync_source: imp.dealer_slug,
+    dealer_id: dealerId,              // set from dealer slug lookup
     verified_at: imp.price ? new Date().toISOString() : null,
     last_checked_at: new Date().toISOString(),
     price_confidence: imp.price ? 'confirmed' : 'estimated',
