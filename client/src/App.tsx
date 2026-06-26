@@ -5,6 +5,7 @@ import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { Component, type ReactNode } from "react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
+import { Analytics } from "@vercel/analytics/react";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null };
@@ -129,6 +130,7 @@ export default function App() {
         </Router>
         <Toaster />
         <SpeedInsights />
+        <Analytics />
       </QueryClientProvider>
     </ErrorBoundary>
   );
