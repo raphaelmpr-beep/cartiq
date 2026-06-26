@@ -1,4 +1,4 @@
-// ─── GolfCartWise Brand Wiki Data ────────────────────────────────────────────
+// ─── GolfCartIQ Brand Wiki Data ────────────────────────────────────────────
 // Static wiki content for all 12 tracked brands.
 // Last updated: June 2026
 
@@ -500,7 +500,7 @@ export const BRAND_WIKI: BrandWiki[] = [
     tagline: '#1 by listing count in FL/GA — with a lifetime chassis warranty.',
     badges: ['Modern EV Brand', 'LSV Focused', 'Warranty Details Needed'],
     summary:
-      'Teko EV has the highest listing count of any emerging brand on GolfCartWise in Florida and Georgia. The brand markets a lifetime chassis warranty alongside an 8-year LiFePO4 battery warranty (personal use only) and a 2-year parts warranty. Corporate and manufacturing details are not fully disclosed — verification is limited to dealer and brand website sources.',
+      'Teko EV has the highest listing count of any emerging brand on GolfCartIQ in Florida and Georgia. The brand markets a lifetime chassis warranty alongside an 8-year LiFePO4 battery warranty (personal use only) and a 2-year parts warranty. Corporate and manufacturing details are not fully disclosed — verification is limited to dealer and brand website sources.',
     snapshot: {
       headquarters: 'Not publicly confirmed',
       parentCompany: 'Not publicly disclosed',
@@ -512,14 +512,14 @@ export const BRAND_WIKI: BrandWiki[] = [
     },
     manufacturerVerification: {
       level: 'limited_public',
-      notes: 'Teko EV\'s manufacturing origin and corporate structure are not clearly disclosed in public materials. High listing count in FL/GA is confirmed by GolfCartWise database. Warranty claims are sourced from tekoev.com — independent verification of warranty fulfillment is not available.',
+      notes: 'Teko EV\'s manufacturing origin and corporate structure are not clearly disclosed in public materials. High listing count in FL/GA is confirmed by GolfCartIQ database. Warranty claims are sourced from tekoev.com — independent verification of warranty fulfillment is not available.',
     },
     commonModels: [
-      { name: 'Teko 4-Passenger', type: 'Personal / LSV', topSpeed: '25 mph', range: '40–55 mi', msrp: '$10,000–$14,000', notes: 'Most common configuration in GolfCartWise listings' },
+      { name: 'Teko 4-Passenger', type: 'Personal / LSV', topSpeed: '25 mph', range: '40–55 mi', msrp: '$10,000–$14,000', notes: 'Most common configuration in GolfCartIQ listings' },
       { name: 'Teko 6-Passenger', type: 'Personal / LSV', topSpeed: '25 mph', range: '35–50 mi', msrp: '$13,000–$16,000' },
     ],
     whatMakesDifferent: [
-      '#1 emerging brand by listing count in FL and GA on GolfCartWise — significant market presence.',
+      '#1 emerging brand by listing count in FL and GA on GolfCartIQ — significant market presence.',
       'Lifetime chassis warranty is a bold claim — verify terms at tekoev.com/warranty before purchase.',
       '8-year LiFePO4 battery warranty for personal use — among the longest in the segment if honored.',
       'LiFePO4 chemistry is preferred for longevity and safety over standard lithium-ion.',
@@ -592,7 +592,7 @@ export const BRAND_WIKI: BrandWiki[] = [
     tagline: '105Ah LiFePO4 standard, 8-year Eco Battery warranty at authorized dealers.',
     badges: ['Modern EV Brand', 'LSV Focused'],
     summary:
-      'Venom EV ships all models with a 105Ah LiFePO4 Eco Battery as standard, with a 160Ah upgrade option. The brand offers an 8-year Eco Battery warranty through authorized dealers — one of the longest in the segment. GolfCartWise has 56 verified Venom EV listings in Florida, including inventory from Let\'s Go Carting in Clearwater, FL.',
+      'Venom EV ships all models with a 105Ah LiFePO4 Eco Battery as standard, with a 160Ah upgrade option. The brand offers an 8-year Eco Battery warranty through authorized dealers — one of the longest in the segment. GolfCartIQ has 56 verified Venom EV listings in Florida, including inventory from Let\'s Go Carting in Clearwater, FL.',
     snapshot: {
       headquarters: 'United States',
       parentCompany: 'Venom EV (independent)',
@@ -615,7 +615,7 @@ export const BRAND_WIKI: BrandWiki[] = [
       '105Ah LiFePO4 (lithium iron phosphate) as standard — safer chemistry than standard Li-ion, with longer cycle life.',
       '8-year Eco Battery warranty is among the longest in the segment — but requires authorized dealer purchase.',
       '160Ah upgrade option offers one of the largest standard battery packs available in this price range.',
-      'GolfCartWise has 56+ verified Venom EV listings across Florida — one of the better-covered emerging brands on the platform.',
+      'GolfCartIQ has 56+ verified Venom EV listings across Florida — one of the better-covered emerging brands on the platform.',
     ],
     buyerConfidenceNotes: [
       'Only purchase from an authorized Venom EV dealer to qualify for the 8-year Eco Battery warranty.',

@@ -23,7 +23,7 @@ export function Header() {
         {/* Logo */}
         <Link href="/">
           <a className="flex items-center gap-2">
-            <svg viewBox="0 0 32 32" className="h-8 w-8" fill="none" aria-label="GolfCartWise logo">
+            <svg viewBox="0 0 32 32" className="h-8 w-8" fill="none" aria-label="GolfCartIQ logo">
               <rect width="32" height="32" rx="8" fill="hsl(220,13%,13%)" />
               <path d="M6 20L12 10L18 16L22 12L26 20" stroke="hsl(142,76%,56%)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
               <circle cx="12" cy="10" r="2" fill="hsl(142,76%,56%)" />

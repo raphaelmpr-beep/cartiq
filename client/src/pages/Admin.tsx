@@ -899,7 +899,7 @@ export default function Admin() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold">Admin Portal</h1>
-            <p className="text-sm text-muted-foreground">GolfCartWise listing and data management</p>
+            <p className="text-sm text-muted-foreground">GolfCartIQ listing and data management</p>
           </div>
           <div className="flex gap-2">
             <ListingFormDialog onSuccess={() => {}} adminToken={adminToken} />
@@ -926,7 +926,7 @@ export default function Admin() {
                 <table className="w-full text-sm border-collapse">
                   <thead>
                     <tr className="bg-muted text-left">
-                      {["ID", "Title", "City/State", "Price", "GolfCartWise Value", "Deal", "Battery", "Seller", "Status", "Actions"].map(h => (
+                      {["ID", "Title", "City/State", "Price", "GolfCartIQ Value", "Deal", "Battery", "Seller", "Status", "Actions"].map(h => (
                         <th key={h} className="p-2 border border-border font-semibold text-xs whitespace-nowrap">{h}</th>
                       ))}
                     </tr>

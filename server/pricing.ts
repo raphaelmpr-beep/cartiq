@@ -1,4 +1,4 @@
-// GolfCartWise Pricing Engine — Comp-Based IMV
+// GolfCartIQ Pricing Engine — Comp-Based IMV
 // =============================================================================
 // Inspired by CarGurus' Instant Market Value (IMV) approach:
 //   1. Use REAL comps from the DB as the primary price anchor

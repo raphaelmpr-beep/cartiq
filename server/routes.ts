@@ -106,8 +106,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
   // ─── SEO: robots.txt ────────────────────────────────────────────────────────
   app.get("/robots.txt", (_req, res) => {
-    res.type("text/plain").send(`# GolfCartWise — Florida & Georgia Golf Cart Price Intelligence
-# https://golfcartwise.app
+    res.type("text/plain").send(`# GolfCartIQ — Florida & Georgia Golf Cart Price Intelligence
+# https://golfcartiq.com
 
 User-agent: *
 Allow: /
@@ -135,18 +135,18 @@ Allow: /
 Disallow: /admin
 Disallow: /api/
 
-Sitemap: https://golfcartwise.app/sitemap.xml`);
+Sitemap: https://golfcartiq.com/sitemap.xml`);
   });
 
   // ─── SEO: llms.txt (AI crawler guidance) ────────────────────────────────────
   app.get("/llms.txt", (_req, res) => {
-    res.type("text/plain").send(`# GolfCartWise — Florida & Georgia Golf Cart Price Intelligence
-# https://golfcartwise.app
+    res.type("text/plain").send(`# GolfCartIQ — Florida & Georgia Golf Cart Price Intelligence
+# https://golfcartiq.com
 
-## About GolfCartWise
-GolfCartWise is a golf cart market intelligence platform for Florida and Georgia.
+## About GolfCartIQ
+GolfCartIQ is a golf cart market intelligence platform for Florida and Georgia.
 It aggregates 1,300+ listings from dealers, applies comp-based pricing (CarGurus-style),
-and provides Wise Deal Ratings, buyer scores, and delivery-adjusted pricing.
+and provides GolfCartIQ Deal Ratings, buyer scores, and delivery-adjusted pricing.
 
 ## Allowed for AI indexing
 - Public listing pages (/listing/*)
@@ -156,7 +156,7 @@ and provides Wise Deal Ratings, buyer scores, and delivery-adjusted pricing.
 - /admin, /api/*, /my-garage
 
 ## Attribution
-Source: GolfCartWise (golfcartwise.app)`);
+Source: GolfCartIQ (golfcartiq.com)`);
   });
 
   // ─── SEO: sitemap.xml (dynamic) ─────────────────────────────────────────────
@@ -164,7 +164,7 @@ Source: GolfCartWise (golfcartwise.app)`);
     try {
       const listings = await storage.getListings({ status: "active", public_listing: true });
       const articles = await storage.getSeoArticles() as any[];
-      const base = "https://golfcartwise.app";
+      const base = "https://golfcartiq.com";
       const today = new Date().toISOString().split("T")[0];
       const staticPages = [
         { path: "/",             priority: "1.0", changefreq: "weekly" },
@@ -323,7 +323,7 @@ Source: GolfCartWise (golfcartwise.app)`);
                 signal: AbortSignal.timeout(8000),
                 headers: {
                   "User-Agent":
-                    "Mozilla/5.0 (compatible; GolfCartWise-PriceBot/1.0; +https://golfcartwise.app)",
+                    "Mozilla/5.0 (compatible; GolfCartIQ-PriceBot/1.0; +https://golfcartiq.com)",
                 },
               });
               if (!resp.ok) { results.errors++; return; }
@@ -500,7 +500,7 @@ Source: GolfCartWise (golfcartwise.app)`);
       const deliveryCost = data.deliveryCost ?? data.estimatedDeliveryCost ?? null;
       let pilotWarning: string | null = null;
       if (data.state && !PILOT_STATES.includes(data.state?.toUpperCase())) {
-        pilotWarning = "GolfCartWise pilot coverage is currently Florida and Georgia. Market estimates outside this area may be limited.";
+        pilotWarning = "GolfCartIQ pilot coverage is currently Florida and Georgia. Market estimates outside this area may be limited.";
       }
       const pricing = calculateGolfCartWiseValue({
         askingPrice: data.askingPrice,

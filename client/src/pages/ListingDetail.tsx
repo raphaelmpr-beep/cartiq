@@ -47,15 +47,15 @@ export default function ListingDetail() {
     if (!listing) return;
     setSEO({
       title: listing.title,
-      description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"} — GolfCartWise Wise Deal Rating: ${listing.dealRating ?? "unknown"}.`,
+      description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"} — GolfCartIQ GolfCartIQ Deal Rating: ${listing.dealRating ?? "unknown"}.`,
       image: listing.imageUrl ?? undefined,
-      canonical: `https://golfcartwise.app/listing/${listing.slug ?? listing.id}`,
+      canonical: `https://golfcartiq.com/listing/${listing.slug ?? listing.id}`,
       jsonLd: [
         listingToProductSchema(listing),
         breadcrumbSchema([
-          { name: "GolfCartWise", url: "https://golfcartwise.app/" },
-          { name: "Search", url: "https://golfcartwise.app/search" },
-          { name: listing.title, url: `https://golfcartwise.app/listing/${listing.slug ?? listing.id}` },
+          { name: "GolfCartIQ", url: "https://golfcartiq.com/" },
+          { name: "Search", url: "https://golfcartiq.com/search" },
+          { name: listing.title, url: `https://golfcartiq.com/listing/${listing.slug ?? listing.id}` },
         ]),
       ],
     });
@@ -169,7 +169,7 @@ export default function ListingDetail() {
                   <div className="text-2xl font-bold">{formatPrice(effectivePrice)}</div>
                 )}
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">GolfCartWise Value</span>
+                  <span className="text-muted-foreground">GolfCartIQ Value</span>
                   <span className="font-semibold">{formatPrice(listing.cartiqEstimatedValue)}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
@@ -316,7 +316,7 @@ export default function ListingDetail() {
             {listing.sellerType === "retail" && (
               <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-sm text-purple-800 space-y-1">
                 <p className="font-semibold">Retail / {listing.retailerName || "Retailer"} Listing</p>
-                <p>GolfCartWise does not guarantee retailer price or availability. Retail prices, availability, shipping, delivery, warranty, and state eligibility may change. Verify all details on the retailer site before purchase.</p>
+                <p>GolfCartIQ does not guarantee retailer price or availability. Retail prices, availability, shipping, delivery, warranty, and state eligibility may change. Verify all details on the retailer site before purchase.</p>
                 {listing.retailerProductUrl && (
                   <a href={listing.retailerProductUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-purple-700 font-medium hover:underline text-xs mt-1">
                     View on {listing.retailerName || "Retailer"} <ExternalLink className="h-3 w-3" />

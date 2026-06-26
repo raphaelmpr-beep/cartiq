@@ -1,13 +1,13 @@
 /**
- * GolfCartWise SEO utilities
+ * GolfCartIQ SEO utilities
  * Manages <title>, <meta>, Open Graph, Twitter Card, and JSON-LD
  * for Google, Bing, and AI crawler compliance.
  */
 
-const SITE_NAME = "GolfCartWise";
-const BASE_URL  = "https://golfcartwise.app";
+const SITE_NAME = "GolfCartIQ";
+const BASE_URL  = "https://golfcartiq.com";
 const DEFAULT_DESCRIPTION =
-  "GolfCartWise is Florida & Georgia's golf cart market intelligence platform. Compare dealer prices, check fair value, and find the best deals on new and used golf carts.";
+  "GolfCartIQ is Florida & Georgia's golf cart market intelligence platform. Compare dealer prices, check fair value, and find the best deals on new and used golf carts.";
 const DEFAULT_IMAGE = `${BASE_URL}/og-image.png`;
 
 interface SEOOptions {
@@ -58,7 +58,7 @@ export function setSEO(opts: SEOOptions = {}): void {
   // ── Standard meta ───────────────────────────────────────────────────────
   setMeta('meta[name="description"]',                  "content", description);
   setMeta('meta[name="robots"]',                       "content", opts.noindex ? "noindex,nofollow" : "index,follow");
-  setMeta('meta[name="author"]',                       "content", "GolfCartWise");
+  setMeta('meta[name="author"]',                       "content", "GolfCartIQ");
 
   // ── Canonical ────────────────────────────────────────────────────────────
   setLink("canonical", canonical);
@@ -87,7 +87,7 @@ export function setSEO(opts: SEOOptions = {}): void {
 
   // ── Twitter / X Card ─────────────────────────────────────────────────────
   setMeta('meta[name="twitter:card"]',        "content", "summary_large_image");
-  setMeta('meta[name="twitter:site"]',        "content", "@GolfCartWise");
+  setMeta('meta[name="twitter:site"]',        "content", "@GolfCartIQ");
   setMeta('meta[name="twitter:title"]',       "content", title);
   setMeta('meta[name="twitter:description"]', "content", description);
   setMeta('meta[name="twitter:image"]',       "content", image);

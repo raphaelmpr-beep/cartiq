@@ -123,7 +123,7 @@ export function ListingCard({ listing, compact }: ListingCardProps) {
             <div>
               <div className="text-lg font-bold text-foreground" data-testid={`text-price-${listing.id}`}>{formatPrice(effectivePrice)}</div>
               {listing.cartiqEstimatedValue && (
-                <div className="text-xs text-muted-foreground">GolfCartWise Value: {formatPrice(listing.cartiqEstimatedValue)}</div>
+                <div className="text-xs text-muted-foreground">GolfCartIQ Value: {formatPrice(listing.cartiqEstimatedValue)}</div>
               )}
             </div>
             <WiseScoreBadge score={listing.buyerScore} />

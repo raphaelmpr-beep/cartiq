@@ -50,9 +50,9 @@ function BrandCard({ brand }: { brand: typeof BRAND_WIKI[number] }) {
 export default function BrandsIndex() {
   useEffect(() => {
     setSEO({
-      title:       "Golf Cart Brands | Compare Club Car, ICON, E-Z-GO & More | GolfCartWise",
-      description: "Compare all 12 golf cart brands tracked on GolfCartWise — Club Car, E-Z-GO, Yamaha, ICON, Evolution, Bintelli, Venom EV, Teko EV, and more. Specs, warranties, and verified listings in FL & GA.",
-      canonical:   "https://www.golfcartwise.com/brands",
+      title:       "Golf Cart Brands | Compare Club Car, ICON, E-Z-GO & More | GolfCartIQ",
+      description: "Compare all 12 golf cart brands tracked on GolfCartIQ — Club Car, E-Z-GO, Yamaha, ICON, Evolution, Bintelli, Venom EV, Teko EV, and more. Specs, warranties, and verified listings in FL & GA.",
+      canonical:   "https://www.golfcartiq.com/brands",
     });
   }, []);
 
@@ -64,7 +64,7 @@ export default function BrandsIndex() {
         <div className="max-w-2xl space-y-2">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Golf Cart Brands</h1>
           <p className="text-muted-foreground text-sm leading-relaxed">
-            GolfCartWise tracks {BRAND_WIKI.length} brands across Florida and Georgia — from legacy manufacturers to modern EV startups.
+            GolfCartIQ tracks {BRAND_WIKI.length} brands across Florida and Georgia — from legacy manufacturers to modern EV startups.
             Each brand page includes specs, warranty details, manufacturer verification, and live listings.
           </p>
         </div>

@@ -13,7 +13,7 @@ import { Zap, CheckCircle, XCircle, ChevronRight, HelpCircle } from "lucide-reac
 function Breadcrumb({ crumbs }: { crumbs: { label: string; href?: string }[] }) {
   return (
     <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-8">
-      <Link href="/" className="hover:text-foreground">GolfCartWise</Link>
+      <Link href="/" className="hover:text-foreground">GolfCartIQ</Link>
       {crumbs.map((c, i) => (
         <span key={i} className="flex items-center gap-1.5">
           <ChevronRight className="h-3 w-3" />
@@ -88,7 +88,7 @@ function CTABar() {
     <div className="rounded-2xl border border-border bg-white p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mt-10">
       <div>
         <p className="font-bold text-sm">Ready to compare listings?</p>
-        <p className="text-xs text-muted-foreground mt-0.5">Search by battery type and see GolfCartWise's Wise Deal Rating on every listing.</p>
+        <p className="text-xs text-muted-foreground mt-0.5">Search by battery type and see GolfCartIQ's GolfCartIQ Deal Rating on every listing.</p>
       </div>
       <div className="flex gap-2 flex-wrap">
         <a href="/#/search?batteryType=lithium"
@@ -117,7 +117,7 @@ function InternalLinks() {
         <span className="text-muted-foreground">·</span>
         <Link href="/golf-cart-batteries/charger-included" className="text-xs text-green-700 hover:underline">Does It Include a Charger?</Link>
         <span className="text-muted-foreground">·</span>
-        <Link href="/how-it-works" className="text-xs text-green-700 hover:underline">How GolfCartWise Scores Listings</Link>
+        <Link href="/how-it-works" className="text-xs text-green-700 hover:underline">How GolfCartIQ Scores Listings</Link>
       </div>
     </div>
   );
@@ -128,9 +128,9 @@ function InternalLinks() {
 export function BatteryOverviewPage() {
   useEffect(() => {
     setSEO({
-      title: "Golf Cart Battery Guide | Lithium vs Lead-Acid, Chargers & More | GolfCartWise",
+      title: "Golf Cart Battery Guide | Lithium vs Lead-Acid, Chargers & More | GolfCartIQ",
       description: "Everything you need to know about golf cart batteries — lithium vs lead-acid, amp hours, charger compatibility, and what to ask before you buy.",
-      canonical: "https://golfcartwise.app/golf-cart-batteries",
+      canonical: "https://golfcartiq.com/golf-cart-batteries",
     });
   }, []);
 
@@ -141,7 +141,7 @@ export function BatteryOverviewPage() {
 
         <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
           <Zap className="h-4 w-4 text-green-600" />
-          <span>GolfCartWise Battery Guide</span>
+          <span>GolfCartIQ Battery Guide</span>
         </div>
         <h1 className="text-2xl font-bold tracking-tight mb-3">Golf Cart Battery Guide</h1>
         <p className="text-sm text-muted-foreground leading-relaxed mb-8">
@@ -207,9 +207,9 @@ export function BatteryOverviewPage() {
 export function LithiumVsLeadAcidPage() {
   useEffect(() => {
     setSEO({
-      title: "Lithium vs Lead-Acid Golf Cart Batteries: Which Is Better? | GolfCartWise",
+      title: "Lithium vs Lead-Acid Golf Cart Batteries: Which Is Better? | GolfCartIQ",
       description: "Lithium vs lead-acid golf cart batteries compared — lifespan, range, maintenance, cost, and total cost of ownership. Make the right call before buying.",
-      canonical: "https://golfcartwise.app/golf-cart-batteries/lithium-vs-lead-acid",
+      canonical: "https://golfcartiq.com/golf-cart-batteries/lithium-vs-lead-acid",
     });
   }, []);
 
@@ -320,9 +320,9 @@ export function LithiumVsLeadAcidPage() {
 export function AhComparePage() {
   useEffect(() => {
     setSEO({
-      title: "105Ah vs 150Ah Golf Cart Battery: Range & What to Choose | GolfCartWise",
+      title: "105Ah vs 150Ah Golf Cart Battery: Range & What to Choose | GolfCartIQ",
       description: "105Ah vs 150Ah lithium golf cart battery — how far will each pack go, what does the upgrade cost, and is it worth it for your use case?",
-      canonical: "https://golfcartwise.app/golf-cart-batteries/105ah-vs-150ah",
+      canonical: "https://golfcartiq.com/golf-cart-batteries/105ah-vs-150ah",
     });
   }, []);
 
@@ -409,9 +409,9 @@ export function AhComparePage() {
 export function ChargerIncludedPage() {
   useEffect(() => {
     setSEO({
-      title: "Does a Golf Cart Come With a Charger? | GolfCartWise",
+      title: "Does a Golf Cart Come With a Charger? | GolfCartIQ",
       description: "Does a used golf cart include a charger? What to look for, lithium vs lead-acid charger compatibility, and what to budget if one isn't included.",
-      canonical: "https://golfcartwise.app/golf-cart-batteries/charger-included",
+      canonical: "https://golfcartiq.com/golf-cart-batteries/charger-included",
     });
   }, []);
 

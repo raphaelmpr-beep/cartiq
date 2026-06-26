@@ -113,7 +113,7 @@ export interface DealCheck {
   questionsToAsk?: string; // JSON
   negotiationLow?: number;
   negotiationHigh?: number;
-  /** GolfCartWise Value — preferred alias over cartiqEstimatedValue */
+  /** GolfCartIQ Value — preferred alias over cartiqEstimatedValue */
   cartiqMarketValue?: number;
   dealDeltaPercent?: number;
   priceToImprove?: {

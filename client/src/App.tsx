@@ -56,7 +56,7 @@ function SellPage() {
       <div className="text-center max-w-md px-4">
         <h1 className="text-xl font-bold mb-2">Sell My Cart</h1>
         <p className="text-muted-foreground text-sm">
-          Seller-authorized listing import is coming soon. For now, contact us to list your cart on GolfCartWise.
+          Seller-authorized listing import is coming soon. For now, contact us to list your cart on GolfCartIQ.
         </p>
       </div>
     </div>
@@ -110,7 +110,7 @@ function AppRoutes() {
           </div>
           {/* Bottom row — legal line */}
           <div className="border-t border-border pt-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <p>© {new Date().getFullYear()} GolfCartWise · GolfCartWise is a research, comparison, and lead-referral platform. We do not sell golf carts or complete transactions. Buyers should confirm all details directly with the dealer or seller.</p>
+            <p>© {new Date().getFullYear()} GolfCartIQ · GolfCartIQ is a research, comparison, and lead-referral platform. We do not sell golf carts or complete transactions. Buyers should confirm all details directly with the dealer or seller.</p>
             <a href="/#/disclosure" className="hover:text-foreground underline whitespace-nowrap">Information Disclosure</a>
           </div>
         </div>

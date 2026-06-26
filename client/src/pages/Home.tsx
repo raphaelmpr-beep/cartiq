@@ -15,9 +15,9 @@ export default function Home() {
   // SEO
   useEffect(() => {
     setSEO({
-      title: "Know the Right Cart. Pay the Right Price.",
-      description: "GolfCartWise helps buyers compare golf carts, prices, dealers, battery types, warranties, delivery options, and deal ratings across Florida and Georgia.",
-      canonical: "https://golfcartwise.app/",
+      title: "GolfCartIQ | Golf Cart Price Intelligence for Florida & Georgia",
+      description: "Compare golf carts for sale, local dealers, prices, deal ratings, battery types, warranties, and delivery options across Florida and Georgia.",
+      canonical: "https://golfcartiq.com/",
     });
   }, []);
   const [dealUrl, setDealUrl] = useState("");
@@ -264,7 +264,7 @@ export default function Home() {
                 { label: "105Ah vs 150Ah — Which Range Do You Need?",  href: "/golf-cart-batteries/105ah-vs-150ah" },
                 { label: "Does a Used Golf Cart Include a Charger?",    href: "/golf-cart-batteries/charger-included" },
                 { label: "E-Z-GO Golf Carts — Buyer Guide",              href: "/brands/e-z-go" },
-                { label: "How GolfCartWise Works",                 href: "/how-it-works" },
+                { label: "How GolfCartIQ Works",                 href: "/how-it-works" },
               ].map(({ label, href }) => (
                 <li key={href}>
                   <Link href={href} className="text-sm text-green-700 hover:underline flex items-center gap-1">
@@ -281,7 +281,7 @@ export default function Home() {
         <div className="max-w-3xl mx-auto px-4 py-14 text-center space-y-6">
           <h2 className="text-2xl font-bold">Check Any Cart's Value in Seconds</h2>
           <p className="text-sm text-muted opacity-80">
-            Enter a cart's details and get an instant GolfCartWise Value estimate, Wise Deal Rating, WiseScore, and buyer checklist.
+            Enter a cart's details and get an instant GolfCartIQ Value estimate, GolfCartIQ Deal Rating, IQ Score, and buyer checklist.
           </p>
           <form onSubmit={handleDealCheck} className="flex flex-col sm:flex-row gap-3 max-w-lg mx-auto">
             <Input

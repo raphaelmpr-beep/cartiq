@@ -96,9 +96,9 @@ export default function BrandPage() {
   useEffect(() => {
     if (!brand) return;
     setSEO({
-      title:       `${brand.name} Golf Carts | Brand Wiki | GolfCartWise`,
+      title:       `${brand.name} Golf Carts | Brand Wiki | GolfCartIQ`,
       description: brand.summary.slice(0, 160),
-      canonical:   `https://www.golfcartwise.com/brands/${brand.slug}`,
+      canonical:   `https://www.golfcartiq.com/brands/${brand.slug}`,
     });
     setLoading(true);
     fetchBrandListings(brand.dbBrand).then(data => {
@@ -128,7 +128,7 @@ export default function BrandPage() {
 
         {/* Breadcrumb */}
         <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-6">
-          <Link href="/" className="hover:text-foreground">GolfCartWise</Link>
+          <Link href="/" className="hover:text-foreground">GolfCartIQ</Link>
           <ChevronRight className="h-3 w-3" />
           <span>Brands</span>
           <ChevronRight className="h-3 w-3" />
@@ -255,7 +255,7 @@ export default function BrandPage() {
                 <h2 className="text-lg font-bold">
                   {loading
                     ? "Loading listings…"
-                    : `${listings.length > 0 ? listings.length + "+" : "No"} ${brand.name} Listings on GolfCartWise`}
+                    : `${listings.length > 0 ? listings.length + "+" : "No"} ${brand.name} Listings on GolfCartIQ`}
                 </h2>
                 {!loading && listings.length > 0 && (
                   <a href={searchHref} className="text-xs text-green-700 hover:underline flex items-center gap-1">
@@ -275,7 +275,7 @@ export default function BrandPage() {
                   <AlertTriangle className="h-6 w-6 text-amber-500 mx-auto" />
                   <p className="font-semibold text-sm">No verified {brand.name} listings right now.</p>
                   <p className="text-xs text-muted-foreground">
-                    GolfCartWise is expanding {brand.name} coverage. Check back soon or browse all listings.
+                    GolfCartIQ is expanding {brand.name} coverage. Check back soon or browse all listings.
                   </p>
                   <a href="/#/search" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm hover:bg-secondary transition-colors">
                     Browse All Listings <ChevronRight className="h-4 w-4" />
@@ -357,7 +357,7 @@ export default function BrandPage() {
               </div>
             )}
 
-            {/* Deal Checker CTA */}
+            {/* CartCheck CTA */}
             <div className="rounded-xl border border-border bg-white p-4 space-y-3">
               <p className="font-bold text-sm">Evaluating a {brand.name} listing?</p>
               <p className="text-xs text-muted-foreground">
@@ -371,7 +371,7 @@ export default function BrandPage() {
 
             {/* All Brands */}
             <div className="rounded-xl border border-border bg-white p-4 space-y-3">
-              <h3 className="font-bold text-sm">All Brands on GolfCartWise</h3>
+              <h3 className="font-bold text-sm">All Brands on GolfCartIQ</h3>
               <div className="flex flex-wrap gap-1.5">
                 {BRAND_WIKI.filter(b => b.slug !== brand.slug).map(b => (
                   <Link key={b.slug} href={`/brands/${b.slug}`}
