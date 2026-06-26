@@ -111,7 +111,8 @@ export default function Home() {
         </div>
 
         {/* ── Hot Deals strip — NO section gap, directly under headline ── */}
-        <div className="border-t border-border">
+        {/* min-h prevents CLS when carousel swaps from skeleton to real cards */}
+        <div className="border-t border-border" style={{ minHeight: "calc((14rem * 3 / 4) + 7rem)" }}>
           <PriceDealsCarousel inline />
         </div>
       </section>

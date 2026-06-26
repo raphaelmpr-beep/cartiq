@@ -140,7 +140,8 @@ Sitemap: https://golfcartiq.com/sitemap.xml`);
 
   // ─── SEO: llms.txt (AI crawler guidance) ────────────────────────────────────
   app.get("/llms.txt", (_req, res) => {
-    res.type("text/plain").send(`# GolfCartIQ
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.send(`# GolfCartIQ
 > Golf Cart Price Intelligence for Florida & Georgia
 > https://golfcartiq.com
 > Contact: hello@golfcartiq.com

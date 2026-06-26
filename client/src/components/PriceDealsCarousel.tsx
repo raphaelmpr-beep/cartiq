@@ -189,9 +189,19 @@ export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
   if (dealsLoading) {
     const skeleton = (
       <div className={`max-w-7xl mx-auto ${padClass}`}>
-        <div className="flex gap-4 overflow-hidden">
+        {/* min-h reserves space matching ~5 cards so no layout shift when real cards load */}
+        <div className="flex gap-4 overflow-hidden" style={{ minHeight: "calc((14rem * 3 / 4) + 6rem)" }}>
           {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="shrink-0 w-56 sm:w-64 h-56 rounded-xl bg-muted animate-pulse" />
+            <div key={i} className="shrink-0 w-56 sm:w-64 rounded-xl bg-muted animate-pulse flex flex-col">
+              {/* image placeholder — same aspect-[4/3] as DealCard */}
+              <div className="aspect-[4/3] w-full rounded-t-xl bg-muted" />
+              {/* body placeholder */}
+              <div className="p-3 space-y-2 flex-1">
+                <div className="h-3 bg-muted-foreground/20 rounded w-3/4" />
+                <div className="h-3 bg-muted-foreground/20 rounded w-1/2" />
+                <div className="h-5 bg-muted-foreground/20 rounded w-1/3 mt-2" />
+              </div>
+            </div>
           ))}
         </div>
       </div>
