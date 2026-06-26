@@ -107,12 +107,11 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 export default handler;
 
 // ── SPA catch-all: inject per-route SEO meta then serve index.html ──────────
-// This runs AFTER all API/static routes are registered by registerRoutes().
-// On Vercel, this handler is the one that serves HTML pages — the CDN static
-// route in vercel.json has been replaced so all non-asset requests come here.
-import fs from "node:fs";
+// Uses INDEX_HTML embedded at build time (server/generated/index-html-loader.ts)
+// to avoid Lambda filesystem path issues with __dirname or process.cwd().
 import path from "node:path";
 import { getRouteMeta } from "./seo-meta";
+import { INDEX_HTML } from "./generated/index-html-loader";
 
 function escHtml(str: string): string {
   return str
@@ -130,15 +129,7 @@ app.use("/{*path}", (req: Request, res: Response) => {
     return res.status(404).json({ error: "Not found" });
   }
 
-  // index.html lives at dist/public/index.html, one level up from dist/vercel-handler.cjs
-  const indexPath = path.resolve(__dirname, "public", "index.html");
-  let html: string;
-  try {
-    html = fs.readFileSync(indexPath, "utf-8");
-  } catch {
-    return res.status(500).send("Server error: could not read index.html");
-  }
-
+  let html = INDEX_HTML;
   const meta = getRouteMeta(req.path);
 
   html = html.replace(/<title>[^<]*<\/title>/, `<title>${escHtml(meta.title)}</title>`);
