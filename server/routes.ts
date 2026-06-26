@@ -274,13 +274,15 @@ Source: GolfCartIQ (golfcartiq.com)`);
 
     // ── Eligibility gate ──────────────────────────────────────────────────
     function isEligible(l: any): boolean {
+      const hasImage = l.image_url != null && String(l.image_url).trim().length > 0;
       return (
         l.status === "active" &&
         l.public_listing === true &&
         l.asking_price != null &&
-        l.image_url != null &&
+        l.asking_price > 0 &&
+        hasImage &&
         !["sold","inactive","unavailable","rejected","blocked","expired"].includes(l.status) &&
-        l.deal_rating !== "overpriced" // never in hot deals
+        l.deal_rating !== "overpriced"
       );
     }
 
@@ -410,6 +412,16 @@ Source: GolfCartIQ (golfcartiq.com)`);
           _hpCache = { ts: now, payload: await buildHomepage() };
         }
         res.json(_hpCache.payload);
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    // Admin cache-bust: POST /api/admin/homepage-refresh
+    app.post("/api/admin/homepage-refresh", requireAdmin, async (_req, res) => {
+      try {
+        _hpCache = { ts: Date.now(), payload: await buildHomepage() };
+        res.json({ ok: true, generated_at: (_hpCache.payload as any).generated_at });
       } catch (e: any) {
         res.status(500).json({ error: e.message });
       }
