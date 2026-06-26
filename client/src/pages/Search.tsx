@@ -1,6 +1,7 @@
 import { setSEO } from "@/lib/seo";
 import { useQuery } from "@tanstack/react-query";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { getSavedLocation, zipToCoords } from "@/lib/geo";
 import { SlidersHorizontal, X, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,7 +113,7 @@ function zipToLatLng(zip: string): [number, number] | null {
 }
 
 // ─── City centroid lookup — covers all cities that appear in CartIQ listings ──
-// Keys are lowercase normalized city names for fuzzy matching
+// Keys are lowercase normalized city names. Always fail-CLOSED (exclude) if not found.
 const CITY_CENTROIDS: Record<string, [number, number]> = {
   // Florida
   "jacksonville":        [30.332, -81.656],
@@ -133,6 +134,31 @@ const CITY_CENTROIDS: Record<string, [number, number]> = {
   "sarasota":            [27.336, -82.531],
   "bradenton":           [27.498, -82.575],
   "fort myers":          [26.641, -81.872],
+  "port orange":         [29.128, -81.008],
+  "daytona beach":       [29.211, -81.023],
+  "new smyrna beach":    [29.025, -80.927],
+  "ormond beach":        [29.286, -81.056],
+  "palm coast":          [29.585, -81.208],
+  "st augustine":        [29.895, -81.315],
+  "saint augustine":     [29.895, -81.315],
+  "gainesville":         [29.652, -82.325],
+  "orlando":             [28.538, -81.379],
+  "kissimmee":           [28.292, -81.408],
+  "palm beach":          [26.706, -80.053],
+  "west palm beach":     [26.715, -80.053],
+  "boca raton":          [26.368, -80.129],
+  "miami":               [25.762, -80.192],
+  "cape coral":          [26.563, -81.950],
+  "estero":              [26.438, -81.807],
+  "bonita springs":      [26.340, -81.779],
+  "venice":              [27.099, -82.454],
+  "punta gorda":         [26.929, -82.045],
+  "spring hill":         [28.478, -82.529],
+  "brooksville":         [28.553, -82.388],
+  "leesburg":            [28.811, -81.878],
+  "deland":              [29.028, -81.303],
+  "deltona":             [28.901, -81.264],
+  "dunnellon":           [29.047, -82.461],
   // Georgia
   "peachtree city":      [33.397, -84.599],
   "cumming":             [34.207, -84.140],
@@ -145,6 +171,13 @@ const CITY_CENTROIDS: Record<string, [number, number]> = {
   "augusta":             [33.474, -82.011],
   "macon":               [32.841, -83.632],
   "columbus":            [32.461, -84.988],
+  "albany":              [31.578, -84.156],
+  "brunswick":           [31.150, -81.492],
+  "dalton":              [34.770, -84.970],
+  "gainesville":         [34.298, -83.824],
+  "rome":                [34.257, -85.165],
+  "statesboro":          [32.449, -81.783],
+  "warner robins":       [32.613, -83.600],
 };
 
 // Normalize messy city strings like "Carts In Covington" → "covington"
@@ -219,7 +252,11 @@ export default function Search() {
   const [sort, setSort] = useState("best_match");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [zipError, setZipError] = useState("");
+  const [zipValidating, setZipValidating] = useState(false);
+  // Resolved coords for the user's entered zip (may come from Nominatim if not in static table)
+  const [zipCoords, setZipCoords] = useState<[number, number] | null>(null);
   const [visibleCount, setVisibleCount] = useState(48);
+  const zipDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // SEO — must come after useState so filters is defined
   useEffect(() => {
@@ -232,16 +269,23 @@ export default function Search() {
     });
   }, [filters.brands, filters.state]);
 
-  // Parse URL params on mount.
-  // wouter's navigate() puts query params in location.search (e.g. ?city=Nocatee&state=FL)
-  // NOT inside location.hash. Fallback: also check hash split for any legacy links.
+  // Parse URL params on mount, then auto-fill zip from saved location if no zip in URL.
   useEffect(() => {
-    // Primary: location.search (set by wouter navigate)
     const searchStr = window.location.search
       || window.location.hash.split("?")[1] || "";
     const params = new URLSearchParams(searchStr);
     const init: ClientFilters = {};
     params.forEach((v, k) => { (init as any)[k] = v; });
+
+    // Auto-fill zip from saved user location if URL doesn't already specify one
+    if (!init.zip) {
+      const saved = getSavedLocation();
+      if (saved?.zip) {
+        init.zip = saved.zip;
+        // Pre-populate zipCoords from saved location
+        setZipCoords([saved.lat, saved.lng]);
+      }
+    }
     setFilters(init);
   }, []);
 
@@ -333,7 +377,8 @@ export default function Search() {
     if (filters.warrantyIncluded === "yes" && l.warrantyIncluded !== "yes") return false;
     // Miles from zip (haversine)
     if (filters.zip && filters.radius) {
-      const userCoords = zipToLatLng(filters.zip);
+      // Use resolved zipCoords (covers both static table + Nominatim lookups)
+      const userCoords = zipCoords ?? zipToLatLng(filters.zip);
       if (userCoords) {
         const listingCoords: [number, number] | null =
           l.lat != null && l.lng != null
@@ -343,7 +388,9 @@ export default function Search() {
           const dist = haversine(userCoords[0], userCoords[1], listingCoords[0], listingCoords[1]);
           if (dist > Number(filters.radius)) return false;
         }
-        // If we can't compute distance, include the listing (don't exclude unknown)
+        // Fail-CLOSED: if we can't resolve the listing's location, exclude it
+        // This prevents out-of-range listings from leaking through
+        if (!listingCoords) return false;
       }
     }
     return true;
@@ -415,8 +462,28 @@ export default function Search() {
               setZipError("");
               if (!v) { clearFilter("zip"); return; }
               setFilter("zip", v);
-              if (v.length === 5 && !zipToLatLng(v)) {
-                setZipError("ZIP not found in FL/GA. Enter a valid FL or GA zip.");
+                    if (v.length === 5) {
+                // Check static table first (instant)
+                const staticCoords = zipToLatLng(v);
+                if (staticCoords) {
+                  setZipCoords(staticCoords);
+                  setZipError("");
+                } else {
+                  // Not in static table — try Nominatim (debounced)
+                  setZipCoords(null);
+                  setZipValidating(true);
+                  if (zipDebounceRef.current) clearTimeout(zipDebounceRef.current);
+                  zipDebounceRef.current = setTimeout(async () => {
+                    const result = await zipToCoords(v);
+                    setZipValidating(false);
+                    if (result) {
+                      setZipCoords([result.lat, result.lng]);
+                      setZipError("");
+                    } else {
+                      setZipError("ZIP code not found. Please check and try again.");
+                    }
+                  }, 600);
+                }
               }
             }}
             className="text-sm flex-1"
@@ -436,8 +503,11 @@ export default function Search() {
             ))}
           </SelectContent>
         </Select>
-        {filters.zip && filters.radius && !zipToLatLng(filters.zip ?? "") && (
-          <p className="text-xs text-muted-foreground mt-1">Enter a valid FL/GA ZIP to use distance filter.</p>
+        {zipValidating && (
+          <p className="text-xs text-muted-foreground mt-1">Validating ZIP…</p>
+        )}
+        {filters.zip && filters.radius && !zipCoords && !zipValidating && (
+          <p className="text-xs text-muted-foreground mt-1">Enter a valid ZIP code to use distance filter.</p>
         )}
       </div>
 

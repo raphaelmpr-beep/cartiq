@@ -106,7 +106,7 @@ return fn.apply(this, arguments)
       gtag('js', new Date());
       gtag('config', 'G-6BXPEYSEB5');
     </script>
-    <script type="module" crossorigin src="/assets/index-CbKy8xwe.js"></script>
+    <script type="module" crossorigin src="/assets/index-CvD2KqWx.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-BYgdb7le.css">
   </head>
   <body>

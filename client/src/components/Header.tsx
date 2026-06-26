@@ -1,8 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, MapPin, ChevronDown, Search, Heart } from "lucide-react";
+import { Menu, X, MapPin, ChevronDown, Search, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  getSavedLocation,
+  clearLocation,
+  requestBrowserLocation,
+  type UserLocation,
+} from "@/lib/geo";
 
 const NAV_LINKS = [
   { href: "/search", label: "Search Carts" },
@@ -12,6 +18,78 @@ const NAV_LINKS = [
   { href: "/sell", label: "Sell My Cart" },
   { href: "/garage", label: "My Garage" },
 ];
+
+// ─── Location button ──────────────────────────────────────────────────────────
+
+function LocationButton({ compact = false }: { compact?: boolean }) {
+  const [loc, setLoc] = useState<UserLocation | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [denied, setDenied] = useState(false);
+
+  // Load saved location on mount
+  useEffect(() => {
+    const saved = getSavedLocation();
+    if (saved) setLoc(saved);
+  }, []);
+
+  async function handleClick() {
+    if (loc) {
+      // Already have location — click clears it (let user reset)
+      clearLocation();
+      setLoc(null);
+      setDenied(false);
+      return;
+    }
+
+    setLoading(true);
+    setDenied(false);
+    const result = await requestBrowserLocation();
+    setLoading(false);
+
+    if (result) {
+      setLoc(result);
+    } else {
+      // Permission denied or unavailable
+      setDenied(true);
+      // Reset after 3s so the button is usable again
+      setTimeout(() => setDenied(false), 3000);
+    }
+  }
+
+  const label = loading
+    ? "Locating…"
+    : denied
+    ? "Location denied"
+    : loc
+    ? `${loc.city}, ${loc.state}`
+    : "Add location";
+
+  const icon = loading ? (
+    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  ) : (
+    <MapPin className="h-3.5 w-3.5" />
+  );
+
+  return (
+    <button
+      onClick={handleClick}
+      title={loc ? "Click to clear your location" : "Click to detect your location"}
+      className={`flex items-center gap-1 text-sm transition-colors px-2 py-1 rounded-md hover:bg-secondary ${
+        loc
+          ? "text-green-700 hover:text-green-900"
+          : denied
+          ? "text-destructive"
+          : "text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+      {loc && !compact && <ChevronDown className="h-3 w-3 opacity-50" />}
+    </button>
+  );
+}
+
+// ─── Header ──────────────────────────────────────────────────────────────────
 
 export function Header() {
   const [location] = useLocation();
@@ -49,11 +127,7 @@ export function Header() {
 
         {/* Desktop right */}
         <div className="hidden md:flex items-center gap-2">
-          <button className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-secondary transition-colors">
-            <MapPin className="h-3.5 w-3.5" />
-            <span>Jacksonville, FL</span>
-            <ChevronDown className="h-3 w-3" />
-          </button>
+          <LocationButton />
           <Link href="/admin">
             <a>
               <Button variant="outline" size="sm" data-testid="admin-login-btn">Admin</Button>
@@ -80,9 +154,8 @@ export function Header() {
               <span className="font-bold text-lg">GolfCart<span className="text-green-600">IQ</span></span>
               <button onClick={() => setMobileOpen(false)}><X className="h-5 w-5" /></button>
             </div>
-            <div className="flex items-center gap-1 text-sm text-muted-foreground mb-4 px-1">
-              <MapPin className="h-3.5 w-3.5" />
-              <span>Jacksonville, FL</span>
+            <div className="px-1 mb-4">
+              <LocationButton compact />
             </div>
             <nav className="space-y-1">
               {NAV_LINKS.map((link) => (
