@@ -275,14 +275,16 @@ Source: GolfCartIQ (golfcartiq.com)`);
     // ── Eligibility gate ──────────────────────────────────────────────────
     function isEligible(l: any): boolean {
       const hasImage = l.image_url != null && String(l.image_url).trim().length > 0;
+      const BAD_STATUSES = ["sold","inactive","unavailable","rejected","blocked","expired"];
+      const BAD_RATINGS  = ["overpriced","over_market","unknown","insufficient_data"];
       return (
         l.status === "active" &&
         l.public_listing === true &&
         l.asking_price != null &&
         l.asking_price > 0 &&
         hasImage &&
-        !["sold","inactive","unavailable","rejected","blocked","expired"].includes(l.status) &&
-        l.deal_rating !== "overpriced"
+        !BAD_STATUSES.includes(l.status) &&
+        !BAD_RATINGS.includes(l.deal_rating)
       );
     }
 
@@ -399,9 +401,9 @@ Source: GolfCartIQ (golfcartiq.com)`);
       const strip = (arr: any[]) => arr.map(({ _score, ...l }) => l);
 
       return {
-        hot_deals:      strip(hotDeals),
-        recently_added: strip(recentlyAdded),
-        featured:       strip(featured),
+        hot_deals:      normList(strip(hotDeals)),
+        recently_added: normList(strip(recentlyAdded)),
+        featured:       normList(strip(featured)),
         generated_at:   new Date().toISOString(),
         cache_window_hours: 3,
       };
