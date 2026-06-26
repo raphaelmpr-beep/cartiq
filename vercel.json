@@ -17,6 +17,10 @@
     {
       "src": "dist/public/og-image.png",
       "use": "@vercel/static"
+    },
+    {
+      "src": "dist/public/fonts/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
@@ -27,6 +31,7 @@
     { "src": "/assets/(.*)", "dest": "dist/public/assets/$1" },
     { "src": "/favicon.png", "dest": "dist/public/favicon.png" },
     { "src": "/og-image.png","dest": "dist/public/og-image.png" },
+    { "src": "/fonts/(.*)", "dest": "dist/public/fonts/$1" },
     { "src": "/(.*)",        "dest": "dist/vercel-handler.cjs" }
   ],
   "env": {
