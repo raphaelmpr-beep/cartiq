@@ -38,15 +38,25 @@ export default function Home() {
     navWithParams("/search", params);
   }
 
-  const { data: listings = [] } = useQuery<Listing[]>({
-    queryKey: ["/api/listings"],
+  interface HomepageData {
+    hot_deals:      Listing[];
+    recently_added: Listing[];
+    featured:       Listing[];
+    generated_at:   string;
+  }
+  const { data: homepage } = useQuery<HomepageData>({
+    queryKey: ["/api/listings/homepage"],
+    staleTime: 3 * 60 * 60 * 1000, // 3-hour client cache matches server window
   });
+  const hotDeals      = homepage?.hot_deals      ?? [];
+  const recentlyAdded = homepage?.recently_added ?? [];
+  const featuredList  = homepage?.featured       ?? [];
 
   const { data: articles = [] } = useQuery<SeoArticle[]>({
     queryKey: ["/api/buyer-guide"],
   });
 
-  const featured = listings.slice(0, 3);
+  // sections come from homepage endpoint above
   const guideCards = articles.slice(0, 3);
 
   const sampleCompare: Partial<Listing> = {
@@ -106,18 +116,37 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ─── Featured Listings ────────────────────────────────────────────────── */}
-      {featured.length > 0 && (
+      {/* ─── Recently Added ─────────────────────────────────────────────────── */}
+      {recentlyAdded.length > 0 && (
         <section className="bg-gray-50 border-b border-border">
           <div className="max-w-7xl mx-auto px-4 py-10">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold">Recent Listings</h2>
+              <h2 className="text-xl font-bold">Recently Added</h2>
               <Link href="/search" className="text-sm text-green-700 hover:underline flex items-center gap-1">
                 See all <ChevronRight className="h-3.5 w-3.5" />
               </Link>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {featured.map((l) => (
+              {recentlyAdded.map((l) => (
+                <ListingCard key={l.id} listing={l} />
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ─── Featured / Hot Deals (scored, diverse) ─────────────────────── */}
+      {featuredList.length > 0 && (
+        <section className="bg-white border-b border-border">
+          <div className="max-w-7xl mx-auto px-4 py-10">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">Top Picks</h2>
+              <Link href="/search?sort=deal" className="text-sm text-green-700 hover:underline flex items-center gap-1">
+                See all deals <ChevronRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {featuredList.map((l) => (
                 <ListingCard key={l.id} listing={l} />
               ))}
             </div>

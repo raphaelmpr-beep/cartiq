@@ -260,6 +260,162 @@ Source: GolfCartIQ (golfcartiq.com)`);
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+
+  // ─── Homepage rotation engine ─────────────────────────────────────────────
+  // GET /api/listings/homepage
+  // Returns pre-scored, deduplicated section sets for the homepage.
+  // Cache refreshes every 3 hours using a time-bucketed seed so the page
+  // feels stable within a window but rotates across windows.
+  // No routes, slugs, sitemaps, or canonical URLs are touched.
+  {
+    interface HomepageCache { ts: number; payload: Record<string, unknown> }
+    let _hpCache: HomepageCache | null = null;
+    const HP_CACHE_TTL_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+    // ── Eligibility gate ──────────────────────────────────────────────────
+    function isEligible(l: any): boolean {
+      return (
+        l.status === "active" &&
+        l.public_listing === true &&
+        l.asking_price != null &&
+        l.image_url != null &&
+        !["sold","inactive","unavailable","rejected","blocked","expired"].includes(l.status) &&
+        l.deal_rating !== "overpriced" // never in hot deals
+      );
+    }
+
+    // ── Per-listing score (0–100) ─────────────────────────────────────────
+    function score(l: any, seed: number): number {
+      let s = 0;
+      // Deal rating (0–35)
+      const dr: Record<string,number> = { great_deal:35, good_deal:28, fair_price:18, unknown:8, high_price:2 };
+      s += dr[l.deal_rating] ?? 5;
+      // Recency — updated_at within 30 days scores up to 20
+      const ageDays = (Date.now() - new Date(l.updated_at).getTime()) / 86_400_000;
+      s += Math.max(0, 20 - ageDays * 0.67);
+      // Data completeness (0–15): year, brand, model, battery_ah, condition
+      const fields = [l.year, l.brand, l.model, l.battery_ah, l.condition];
+      s += fields.filter(Boolean).length * 3;
+      // Image (5)
+      if (l.image_url) s += 5;
+      // Valid price (5)
+      if (l.asking_price > 0) s += 5;
+      // Has contact path (5): seller_phone/email or dealer_id
+      if (l.seller_phone || l.seller_email || l.dealer_id) s += 5;
+      // Buyer score passthrough (0–10, normalised from 0–100)
+      s += (l.buyer_score ?? 0) / 10;
+      // Stable random jitter (0–10) using listing id + time bucket seed
+      s += ((l.id * 2654435761 + seed) % 1000) / 100;
+      return s;
+    }
+
+    // ── Dealer + brand diversity filter ──────────────────────────────────
+    function applyDiversity(
+      candidates: any[],
+      n: number,
+      usedIds: Set<number>,
+      maxPerDealer = 2,
+      maxPerBrand = 2,
+    ): any[] {
+      const out: any[] = [];
+      const dealerCount: Record<string, number> = {};
+      const brandCount:  Record<string, number> = {};
+      for (const l of candidates) {
+        if (usedIds.has(l.id)) continue;
+        const dk = String(l.dealer_id ?? l.seller_name ?? "private");
+        const bk = (l.brand ?? "unknown").toLowerCase();
+        if ((dealerCount[dk] ?? 0) >= maxPerDealer) continue;
+        if ((brandCount[bk]  ?? 0) >= maxPerBrand)  continue;
+        out.push(l);
+        usedIds.add(l.id);
+        dealerCount[dk] = (dealerCount[dk] ?? 0) + 1;
+        brandCount[bk]  = (brandCount[bk]  ?? 0) + 1;
+        if (out.length >= n) break;
+      }
+      return out;
+    }
+
+    // ── Build homepage payload ────────────────────────────────────────────
+    async function buildHomepage(): Promise<Record<string, unknown>> {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      // Fetch candidate pool: active, public, priced, imaged
+      // Pull enough for all sections + overflow
+      const { data, error } = await sb
+        .from("listings")
+        .select("*")
+        .eq("status", "active")
+        .eq("public_listing", true)
+        .not("asking_price", "is", null)
+        .not("image_url", "is", null)
+        .not("deal_rating", "eq", "overpriced")
+        .order("updated_at", { ascending: false })
+        .limit(500);
+      if (error) throw new Error(error.message);
+      const pool: any[] = (data ?? []).filter(isEligible);
+
+      // Time-bucket seed — changes every 3 hours, stable within window
+      const seed = Math.floor(Date.now() / HP_CACHE_TTL_MS);
+
+      // Score all candidates
+      const scored = pool
+        .map(l => ({ ...l, _score: score(l, seed) }))
+        .sort((a, b) => b._score - a._score);
+
+      const usedIds = new Set<number>();
+
+      // ── Section 1: Hot Deals ──────────────────────────────────────────
+      // great_deal first, then good_deal; exclude high_price, insufficient_data, overpriced
+      const hotCandidates = scored.filter(l =>
+        ["great_deal", "good_deal"].includes(l.deal_rating)
+      );
+      // Fallback: add fair_price if hot pool is thin
+      const hotPool = hotCandidates.length >= 6
+        ? hotCandidates
+        : [...hotCandidates, ...scored.filter(l => l.deal_rating === "fair_price")];
+      const hotDeals = applyDiversity(hotPool, 12, usedIds, 1, 2);
+
+      // ── Section 2: Recently Added ─────────────────────────────────────
+      // Sort by created_at desc, prefer last 30 days, no duplicates from Hot Deals
+      const recentCandidates = [...scored].sort((a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      const recentlyAdded = applyDiversity(recentCandidates, 6, usedIds, 2, 2);
+
+      // ── Section 3: Featured / Promoted ───────────────────────────────
+      // Use buyer_score as proxy for featured tier weight; rotate fairly
+      // Exclude already-shown listings
+      const featuredCandidates = scored.filter(l =>
+        ["great_deal","good_deal","fair_price"].includes(l.deal_rating)
+      );
+      const featured = applyDiversity(featuredCandidates, 3, usedIds, 1, 2);
+
+      // Clean internal score field before sending
+      const strip = (arr: any[]) => arr.map(({ _score, ...l }) => l);
+
+      return {
+        hot_deals:      strip(hotDeals),
+        recently_added: strip(recentlyAdded),
+        featured:       strip(featured),
+        generated_at:   new Date().toISOString(),
+        cache_window_hours: 3,
+      };
+    }
+
+    app.get("/api/listings/homepage", async (_req, res) => {
+      try {
+        const now = Date.now();
+        if (!_hpCache || now - _hpCache.ts > HP_CACHE_TTL_MS) {
+          _hpCache = { ts: now, payload: await buildHomepage() };
+        }
+        res.json(_hpCache.payload);
+      } catch (e: any) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+  }
+
   // ─── Listings ────────────────────────────────────────────────────────────────
 
   // Hot deals carousel — great_deal + good_deal, priced + imaged, sorted by buyer_score
