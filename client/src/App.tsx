@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { Component, type ReactNode } from "react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null };
@@ -127,6 +128,7 @@ export default function App() {
           <AppRoutes />
         </Router>
         <Toaster />
+        <SpeedInsights />
       </QueryClientProvider>
     </ErrorBoundary>
   );
