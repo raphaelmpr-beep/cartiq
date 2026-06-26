@@ -45,7 +45,7 @@ export function dealDeltaColor(delta?: number | null): string {
   if (delta == null) return "text-gray-500";
   if (delta < 0) return "text-green-700";
   if (delta > 100) return "text-red-600";
-  return "text-amber-600";
+  return "text-amber-700";
 }
 
 export function batteryTypeLabel(bt?: string | null): string {

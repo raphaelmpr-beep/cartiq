@@ -87,7 +87,7 @@
 
 /* Score colors */
 .score-high { @apply text-green-700; }
-.score-mid { @apply text-amber-600; }
+.score-mid { @apply text-amber-700; }
 .score-low { @apply text-red-600; }
 
 /* Risk colors */

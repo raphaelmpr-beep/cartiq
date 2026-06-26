@@ -190,7 +190,7 @@ export function ListingCard({ listing, compact, priority = false }: ListingCardP
               title="View on dealer site"
               data-testid={`btn-source-link-${listing.id}`}
             >
-              <Button variant="outline" size="sm" className="px-2.5">
+              <Button variant="outline" size="sm" className="px-2.5" aria-label="View on dealer site">
                 <ExternalLink className="h-3.5 w-3.5" />
               </Button>
             </a>

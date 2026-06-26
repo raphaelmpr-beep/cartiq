@@ -737,21 +737,21 @@ export default function Search() {
                 return selectedBrands.map((b) => (
                   <span key={b} className="inline-flex items-center gap-1 px-2.5 py-1 bg-secondary rounded-full text-xs font-medium">
                     {b}
-                    <button onClick={() => toggleBrand(b)}><X className="h-3 w-3" /></button>
+                    <button onClick={() => toggleBrand(b)} aria-label={`Remove ${b} filter`}><X className="h-3 w-3" /></button>
                   </span>
                 ));
               }
               return (
                 <span key={k} className="inline-flex items-center gap-1 px-2.5 py-1 bg-secondary rounded-full text-xs font-medium">
                   {label}
-                  <button onClick={() => clearFilter(k as keyof ClientFilters)}><X className="h-3 w-3" /></button>
+                  <button onClick={() => clearFilter(k as keyof ClientFilters)} aria-label={`Remove ${label} filter`}><X className="h-3 w-3" /></button>
                 </span>
               );
             })}
             {filters.zip && filters.radius && (
               <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-secondary rounded-full text-xs font-medium">
                 <MapPin className="h-3 w-3" />{filters.radius} mi of {filters.zip}
-                <button onClick={() => { clearFilter("zip"); clearFilter("radius"); }}><X className="h-3 w-3" /></button>
+                <button onClick={() => { clearFilter("zip"); clearFilter("radius"); }} aria-label="Remove location filter"><X className="h-3 w-3" /></button>
               </span>
             )}
           </div>

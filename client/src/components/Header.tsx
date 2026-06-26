@@ -152,7 +152,7 @@ export function Header() {
           <SheetContent side="right" className="w-72">
             <div className="flex items-center justify-between mb-6">
               <span className="font-bold text-lg">GolfCart<span className="text-green-600">IQ</span></span>
-              <button onClick={() => setMobileOpen(false)}><X className="h-5 w-5" /></button>
+              <button onClick={() => setMobileOpen(false)} aria-label="Close menu"><X className="h-5 w-5" /></button>
             </div>
             <div className="px-1 mb-4">
               <LocationButton compact />

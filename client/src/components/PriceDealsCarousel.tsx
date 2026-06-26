@@ -70,6 +70,9 @@ function DealCard({ listing }: { listing: Listing }) {
             alt={listing.title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
             loading="lazy"
+            decoding="async"
+            width={400}
+            height={300}
             onError={(e) => {
               const t = e.currentTarget;
               t.onerror = null;
@@ -87,7 +90,7 @@ function DealCard({ listing }: { listing: Listing }) {
         </div>
         {/* Price drop pill top-right */}
         {isPriceDrop && (
-          <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-green-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+          <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-green-700 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
             <TrendingDown className="h-2.5 w-2.5" /> Price drop
           </div>
         )}

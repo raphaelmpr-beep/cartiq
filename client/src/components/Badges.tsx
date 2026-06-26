@@ -134,7 +134,7 @@ export function DeliveryCostBadge({ deliveryIncluded, deliveryCost, deliveryAvai
   }
   if (deliveryAvailable) {
     return (
-      <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-600 border border-amber-200", className)}>
+      <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200", className)}>
         <Truck className="h-3 w-3" /> Delivery Quote Needed
       </span>
     );
