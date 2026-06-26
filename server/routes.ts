@@ -350,7 +350,9 @@ Source: GolfCartIQ (golfcartiq.com)`);
         .eq("status", "active")
         .eq("public_listing", true)
         .not("asking_price", "is", null)
+        .gt("asking_price", 0)
         .not("image_url", "is", null)
+        .neq("image_url", "")
         .not("deal_rating", "eq", "overpriced")
         .order("updated_at", { ascending: false })
         .limit(500);
