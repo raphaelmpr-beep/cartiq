@@ -374,6 +374,19 @@ type CoverageRow = {
   valuation_review_needed: boolean;
   adapter_notes: string | null;
   scanned_at: string | null;
+  // Google validation
+  google_place_id?: string | null;
+  google_verified_name?: string | null;
+  google_address?: string | null;
+  google_phone?: string | null;
+  google_rating?: number | null;
+  google_review_count?: number | null;
+  google_verified_at?: string | null;
+  google_match_score?: string | null;
+  // Site platform
+  site_platform?: string | null;
+  site_platform_notes?: string | null;
+  is_duplicate_of?: string | null;
 };
 
 const COVERAGE_STATUS_META: Record<string, { label: string; color: string }> = {
@@ -398,10 +411,37 @@ function CoverageStatusBadge({ status }: { status: string }) {
 
 function CoverageAudit({ adminToken }: { adminToken: string }) {
   const ADMIN_HEADERS = { "x-admin-token": adminToken };
-  const { data: rows = [], isLoading, error, refetch } = useQuery<CoverageRow[]>({
+  const { data: rows = [], isLoading, error, refetch, isFetching } = useQuery<CoverageRow[]>({
     queryKey: ["/api/admin/coverage-audit"],
     queryFn: () => apiRequest("GET", "/api/admin/coverage-audit", undefined, ADMIN_HEADERS).then(r => r.json()),
   });
+
+  const [isValidatingAll, setIsValidatingAll] = useState(false);
+  const [validatingSlug, setValidatingSlug] = useState<string | null>(null);
+
+  const handleValidateAll = async () => {
+    setIsValidatingAll(true);
+    try {
+      await apiRequest("POST", "/api/admin/dealers/bulk-google-validate", {}, ADMIN_HEADERS);
+      await refetch();
+    } catch (e) {
+      console.error("Bulk validate failed", e);
+    } finally {
+      setIsValidatingAll(false);
+    }
+  };
+
+  const handleValidateDealer = async (slug: string) => {
+    setValidatingSlug(slug);
+    try {
+      await apiRequest("POST", `/api/admin/dealers/${slug}/google-validate`, {}, ADMIN_HEADERS);
+      await refetch();
+    } catch (e) {
+      console.error("Validate failed for", slug, e);
+    } finally {
+      setValidatingSlug(null);
+    }
+  };
 
   const flaggedCount  = rows.filter(r => r.valuation_review_needed).length;
   const activeCount   = rows.filter(r => r.public_listings_count > 0).length;
@@ -450,7 +490,8 @@ function CoverageAudit({ adminToken }: { adminToken: string }) {
             <tr className="bg-muted text-left">
               {["Dealer", "Inventory URL", "Discovered", "Pending", "Live", "Dups",
                 "Coverage Status", "Page Type", "Pagination", "Valuation Flag",
-                "Last Scanned", "Adapter Notes"].map(h => (
+                "Last Scanned", "Adapter Notes",
+                "Google Match", "Address", "Phone", "Site Platform", "Duplicate", "Actions"].map(h => (
                 <th key={h} className="p-2 border border-border font-semibold text-xs whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -538,6 +579,100 @@ function CoverageAudit({ adminToken }: { adminToken: string }) {
                 <td className="p-2 border border-border text-xs text-muted-foreground max-w-[200px]">
                   <span title={row.adapter_notes || ""}>{row.adapter_notes || "—"}</span>
                 </td>
+
+                {/* Google Match */}
+                <td className="p-2 border border-border">
+                  {(() => {
+                    const score = row.google_match_score;
+                    const colors: Record<string, string> = {
+                      exact:              "bg-green-100 text-green-800 border-green-200",
+                      likely:             "bg-teal-100 text-teal-800 border-teal-200",
+                      partial:            "bg-yellow-100 text-yellow-800 border-yellow-200",
+                      no_match:           "bg-red-100 text-red-800 border-red-200",
+                      duplicate_place_id: "bg-orange-100 text-orange-800 border-orange-200",
+                      no_api_key:         "bg-gray-100 text-gray-500 border-gray-200",
+                    };
+                    if (!score) return <span className="text-muted-foreground text-xs">—</span>;
+                    return (
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium border ${colors[score] ?? "bg-gray-100 text-gray-500 border-gray-200"}`}>
+                        {score === "duplicate_place_id" ? "⚠ Dup" : score}
+                      </span>
+                    );
+                  })()}
+                </td>
+
+                {/* Address */}
+                <td className="p-2 border border-border text-xs text-muted-foreground max-w-[180px]">
+                  <span title={row.google_address ?? ""}>{row.google_address ?? "—"}</span>
+                </td>
+
+                {/* Phone */}
+                <td className="p-2 border border-border text-xs text-muted-foreground whitespace-nowrap">
+                  {row.google_phone ?? "—"}
+                </td>
+
+                {/* Site Platform */}
+                <td className="p-2 border border-border">
+                  {(() => {
+                    const p = row.site_platform;
+                    const labels: Record<string, string> = {
+                      dealer_spike:   "DealerSpike",
+                      dealer_socket:  "DealerSocket",
+                      lightspeed:     "Lightspeed",
+                      cdk:            "CDK",
+                      motility:       "Motility",
+                      shopify:        "Shopify",
+                      wix:            "Wix",
+                      squarespace:    "Squarespace",
+                      wordpress:      "WordPress",
+                      webflow:        "Webflow",
+                      custom:         "Custom",
+                      unreachable:    "Unreachable",
+                      unknown:        "Unknown",
+                    };
+                    const managed = ["dealer_spike","dealer_socket","lightspeed","cdk","motility"];
+                    const builder = ["shopify","wix","squarespace","wordpress","webflow"];
+                    let color = "bg-gray-100 text-gray-500 border-gray-200";
+                    if (p && managed.includes(p)) color = "bg-blue-100 text-blue-800 border-blue-200";
+                    else if (p && builder.includes(p)) color = "bg-purple-100 text-purple-800 border-purple-200";
+                    else if (p === "custom") color = "bg-green-100 text-green-800 border-green-200";
+                    else if (p === "unreachable") color = "bg-red-100 text-red-800 border-red-200";
+                    if (!p || p === "unknown") return <span className="text-muted-foreground text-xs">—</span>;
+                    return (
+                      <span
+                        title={row.site_platform_notes ?? ""}
+                        className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium border ${color}`}
+                      >
+                        {labels[p] ?? p}
+                      </span>
+                    );
+                  })()}
+                </td>
+
+                {/* Duplicate flag */}
+                <td className="p-2 border border-border text-xs">
+                  {row.is_duplicate_of ? (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium border bg-orange-100 text-orange-800 border-orange-200">
+                      ⚠ {row.is_duplicate_of}
+                    </span>
+                  ) : <span className="text-muted-foreground">—</span>}
+                </td>
+
+                {/* Per-row Validate */}
+                <td className="p-2 border border-border">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => handleValidateDealer(row.dealer_slug)}
+                    disabled={validatingSlug === row.dealer_slug || isValidatingAll}
+                  >
+                    {validatingSlug === row.dealer_slug
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : "Validate"
+                    }
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -549,9 +684,30 @@ function CoverageAudit({ adminToken }: { adminToken: string }) {
         )}
       </div>
 
-      <div className="flex justify-end">
-        <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5">
-          <RefreshCw className="h-3.5 w-3.5" /> Refresh
+      <div className="flex justify-end gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleValidateAll}
+          disabled={isValidatingAll || isFetching}
+          className="gap-1.5"
+        >
+          {isValidatingAll
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Validating…</>
+            : <><CheckCircle className="h-3.5 w-3.5" /> Validate All</>
+          }
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => refetch()}
+          disabled={isFetching}
+          className="gap-1.5"
+        >
+          {isFetching
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Refreshing…</>
+            : <><RefreshCw className="h-3.5 w-3.5" /> Refresh</>
+          }
         </Button>
       </div>
     </div>

@@ -35,6 +35,22 @@ export interface Dealer {
   default_warranty_months: number | null;
   default_warranty_notes: string | null;
   notes: string | null;
+  // ── Google Business Validation ──────────────────────────────────────────
+  google_place_id: string | null;
+  google_verified_name: string | null;
+  google_address: string | null;
+  google_phone: string | null;
+  google_rating: number | null;
+  google_review_count: number | null;
+  google_verified_at: string | null;
+  /** 'exact' | 'likely' | 'partial' | 'no_match' | 'duplicate_place_id' | 'no_api_key' */
+  google_match_score: string | null;
+  // ── Site Platform Detection ──────────────────────────────────────────────
+  /** 'dealer_spike' | 'dealer_socket' | 'lightspeed' | 'cdk' | 'motility' | 'shopify' | 'wix' | 'squarespace' | 'wordpress' | 'webflow' | 'custom' | 'unreachable' | 'unknown' */
+  site_platform: string | null;
+  site_platform_notes: string | null;
+  /** slug of the canonical dealer if this record is a duplicate */
+  is_duplicate_of: string | null;
   created_at: string;
   updated_at: string;
 }

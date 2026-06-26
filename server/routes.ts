@@ -1235,6 +1235,13 @@ Source: GolfCartIQ (golfcartiq.com)`);
         pendingByDealer[row.dealer_slug] = (pendingByDealer[row.dealer_slug] || 0) + 1;
       }
 
+      // Fetch dealer validation fields for all dealers in one shot
+      const { data: dealerRows } = await sb
+        .from("dealers")
+        .select("slug,google_place_id,google_verified_name,google_address,google_phone,google_rating,google_review_count,google_verified_at,google_match_score,site_platform,site_platform_notes,is_duplicate_of");
+      const dealerBySlug: Record<string, any> = {};
+      for (const d of (dealerRows || [])) dealerBySlug[d.slug] = d;
+
       // Deduplicate log rows — keep most recent per dealer_slug
       const latestByDealer: Record<string, any> = {};
       for (const row of (logRows || [])) {
@@ -1252,6 +1259,7 @@ Source: GolfCartIQ (golfcartiq.com)`);
         const live = liveBySource[slug] || { total: 0, allGreatDeal: false, greatDealCount: 0 };
         const pending = pendingByDealer[slug] || 0;
         const valuationReview = live.total > 0 && live.allGreatDeal;
+        const dealer = dealerBySlug[slug] || null;
         return {
           dealer_slug: slug,
           inventory_url:          log?.inventory_url || null,
@@ -1270,6 +1278,18 @@ Source: GolfCartIQ (golfcartiq.com)`);
           valuation_review_needed: valuationReview || log?.valuation_review_needed || false,
           adapter_notes:          log?.adapter_notes || null,
           scanned_at:             log?.scanned_at || null,
+          // Google validation fields
+          google_place_id:        dealer?.google_place_id || null,
+          google_verified_name:   dealer?.google_verified_name || null,
+          google_address:         dealer?.google_address || null,
+          google_phone:           dealer?.google_phone || null,
+          google_rating:          dealer?.google_rating || null,
+          google_review_count:    dealer?.google_review_count || null,
+          google_verified_at:     dealer?.google_verified_at || null,
+          google_match_score:     dealer?.google_match_score || null,
+          site_platform:          dealer?.site_platform || null,
+          site_platform_notes:    dealer?.site_platform_notes || null,
+          is_duplicate_of:        dealer?.is_duplicate_of || null,
         };
       });
 
@@ -1791,6 +1811,227 @@ Source: GolfCartIQ (golfcartiq.com)`);
       if (patchErr) return res.status(500).json({ error: patchErr.message });
 
       res.json({ ok: true, url: publicUrl });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
+  // ─── Admin: Google Business validation + site platform detection ─────────────
+  // POST /api/admin/dealers/:slug/google-validate
+  // Uses Google Places Text Search to find the dealer, validate name/address/phone,
+  // detect duplicate place_ids, and fingerprint the site platform.
+  app.post("/api/admin/dealers/:slug/google-validate", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { slug } = req.params;
+
+      // Fetch dealer record
+      const { data: dealer, error: dealerErr } = await sb
+        .from("dealers")
+        .select("*")
+        .eq("slug", slug)
+        .single();
+      if (dealerErr || !dealer) return res.status(404).json({ error: "Dealer not found" });
+
+      const PLACES_KEY = process.env.GOOGLE_PLACES_API_KEY;
+      let googleResult: any = null;
+      let matchScore = "no_match";
+
+      if (PLACES_KEY) {
+        // Build search query: "Dealer Name City State"
+        const query = encodeURIComponent(`${dealer.name} ${dealer.city || ""} ${dealer.state || ""} golf carts`);
+        const placesUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&key=${PLACES_KEY}`;
+        const resp = await fetch(placesUrl, { signal: AbortSignal.timeout(8000) });
+        if (resp.ok) {
+          const data = await resp.json() as any;
+          if (data.results && data.results.length > 0) {
+            const place = data.results[0];
+            googleResult = place;
+
+            // Determine match quality
+            const nameLower = (dealer.name || "").toLowerCase();
+            const placeNameLower = (place.name || "").toLowerCase();
+            if (placeNameLower === nameLower) matchScore = "exact";
+            else if (placeNameLower.includes(nameLower) || nameLower.includes(placeNameLower)) matchScore = "likely";
+            else matchScore = "partial";
+
+            // Check for duplicate place_id across other dealers
+            const { data: dupCheck } = await sb
+              .from("dealers")
+              .select("slug, name")
+              .eq("google_place_id", place.place_id)
+              .neq("slug", slug);
+
+            if (dupCheck && dupCheck.length > 0) {
+              matchScore = "duplicate_place_id";
+              // Tag this dealer as a potential dup
+              await sb.from("dealers").update({
+                is_duplicate_of: dupCheck[0].slug,
+                updated_at: new Date().toISOString(),
+              }).eq("slug", slug);
+            }
+          }
+        }
+      } else {
+        // No API key — use name/phone heuristic only
+        googleResult = null;
+        matchScore = "no_api_key";
+      }
+
+      // ── Site platform detection ────────────────────────────────────────────
+      let sitePlatform = "unknown";
+      let sitePlatformNotes = "";
+
+      if (dealer.website_url) {
+        try {
+          const siteResp = await fetch(dealer.website_url, {
+            signal: AbortSignal.timeout(10000),
+            headers: { "User-Agent": "Mozilla/5.0 (compatible; GolfCartIQ-PlatformBot/1.0)" },
+          });
+          if (siteResp.ok) {
+            const html = await siteResp.text();
+            const htmlLower = html.toLowerCase();
+
+            // Ordered by specificity — first match wins
+            if (htmlLower.includes("dealerspike") || htmlLower.includes("dealer-spike")) {
+              sitePlatform = "dealer_spike";
+              sitePlatformNotes = "DealerSpike managed dealer site";
+            } else if (htmlLower.includes("dealersocket") || htmlLower.includes("dealer-socket")) {
+              sitePlatform = "dealer_socket";
+              sitePlatformNotes = "DealerSocket managed dealer site";
+            } else if (htmlLower.includes("lightspeed") && htmlLower.includes("inventory")) {
+              sitePlatform = "lightspeed";
+              sitePlatformNotes = "Lightspeed dealer management system";
+            } else if (htmlLower.includes("cdk") && (htmlLower.includes("inventory") || htmlLower.includes("cdk global"))) {
+              sitePlatform = "cdk";
+              sitePlatformNotes = "CDK Global dealer platform";
+            } else if (htmlLower.includes("motility") || htmlLower.includes("motilitysoftware")) {
+              sitePlatform = "motility";
+              sitePlatformNotes = "Motility dealer management system";
+            } else if (htmlLower.includes("shopify") || htmlLower.includes("cdn.shopify.com")) {
+              sitePlatform = "shopify";
+              sitePlatformNotes = "Shopify e-commerce";
+            } else if (htmlLower.includes("wix.com") || htmlLower.includes("_wix_")) {
+              sitePlatform = "wix";
+              sitePlatformNotes = "Wix website builder";
+            } else if (htmlLower.includes("squarespace")) {
+              sitePlatform = "squarespace";
+              sitePlatformNotes = "Squarespace website builder";
+            } else if (htmlLower.includes("wp-content") || htmlLower.includes("wp-includes")) {
+              sitePlatform = "wordpress";
+              sitePlatformNotes = "WordPress CMS";
+            } else if (htmlLower.includes("webflow")) {
+              sitePlatform = "webflow";
+              sitePlatformNotes = "Webflow website builder";
+            } else {
+              sitePlatform = "custom";
+              sitePlatformNotes = "Custom or unrecognized platform";
+            }
+          }
+        } catch {
+          sitePlatform = "unreachable";
+          sitePlatformNotes = "Site could not be fetched";
+        }
+      }
+
+      // ── Patch dealer record ────────────────────────────────────────────────
+      const patch: Record<string, any> = {
+        google_match_score: matchScore,
+        site_platform: sitePlatform,
+        site_platform_notes: sitePlatformNotes,
+        google_verified_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      if (googleResult) {
+        patch.google_place_id      = googleResult.place_id || null;
+        patch.google_verified_name = googleResult.name || null;
+        patch.google_address       = googleResult.formatted_address || null;
+        patch.google_rating        = googleResult.rating || null;
+        patch.google_review_count  = googleResult.user_ratings_total || null;
+
+        // Backfill phone if dealer record is missing it and Google has it
+        if (!dealer.phone && googleResult.formatted_phone_number) {
+          patch.phone = googleResult.formatted_phone_number;
+        }
+        // Backfill address parts if missing
+        if (!dealer.city && googleResult.formatted_address) {
+          const parts = googleResult.formatted_address.split(",");
+          if (parts.length >= 2) {
+            patch.city = parts[parts.length - 3]?.trim() || dealer.city;
+          }
+        }
+      }
+
+      await sb.from("dealers").update(patch).eq("slug", slug);
+
+      res.json({
+        ok: true,
+        slug,
+        google_match_score: matchScore,
+        google_verified_name: patch.google_verified_name || null,
+        google_address: patch.google_address || null,
+        google_phone: patch.phone || null,
+        google_rating: patch.google_rating || null,
+        site_platform: sitePlatform,
+        site_platform_notes: sitePlatformNotes,
+        is_duplicate: matchScore === "duplicate_place_id",
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/admin/dealers/bulk-google-validate — validate all dealers in sequence
+  app.post("/api/admin/dealers/bulk-google-validate", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      const { data: dealers } = await sb
+        .from("dealers")
+        .select("slug, name")
+        .order("name");
+
+      if (!dealers || dealers.length === 0) return res.json({ ok: true, processed: 0 });
+
+      const results: any[] = [];
+      const BASE = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : `http://localhost:${process.env.PORT || 5000}`;
+
+      for (const dealer of dealers) {
+        try {
+          const r = await fetch(`${BASE}/api/admin/dealers/${dealer.slug}/google-validate`, {
+            method: "POST",
+            headers: { "x-admin-token": process.env.ADMIN_PASSWORD || "cartiq2024" },
+            signal: AbortSignal.timeout(15000),
+          });
+          const result = await r.json();
+          results.push({ slug: dealer.slug, ...result });
+          // Small delay between requests to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (e: any) {
+          results.push({ slug: dealer.slug, error: e.message });
+        }
+      }
+
+      const duplicates = results.filter(r => r.is_duplicate);
+      const platformCounts: Record<string, number> = {};
+      for (const r of results) {
+        if (r.site_platform) platformCounts[r.site_platform] = (platformCounts[r.site_platform] || 0) + 1;
+      }
+
+      res.json({
+        ok: true,
+        processed: results.length,
+        duplicates_found: duplicates.length,
+        duplicate_slugs: duplicates.map(d => d.slug),
+        platform_breakdown: platformCounts,
+        results,
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
