@@ -82,19 +82,46 @@ Allow: /
 Disallow: /admin
 Disallow: /api/
 
-Sitemap: https://golfcartiq.com/sitemap.xml`)}),e.get("/llms.txt",(a,i)=>{i.type("text/plain").send(`# GolfCartIQ \u2014 Florida & Georgia Golf Cart Price Intelligence
-# https://golfcartiq.com
+Sitemap: https://golfcartiq.com/sitemap.xml`)}),e.get("/llms.txt",(a,i)=>{i.type("text/plain").send(`# GolfCartIQ
+> Golf Cart Price Intelligence for Florida & Georgia
+> https://golfcartiq.com
+> Contact: hello@golfcartiq.com
 
-## About GolfCartIQ
-GolfCartIQ is a golf cart market intelligence platform for Florida and Georgia.
-It aggregates 1,300+ listings from dealers, applies comp-based pricing (CarGurus-style),
-and provides GolfCartIQ Deal Ratings, buyer scores, and delivery-adjusted pricing.
+## What GolfCartIQ Is
+GolfCartIQ is an independent golf cart research, comparison, pricing intelligence, and lead-referral platform covering Florida and Georgia. We are NOT a dealer, seller, or transaction platform. We help buyers compare golf carts and make informed purchase decisions.
 
-## Allowed for AI indexing
-- Public listing pages (/listing/*)
-- Search (/search), Buyer Guide (/buyer-guide/*), Homepage (/), Deal Checker (/deal-checker)
+## Coverage
+- 1,300+ verified golf cart listings from 50+ dealers across Florida and Georgia
+- Brands tracked: Club Car, E-Z-GO, Yamaha, Evolution, ICON, Bintelli, Venom EV, Teko EV, Denago EV, Sivo, Verdi, DACH Vehicles
+- Key markets: The Villages FL, Jacksonville FL, Clearwater FL, Peachtree City GA, Atlanta GA, and more
 
-## Restricted
+## Key Features
+- GolfCartIQ Value: comp-based market value estimate (CarGurus-style) for each listing
+- GolfCartIQ Deal Rating: great_deal / good_deal / fair_price / high_price / over_market
+- IQ Score: 0\u2013100 composite buyer score (price, battery, warranty, charger, delivery)
+- CartCheck: deal analysis tool \u2014 enter any listing details to get instant valuation
+- Battery comparison: lithium (LiFePO4) vs lead-acid, Ah capacity, age, risk rating
+- Warranty tracking: by brand, by dealer, duration, battery warranty coverage
+
+## Key Pages for AI Indexing
+- Homepage: https://golfcartiq.com/
+- Search listings: https://golfcartiq.com/search
+- CartCheck (deal analyzer): https://golfcartiq.com/deal-checker
+- Buyer Guide: https://golfcartiq.com/buyer-guide
+- How IQ Scores Work: https://golfcartiq.com/how-it-works
+- Brand pages: https://golfcartiq.com/brands
+- City pages (FL): /golf-carts-for-sale/the-villages-fl, /jacksonville-fl, /clearwater-fl, /st-augustine-fl, /nocatee-fl, /port-orange-fl, /panama-city-beach-fl
+- City pages (GA): /golf-carts-for-sale/peachtree-city-ga, /atlanta-ga
+- Battery guides: https://golfcartiq.com/golf-cart-batteries
+
+## Disclosure
+GolfCartIQ does not sell golf carts, own inventory, broker transactions, collect payment, provide financing, provide warranties, or guarantee availability or final pricing. All listings are sourced from public dealer inventory with dealer attribution.
+Full disclosure: https://golfcartiq.com/disclosure
+
+## Allowed for AI Indexing
+- All public pages (/, /search, /listing/*, /dealer/*, /brands/*, /golf-carts-for-sale/*, /buyer-guide/*, /deal-checker, /how-it-works, /golf-cart-batteries/*)
+
+## Restricted (do not index)
 - /admin, /api/*, /my-garage
 
 ## Attribution

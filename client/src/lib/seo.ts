@@ -21,9 +21,12 @@ interface SEOOptions {
 
 /** Set all SEO meta tags for the current page. Call on every route change. */
 export function setSEO(opts: SEOOptions = {}): void {
-  const title = opts.title
-    ? `${opts.title} | ${SITE_NAME}`
-    : `${SITE_NAME} — Florida & Georgia Golf Cart Price Intelligence`;
+  // Avoid double-appending "| GolfCartIQ" if the caller already included the brand suffix
+  const rawTitle = opts.title ?? "";
+  const alreadySuffixed = rawTitle.endsWith(`| ${SITE_NAME}`) || rawTitle.startsWith(SITE_NAME);
+  const title = rawTitle
+    ? (alreadySuffixed ? rawTitle : `${rawTitle} | ${SITE_NAME}`)
+    : `${SITE_NAME} | Golf Cart Price Intelligence for Florida & Georgia`;
   const description = opts.description ?? DEFAULT_DESCRIPTION;
   const image       = opts.image ?? DEFAULT_IMAGE;
   const canonical   = opts.canonical ?? (BASE_URL + window.location.pathname);
@@ -115,16 +118,36 @@ export function setSEO(opts: SEOOptions = {}): void {
     }
   });
 
-  // Always include Organization
+  // Always include Organization — rich schema for E-E-A-T and AI citations
   schemas.push({
     "@context": "https://schema.org",
     "@type": "Organization",
     "name": SITE_NAME,
     "url": BASE_URL,
-    "logo": `${BASE_URL}/favicon.png`,
-    "description": DEFAULT_DESCRIPTION,
-    "areaServed": ["Florida", "Georgia"],
-    "serviceType": "Golf Cart Price Intelligence"
+    "logo": {
+      "@type": "ImageObject",
+      "url": `${BASE_URL}/favicon.png`,
+      "width": 512,
+      "height": 512
+    },
+    "description": "GolfCartIQ is an independent golf cart research, comparison, pricing intelligence, and lead-referral platform covering Florida and Georgia. We track 1,300+ listings from 50+ verified dealers and apply comp-based pricing analysis so buyers can compare prices, deal ratings, battery specs, warranties, and delivery costs in one place.",
+    "slogan": "Know before you buy.",
+    "areaServed": [
+      { "@type": "State", "name": "Florida", "sameAs": "https://en.wikipedia.org/wiki/Florida" },
+      { "@type": "State", "name": "Georgia", "sameAs": "https://en.wikipedia.org/wiki/Georgia_(U.S._state)" }
+    ],
+    "knowsAbout": ["Golf Carts", "Golf Cart Pricing", "Electric Vehicles", "Golf Cart Dealers", "Lithium Battery Golf Carts"],
+    "serviceType": "Golf Cart Price Intelligence Platform",
+    "contactPoint": {
+      "@type": "ContactPoint",
+      "contactType": "customer support",
+      "email": "hello@golfcartiq.com",
+      "areaServed": "US",
+      "availableLanguage": "English"
+    },
+    "sameAs": [
+      "https://twitter.com/GolfCartIQ"
+    ]
   });
 
   // Page-specific schemas
