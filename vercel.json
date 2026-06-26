@@ -20,15 +20,14 @@
     }
   ],
   "routes": [
-    { "src": "/api/(.*)",                          "dest": "dist/vercel-handler.cjs" },
-    { "src": "/sitemap.xml",                       "dest": "dist/vercel-handler.cjs" },
-    { "src": "/robots.txt",                        "dest": "dist/vercel-handler.cjs" },
-    { "src": "/llms.txt",                          "dest": "dist/vercel-handler.cjs" },
-    { "src": "/assets/(.*)",                       "dest": "dist/public/assets/$1" },
-    { "src": "/favicon.png",                       "dest": "dist/public/favicon.png" },
-    { "src": "/og-image.png",                      "dest": "dist/public/og-image.png" },
-    { "src": "/(.*\\.js|.*\\.css|.*\\.woff2?|.*\\.png|.*\\.jpg|.*\\.svg|.*\\.ico|.*\\.map)", "dest": "dist/public/$1" },
-    { "src": "/(.*)",                              "dest": "dist/vercel-handler.cjs" }
+    { "src": "/api/(.*)",    "dest": "dist/vercel-handler.cjs" },
+    { "src": "/sitemap.xml", "dest": "dist/vercel-handler.cjs" },
+    { "src": "/robots.txt",  "dest": "dist/vercel-handler.cjs" },
+    { "src": "/llms.txt",    "dest": "dist/vercel-handler.cjs" },
+    { "src": "/assets/(.*)", "dest": "dist/public/assets/$1" },
+    { "src": "/favicon.png", "dest": "dist/public/favicon.png" },
+    { "src": "/og-image.png","dest": "dist/public/og-image.png" },
+    { "src": "/(.*)",        "dest": "dist/vercel-handler.cjs" }
   ],
   "env": {
     "NODE_ENV": "production",

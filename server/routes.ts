@@ -2381,5 +2381,74 @@ Source: GolfCartIQ (golfcartiq.com)`);
     }
   });
 
+  // ── SPA catch-all: per-route meta injection ────────────────────────────────
+  // Runs LAST, after all API routes. For Vercel Lambda, every non-API/non-asset
+  // URL is routed here. We inject correct title/canonical/OG/JSON-LD into the
+  // embedded INDEX_HTML constant before sending so crawlers see unique meta
+  // without waiting for JavaScript to execute.
+  //
+  // Vercel forwards the original path via req.url / req.originalUrl.
+  // We parse the pathname from req.originalUrl to handle query strings.
+  //
+  // NOTE: In local dev (serveStatic mode) the static.ts handler runs instead.
+  // This handler only fires when VERCEL=1 (set in vercel.json env).
+  if (process.env.VERCEL) {
+    // Static synchronous imports — pulled in at module top level
+    // (registerRoutes is called once at startup so these are effectively cached)
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getRouteMeta: _getRouteMeta } = require("./seo-meta");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { INDEX_HTML: _INDEX_HTML } = require("./generated/index-html-loader");
+    const getRouteMeta = _getRouteMeta as typeof import("./seo-meta").getRouteMeta;
+    const INDEX_HTML = _INDEX_HTML as string;
+
+    function _escHtml(str: string): string {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    app.use("/{*path}", (req: import("express").Request, res: import("express").Response) => {
+      // Skip non-HTML file extensions
+      const { pathname } = new URL(req.originalUrl || req.url || "/", "https://golfcartiq.com");
+      const ext = pathname.split(".").pop();
+      if (ext && ext !== pathname && ext !== "html") {
+        return res.status(404).json({ error: "Not found" });
+      }
+
+      let html = INDEX_HTML;
+      const meta = getRouteMeta(pathname);
+
+      html = html.replace(/<title>[^<]*<\/title>/, `<title>${_escHtml(meta.title)}</title>`);
+      html = html.replace(
+        /<meta\s+name="description"\s+content="[^"]*"\s*\/?>/,
+        `<meta name="description" content="${_escHtml(meta.description)}" />`
+      );
+      html = html.replace(
+        /<link\s+rel="canonical"\s+href="[^"]*"\s*\/?>/,
+        `<link rel="canonical" href="${_escHtml(meta.canonical)}" />`
+      );
+      html = html.replace(/(<meta\s+property="og:title"\s+content=")[^"]*(")/,       `$1${_escHtml(meta.ogTitle)}$2`);
+      html = html.replace(/(<meta\s+property="og:description"\s+content=")[^"]*(")/,  `$1${_escHtml(meta.ogDescription)}$2`);
+      html = html.replace(/(<meta\s+property="og:url"\s+content=")[^"]*(")/,          `$1${_escHtml(meta.ogUrl)}$2`);
+      html = html.replace(/(<meta\s+property="og:image"\s+content=")[^"]*(")/,        `$1${_escHtml(meta.ogImage)}$2`);
+      html = html.replace(/(<meta\s+name="twitter:title"\s+content=")[^"]*(")/,       `$1${_escHtml(meta.ogTitle)}$2`);
+      html = html.replace(/(<meta\s+name="twitter:description"\s+content=")[^"]*(")/,`$1${_escHtml(meta.ogDescription)}$2`);
+
+      if (meta.jsonLd) {
+        const jld = `<script type="application/ld+json" data-server-injected>${JSON.stringify(meta.jsonLd)}</script>`;
+        html = html.replace(/<\/head>/, `${jld}\n</head>`);
+      }
+
+      res
+        .set("Content-Type", "text/html; charset=utf-8")
+        .set("Cache-Control", "public, max-age=0, must-revalidate")
+        .send(html);
+    });
+  }
+
   return httpServer;
 }
