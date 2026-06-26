@@ -131,6 +131,7 @@ const FILTER_LABELS: Record<string, (v: string) => string> = {
   brands: (v) => `Brand: ${v}`,
   seating: (v) => ({ "2": "2-Seat", "4": "4-Seat", "6": "6-Seat", "8plus": "8+ Seat" }[v] ?? v),
   powerType: (v) => ({ electric: "Electric", gas: "Gas" }[v] ?? v),
+  batteryAh: (v) => `${v}Ah`,
   minPrice: (v) => `Min $${Number(v).toLocaleString()}`,
   maxPrice: (v) => `Max $${Number(v).toLocaleString()}`,
   streetLegal: () => "Street Legal",
@@ -147,6 +148,7 @@ interface ClientFilters {
   brands?: string;        // comma-separated brand list
   seating?: string;       // "2" | "4" | "6" | "8plus"
   powerType?: string;     // "electric" | "gas"
+  batteryAh?: string;     // "105" | "150" | "160" | "260"
   minPrice?: string;
   maxPrice?: string;
   streetLegal?: string;
@@ -264,6 +266,7 @@ export default function Search() {
     if (filters.seating === "8plus" && (l.seating ?? 0) < 8) return false;
     // Power type
     if (filters.powerType && l.powerType !== filters.powerType) return false;
+    if (filters.batteryAh && l.batteryAh !== Number(filters.batteryAh)) return false;
     // Price
     const price = l.askingPrice ?? l.salePrice ?? l.regularPrice ?? 0;
     if (filters.minPrice && price < Number(filters.minPrice)) return false;
@@ -438,6 +441,33 @@ export default function Search() {
               onClick={() => filters.powerType === o.value ? clearFilter("powerType") : setFilter("powerType", o.value)}
               className={`flex-1 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
                 filters.powerType === o.value
+                  ? "bg-foreground text-background border-foreground"
+                  : "bg-background text-foreground border-border hover:bg-secondary"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Battery Capacity */}
+      <div>
+        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">Battery Capacity</label>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { label: "105Ah", value: "105" },
+            { label: "150Ah", value: "150" },
+            { label: "160Ah", value: "160" },
+            { label: "260Ah", value: "260" },
+          ].map((o) => (
+            <button
+              key={o.value}
+              onClick={() => filters.batteryAh === o.value ? clearFilter("batteryAh") : setFilter("batteryAh", o.value)}
+              className={`flex-1 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
+                filters.batteryAh === o.value
                   ? "bg-foreground text-background border-foreground"
                   : "bg-background text-foreground border-border hover:bg-secondary"
               }`}
