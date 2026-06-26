@@ -435,8 +435,13 @@ export default function Search() {
   // Chip labels for active filters (exclude zip/radius if shown together)
   const chipEntries = Object.entries(filters).filter(([k, v]) => v && k !== "q" && k !== "radius");
 
-  // ── Filter panel ──────────────────────────────────────────────────────────
-  const FilterPanel = () => (
+  // ── Filter panel ─────────────────────────────────────────────────────────
+  // IMPORTANT: defined as useMemo returning JSX, NOT as an inline component.
+  // Inline components (const Foo = () => ...) inside a parent component get a
+  // new identity on every render, causing React to unmount+remount them and
+  // destroying input focus on every keystroke.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const filterPanel = (
     <div className="space-y-5 text-sm">
 
       {/* Search keyword */}
@@ -765,7 +770,7 @@ export default function Search() {
             </SheetTrigger>
             <SheetContent side="left" className="w-72 overflow-y-auto">
               <SheetHeader><SheetTitle>Filters</SheetTitle></SheetHeader>
-              <div className="mt-4"><FilterPanel /></div>
+              <div className="mt-4">{filterPanel}</div>
             </SheetContent>
           </Sheet>
 
@@ -796,7 +801,7 @@ export default function Search() {
                 </button>
               )}
             </div>
-            <FilterPanel />
+            {filterPanel}
           </div>
         </aside>
 
