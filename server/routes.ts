@@ -384,10 +384,18 @@ Source: GolfCartIQ (golfcartiq.com)`);
       const hotDeals = applyDiversity(hotPool, 12, usedIds, 1, 2);
 
       // ── Section 2: Recently Added ─────────────────────────────────────
-      // Sort by created_at desc, prefer last 30 days, no duplicates from Hot Deals
-      const recentCandidates = [...scored].sort((a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
+      // Blend recency with jitter: score = recency_score (0–50) + jitter (0–15)
+      // so listings added within a few days of each other shuffle between visits
+      // rather than always showing the same strict top-6 by created_at.
+      const recentCandidates = [...pool]
+        .filter(l => isEligible(l) && !usedIds.has(l.id))
+        .map(l => {
+          const ageDays = (Date.now() - new Date(l.created_at).getTime()) / 86_400_000;
+          const recencyScore = Math.max(0, 50 - ageDays * 1.5); // 0–50, decays over ~33 days
+          const jitter = ((l.id * 2654435761 + seed) % 1000) / 66.7; // 0–15
+          return { ...l, _rscore: recencyScore + jitter };
+        })
+        .sort((a, b) => b._rscore - a._rscore);
       const recentlyAdded = applyDiversity(recentCandidates, 6, usedIds, 2, 2);
 
       // ── Section 3: Featured / Promoted ───────────────────────────────
@@ -398,8 +406,8 @@ Source: GolfCartIQ (golfcartiq.com)`);
       );
       const featured = applyDiversity(featuredCandidates, 3, usedIds, 1, 2);
 
-      // Clean internal score field before sending
-      const strip = (arr: any[]) => arr.map(({ _score, ...l }) => l);
+      // Clean internal score fields before sending
+      const strip = (arr: any[]) => arr.map(({ _score, _rscore, ...l }) => l);
 
       return {
         hot_deals:      normList(strip(hotDeals)),
