@@ -147,8 +147,11 @@ class SupabaseStorage implements IStorage {
   }
 
   async getHotDeals(limit = 20): Promise<Listing[]> {
-    // Hot deals: great_deal or good_deal, has price, has image, active+public
-    // Primary sort: deal_rating (great_deal first), secondary: updated_at desc
+    // Hot deals: great_deal or good_deal, has price, has image, active+public.
+    // Fetch a wide pool (4× the requested limit) then shuffle so every page
+    // load surfaces a different mix. great_deal listings get a 2× weight boost
+    // in the weighted shuffle so they stay prominent on average.
+    const pool = limit * 4;
     const { data, error } = await db()
       .from("listings")
       .select("*")
@@ -157,19 +160,34 @@ class SupabaseStorage implements IStorage {
       .in("deal_rating", ["great_deal", "good_deal"])
       .not("asking_price", "is", null)
       .not("image_url", "is", null)
-      .order("deal_rating", { ascending: true })   // great_deal < good_deal alphabetically — we re-sort below
+      .neq("image_url", "")
       .order("updated_at", { ascending: false })
-      .limit(limit * 2);  // fetch extra so we can re-sort by rating priority
+      .limit(pool);
     if (error) throw new Error(error.message);
-    const ratingOrder: Record<string, number> = { great_deal: 0, good_deal: 1 };
-    const sorted = ((data ?? []) as Listing[])
-      .sort((a, b) => {
-        const ra = ratingOrder[(a as any).deal_rating] ?? 9;
-        const rb = ratingOrder[(b as any).deal_rating] ?? 9;
-        return ra !== rb ? ra - rb : 0;
-      })
-      .slice(0, limit);
-    return sorted;
+    const candidates = (data ?? []) as Listing[];
+
+    // Weighted Fisher-Yates: great_deal entries are duplicated once so they
+    // appear roughly 2× as often, then we deduplicate after the shuffle.
+    const weighted: Listing[] = [];
+    for (const l of candidates) {
+      weighted.push(l);
+      if ((l as any).deal_rating === "great_deal") weighted.push(l);
+    }
+    // Fisher-Yates in-place shuffle
+    for (let i = weighted.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [weighted[i], weighted[j]] = [weighted[j], weighted[i]];
+    }
+    // Deduplicate by id, preserving shuffled order, then take limit
+    const seen = new Set<number>();
+    const result: Listing[] = [];
+    for (const l of weighted) {
+      if (seen.has((l as any).id)) continue;
+      seen.add((l as any).id);
+      result.push(l);
+      if (result.length >= limit) break;
+    }
+    return result;
   }
 
   async getListingById(id: number): Promise<Listing | undefined> {

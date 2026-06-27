@@ -265,13 +265,13 @@ Source: GolfCartIQ (golfcartiq.com)`);
   // ─── Homepage rotation engine ─────────────────────────────────────────────
   // GET /api/listings/homepage
   // Returns pre-scored, deduplicated section sets for the homepage.
-  // Cache refreshes every 3 hours using a time-bucketed seed so the page
-  // feels stable within a window but rotates across windows.
+  // Per-request seed ensures listings rotate on every load — no cache.
+  // Eligibility gate: active + public + price + image + good deal rating.
   // No routes, slugs, sitemaps, or canonical URLs are touched.
   {
-    interface HomepageCache { ts: number; payload: Record<string, unknown> }
-    let _hpCache: HomepageCache | null = null;
-    const HP_CACHE_TTL_MS = 3 * 60 * 60 * 1000; // 3 hours
+    // No persistent cache — Vercel lambdas don't share memory across requests
+    // anyway, so caching here only hurts rotation within the same warm instance.
+    // Each request gets its own seed → fresh shuffle every load.
 
     // ── Eligibility gate ──────────────────────────────────────────────────
     function isEligible(l: any): boolean {
@@ -346,7 +346,7 @@ Source: GolfCartIQ (golfcartiq.com)`);
       const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
 
       // Fetch candidate pool: active, public, priced, imaged
-      // Pull enough for all sections + overflow
+      // 200-row limit keeps response fast without caching
       const { data, error } = await sb
         .from("listings")
         .select("*")
@@ -358,12 +358,12 @@ Source: GolfCartIQ (golfcartiq.com)`);
         .neq("image_url", "")
         .not("deal_rating", "eq", "overpriced")
         .order("updated_at", { ascending: false })
-        .limit(500);
+        .limit(200);
       if (error) throw new Error(error.message);
       const pool: any[] = (data ?? []).filter(isEligible);
 
-      // Time-bucket seed — changes every 3 hours, stable within window
-      const seed = Math.floor(Date.now() / HP_CACHE_TTL_MS);
+      // Per-request seed — changes on every load so listings rotate freely
+      const seed = Date.now();
 
       // Score all candidates
       const scored = pool
@@ -412,21 +412,17 @@ Source: GolfCartIQ (golfcartiq.com)`);
 
     app.get("/api/listings/homepage", async (_req, res) => {
       try {
-        const now = Date.now();
-        if (!_hpCache || now - _hpCache.ts > HP_CACHE_TTL_MS) {
-          _hpCache = { ts: now, payload: await buildHomepage() };
-        }
-        res.json(_hpCache.payload);
+        res.json(await buildHomepage());
       } catch (e: any) {
         res.status(500).json({ error: e.message });
       }
     });
 
-    // Admin cache-bust: POST /api/admin/homepage-refresh
+    // Admin cache-bust: POST /api/admin/homepage-refresh (kept for API compat)
     app.post("/api/admin/homepage-refresh", requireAdmin, async (_req, res) => {
       try {
-        _hpCache = { ts: Date.now(), payload: await buildHomepage() };
-        res.json({ ok: true, generated_at: (_hpCache.payload as any).generated_at });
+        const payload = await buildHomepage();
+        res.json({ ok: true, generated_at: (payload as any).generated_at });
       } catch (e: any) {
         res.status(500).json({ error: e.message });
       }

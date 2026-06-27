@@ -46,7 +46,8 @@ export default function Home() {
   }
   const { data: homepage } = useQuery<HomepageData>({
     queryKey: ["/api/listings/homepage"],
-    staleTime: 3 * 60 * 60 * 1000, // 3-hour client cache matches server window
+    staleTime: 0,        // always re-fetch on mount so listings rotate each visit
+    refetchOnMount: true,
   });
   const hotDeals      = homepage?.hot_deals      ?? [];
   const recentlyAdded = homepage?.recently_added ?? [];

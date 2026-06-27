@@ -141,6 +141,8 @@ function DealCard({ listing }: { listing: Listing }) {
 export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
   const { data: deals = [], isLoading: dealsLoading } = useQuery<Listing[]>({
     queryKey: ["/api/listings/hot-deals"],
+    staleTime: 0,        // always re-fetch on mount so listings rotate each page visit
+    refetchOnMount: true,
   });
 
   const { data: meta } = useQuery<{ lastUpdated: string | null }>({
