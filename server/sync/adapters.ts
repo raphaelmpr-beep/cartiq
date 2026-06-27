@@ -110,13 +110,39 @@ export async function getBoteroListingUrls(flGaOnly = true): Promise<string[]> {
   );
 }
 
+/**
+ * JAX Golf Carts — sitemap URL fetcher (plain HTTP).
+ *
+ * ⚠️  golfcartsjacksonville.com uses SiteGround SG Captcha.
+ *    Plain fetch returns HTTP 202 + a JS challenge page — NOT real XML.
+ *    This function detects that case and returns [] immediately.
+ *
+ * The browser-based path lives in server/sync/browser-sync.ts (runBrowserSync).
+ * pipeline-lambda routes jax through browser-sync when browser_required=true.
+ * This function is kept as a diagnostic no-op and for forward-compat.
+ */
 export async function getJaxListingUrls(): Promise<string[]> {
-  const res = await fetch('https://golfcartsjacksonville.com/auto-listing-sitemap.xml', {
-    headers: { 'User-Agent': 'CartIQ-Sync/1.0' },
-  });
-  const xml = await res.text();
-  const matches = [...xml.matchAll(/<loc>(https:\/\/golfcartsjacksonville\.com\/listing\/[^<]+)<\/loc>/g)];
-  return matches.map(m => m[1].trim());
+  try {
+    const res = await fetch('https://golfcartsjacksonville.com/auto-listing-sitemap.xml', {
+      headers: { 'User-Agent': 'CartIQ-Sync/1.0' },
+      signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
+    });
+    // SG Captcha returns 202 + HTML challenge — not real XML
+    if (res.status === 202 || res.status === 403) {
+      console.warn('[JAX] Sitemap blocked by SiteGround SG Captcha (status=' + res.status + '). Use runBrowserSync() instead.');
+      return [];
+    }
+    const xml = await res.text();
+    // Safety check: if we got HTML instead of XML, bail out
+    if (xml.trim().startsWith('<html') || xml.trim().startsWith('<!DOCTYPE')) {
+      console.warn('[JAX] Sitemap returned HTML (likely SG Captcha challenge). Use runBrowserSync() instead.');
+      return [];
+    }
+    const matches = [...xml.matchAll(/<loc>(https:\/\/golfcartsjacksonville\.com\/listing\/[^<]+)<\/loc>/g)];
+    return matches.map(m => m[1].trim());
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -344,51 +370,151 @@ export async function parseBoteroListing(
 
 /**
  * Parse a JAX Golf Carts listing page.
+ *
+ * DOM confirmed via browser audit (June 2026):
+ *   - Title: first <h2> on page (listing title, not site title)
+ *   - Price: .woocommerce-Price-amount inside summary/sidebar h2
+ *   - Specs: #tab-details table th/td rows (Price, Miles, Color, Body, Condition)
+ *   - Images: direct <img src> via Optimole CDN (no data-src / lazy)
+ *            selector: .woocommerce-product-gallery img, .product-gallery img
+ *            URL contains /wp-content/ after CDN prefix
+ *   - Phone: <a href="tel:...">
+ *   - Condition badge: span containing "New Vehicle" / "Used" near .product_meta
  */
 export async function parseJaxListing(
   page: import('playwright').Page,
   url: string
 ): Promise<ListingData> {
-  await page.goto(url, { waitUntil: 'networkidle', timeout: 25000 });
-  await page.waitForTimeout(2000);
+  // waitUntil: domcontentloaded is faster and sufficient; SG Captcha resolves
+  // before networkidle but domcontentloaded is enough for the gallery to render.
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+  await page.waitForTimeout(2500); // allow Optimole CDN images to populate src
 
   const data = await page.evaluate(() => {
-    const title = document.querySelector('h1')?.textContent?.trim() || null;
+    // ── Title ────────────────────────────────────────────────────────────────
+    // JAX uses <h2> for listing title (not <h1> — confirmed in DOM audit)
+    const titleEl =
+      document.querySelector('h1.product_title') ||
+      document.querySelector('h1.entry-title') ||
+      document.querySelector('h2.product_title') ||
+      // fallback: first h2 that isn't in header/nav
+      [...document.querySelectorAll('h2')].find(el => {
+        const text = el.textContent?.trim() || '';
+        // must look like "2026 E-Z-GO ..." (year or brand at start)
+        return /^(20\d{2}|19\d{2}|E-Z-GO|Club Car|Yamaha|ICON|Bintelli|EZGO)/i.test(text);
+      }) ||
+      document.querySelector('h1');
+    const title = titleEl?.textContent?.trim() || null;
 
+    // ── Price ────────────────────────────────────────────────────────────────
+    // WooCommerce standard: .woocommerce-Price-amount wraps currency + number
+    // JAX confirmed: sidebar h2 contains span.woocommerce-Price-amount
     const priceEl =
-      document.querySelector('.price ins .amount') ||
-      document.querySelector('.price .amount') ||
-      document.querySelector('.woocommerce-Price-amount') ||
-      document.querySelector('[class*="price"]');
+      document.querySelector('.summary .woocommerce-Price-amount') ||
+      document.querySelector('.price .woocommerce-Price-amount') ||
+      document.querySelector('h2 .woocommerce-Price-amount') ||
+      document.querySelector('.woocommerce-Price-amount');
     const rawPrice = priceEl?.textContent?.replace(/[^0-9.]/g, '') || null;
 
+    // ── Specs table ──────────────────────────────────────────────────────────
+    // Confirmed: #tab-details table with <th> labels and <td> values
+    // Also check #tab-specifications for additional fields
     const specs: Record<string, string> = {};
-    document.querySelectorAll('.vehicle-details li, .specs-table tr, .listing-details li').forEach(el => {
-      const text = el.textContent || '';
-      const [k, ...rest] = text.split(':');
-      if (k && rest.length) specs[k.trim()] = rest.join(':').trim();
+    const specsTables = document.querySelectorAll(
+      '#tab-details table tr, #tab-specifications table tr, .woocommerce-tabs table tr'
+    );
+    specsTables.forEach(row => {
+      const th = row.querySelector('th')?.textContent?.trim();
+      const td = row.querySelector('td')?.textContent?.trim();
+      if (th && td && td !== '$') {
+        specs[th] = td;
+      }
     });
 
+    // ── Condition ────────────────────────────────────────────────────────────
+    // From specs table "Condition" row, or from product_meta span
+    const conditionRaw =
+      specs['Condition'] ||
+      document.querySelector('.product_meta .condition, [class*="condition"]')?.textContent?.trim() ||
+      // "New Vehicle" badge near the price
+      [...document.querySelectorAll('.summary span, .product_meta span')]
+        .find(el => /new vehicle|used vehicle|refurbished/i.test(el.textContent || ''))
+        ?.textContent?.trim() ||
+      null;
+
+    // ── Images ───────────────────────────────────────────────────────────────
+    // Confirmed: images served via Optimole CDN with direct src (no lazy attrs)
+    // Original wp-content URL is embedded after the CDN path
+    // e.g. https://mlp6k...optimole.com/cb:.../https://golfcartsjacksonville.com/wp-content/...
     const imgEls = document.querySelectorAll(
-      '.wp-post-image, .vehicle-gallery img, .woocommerce-product-gallery img, figure img, .slider img'
+      '.woocommerce-product-gallery img, ' +
+      '.product-gallery img, ' +
+      '.flex-viewport img, ' +
+      '.woocommerce-product-gallery__image img, ' +
+      'figure.woocommerce-product-gallery__wrapper img'
     );
     const images = [...imgEls]
-      .map(img => (img as HTMLImageElement).src || (img as HTMLImageElement).dataset.lazySrc || '')
-      .filter(src => src.startsWith('http') && src.includes('wp-content'))
+      .map(img => {
+        const el = img as HTMLImageElement;
+        return el.src || el.dataset.src || el.dataset.lazySrc || '';
+      })
+      .filter(src => src.startsWith('http'))
+      // Accept both Optimole CDN URLs and direct wp-content URLs
+      .filter(src => src.includes('optimole.com') || src.includes('wp-content/uploads'))
+      // Drop placeholder / logo images
+      .filter(src => !src.includes('placeholder') && !src.includes('cropped-Artboard'))
       .filter((v, i, a) => a.indexOf(v) === i);
 
-    const locationEl = document.querySelector('.dealer-location, .location, address')?.textContent?.trim() || null;
+    // ── Battery (from description or specs) ──────────────────────────────────
+    // JAX uses description text e.g. "2.2 Samsung Lithium Battery w/ 8 Year Warranty"
+    const descText = document.querySelector(
+      '.woocommerce-product-details__short-description, .product-short-description, .entry-content'
+    )?.textContent || '';
+    const batteryMatch = descText.match(/(\d+(?:\.\d+)?\s*(?:kwh|kWh|ah|Ah|amp)[\w\s]*(?:lithium|lead|agm|gel)?[\w\s]*battery[^.]*)/i);
+    const battery = batteryMatch
+      ? batteryMatch[1].replace(/\s+/g, ' ').trim()
+      : (specs['Battery'] || specs['Power'] || null);
 
-    return { title, rawPrice, specs, images, location: locationEl };
+    // ── Seating (from Body field or specs) ───────────────────────────────────
+    const seatingRaw =
+      specs['Body'] ||
+      specs['Seating'] ||
+      specs['Passengers'] ||
+      null;
+
+    // ── Location ─────────────────────────────────────────────────────────────
+    const locationEl =
+      document.querySelector('address, .dealer-location, .store-address, footer address') ||
+      null;
+    const location = locationEl?.textContent?.trim() || null;
+
+    return { title, rawPrice, specs, images, location, conditionRaw, battery, seatingRaw, descText };
   });
 
-  const parsed = normalizeListing(data, url, 'jax');
+  // ── Normalize ─────────────────────────────────────────────────────────────
+  const parsed = normalizeListing(
+    {
+      ...data,
+      condition: data.conditionRaw,
+      seating: data.seatingRaw,
+    },
+    url,
+    'jax-golf-carts-jacksonville'  // use full dealer slug for DB consistency
+  );
+
+  // ── Year / Make / Model fallback from title slug ───────────────────────────
   if (!parsed.year || !parsed.make) {
     const fromTitle = parseYearMakeModelFromTitle(data.title || '');
     parsed.year = parsed.year || fromTitle.year;
     parsed.make = parsed.make || fromTitle.make;
     parsed.model = parsed.model || fromTitle.model;
   }
+
+  // ── Battery type from description ─────────────────────────────────────────
+  if (data.battery && !parsed.battery_type) {
+    parsed.battery_type = data.battery;
+  }
+
   return parsed;
 }
 

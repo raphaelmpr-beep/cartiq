@@ -17,6 +17,7 @@ import {
   isNavPage,
   cleanHtmlWhitespace,
 } from './adapters.js';
+import { runBrowserSync } from './browser-sync.js';
 
 function getSupabase() {
   return createClient(
@@ -519,11 +520,41 @@ async function runDiscoverSitemap(
   const adapterKey = dealer.adapter_key;
   const strategy   = dealer.discovery_strategy;
 
-  // ── Requires browser — cannot run serverless ─────────────────────────────
+  // ── Requires browser — route through browser-sync.ts ───────────────────────
+  // Some dealers (e.g. JAX) use SiteGround SG Captcha or similar bot-protection
+  // that blocks plain HTTP fetch. browser-sync.ts uses Playwright to bypass it.
   if (dealer.browser_required) {
-    const msg = `[${slug}] Needs browser (${adapterKey || strategy || 'no adapter'}) — schedule via cron on pplx.app`;
-    result.summary.push(msg);
-    await writeDiscoveryStatus(supabase, slug, 'needs_browser', msg);
+    const browserSyncDealers = ['jax-golf-carts-jacksonville'];
+    if (browserSyncDealers.includes(slug)) {
+      try {
+        const bsResult = await runBrowserSync({
+          dealer: slug,
+          limit,
+          dry_run,
+          verbose: true,
+        });
+        result.new_queued    += bsResult.new_queued;
+        result.already_known += bsResult.already_known;
+        result.processed     += bsResult.discovered;
+        if (bsResult.parse_errors > 0 || bsResult.db_errors > 0) result.errors++;
+        bsResult.summary.forEach(s => result.summary.push(s));
+        await writeDiscoveryStatus(
+          supabase, slug,
+          bsResult.new_queued > 0 ? 'ok' : 'no_new',
+          bsResult.summary[bsResult.summary.length - 1] || 'Browser sync complete'
+        );
+      } catch (e: any) {
+        const msg = `[${slug}] Browser sync error: ${e.message}`;
+        result.errors++;
+        result.summary.push(msg);
+        await writeDiscoveryStatus(supabase, slug, 'error', msg);
+      }
+    } else {
+      // Dealer needs browser but has no browser-sync adapter yet
+      const msg = `[${slug}] Needs browser (${adapterKey || strategy || 'no adapter'}) — add to BROWSER_SYNC_DEALERS in browser-sync.ts`;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, 'needs_browser', msg);
+    }
     return;
   }
 

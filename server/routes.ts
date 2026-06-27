@@ -1184,6 +1184,46 @@ Source: GolfCartIQ (golfcartiq.com)`);
     }
   });
 
+  /**
+   * POST /api/admin/sync-browser
+   * Trigger a Playwright-based browser sync for dealers protected by bot-detection
+   * (SiteGround SG Captcha, Cloudflare JS Challenge, etc.).
+   *
+   * Body: { dealer: string, limit?: number, dry_run?: boolean }
+   *
+   * Currently supports: jax-golf-carts-jacksonville
+   * To add a dealer: register it in BROWSER_SYNC_DEALERS in server/sync/browser-sync.ts
+   * and set browser_required=true on its dealers row.
+   */
+  app.post("/api/admin/sync-browser", requireAdmin, async (req, res) => {
+    try {
+      const { runBrowserSync } = await import("./sync/browser-sync.js");
+      const dealer  = (req.body.dealer  as string  || "").trim();
+      const limit   = parseInt(req.body.limit)  || 0;
+      const dry_run = req.body.dry_run === true;
+
+      if (!dealer) {
+        return res.status(400).json({ error: "dealer slug is required" });
+      }
+
+      const result = await runBrowserSync({ dealer, limit, dry_run, verbose: true });
+      res.json({
+        ok: true,
+        dealer,
+        discovered:   result.discovered,
+        new_queued:   result.new_queued,
+        already_known: result.already_known,
+        parse_errors: result.parse_errors,
+        db_errors:    result.db_errors,
+        duration_ms:  result.duration_ms,
+        summary:      result.summary,
+        dry_run,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GET /api/admin/pending-imports — list queued listings awaiting review
   app.get("/api/admin/pending-imports", requireAdmin, async (req, res) => {
     try {
