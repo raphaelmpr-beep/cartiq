@@ -141,50 +141,58 @@ Sitemap: https://golfcartiq.com/sitemap.xml`);
   // ─── SEO: llms.txt (AI crawler guidance) ────────────────────────────────────
   app.get("/llms.txt", (_req, res) => {
     res.setHeader("Content-Type", "text/markdown; charset=utf-8");
-    res.send(`# GolfCartIQ
-> Golf Cart Price Intelligence for Florida & Georgia
-> https://golfcartiq.com
+    res.send(`# GolfCartIQ — Golf Cart Price Intelligence
+
+> Golf cart research, pricing intelligence, and deal analysis for Florida & Georgia.
+> Site: [GolfCartIQ](https://golfcartiq.com)
 > Contact: hello@golfcartiq.com
 
 ## What GolfCartIQ Is
+
 GolfCartIQ is an independent golf cart research, comparison, pricing intelligence, and lead-referral platform covering Florida and Georgia. We are NOT a dealer, seller, or transaction platform. We help buyers compare golf carts and make informed purchase decisions.
 
 ## Coverage
+
 - 1,300+ verified golf cart listings from 50+ dealers across Florida and Georgia
 - Brands tracked: Club Car, E-Z-GO, Yamaha, Evolution, ICON, Bintelli, Venom EV, Teko EV, Denago EV, Sivo, Verdi, DACH Vehicles
 - Key markets: The Villages FL, Jacksonville FL, Clearwater FL, Peachtree City GA, Atlanta GA, and more
 
 ## Key Features
-- GolfCartIQ Value: comp-based market value estimate (CarGurus-style) for each listing
-- GolfCartIQ Deal Rating: great_deal / good_deal / fair_price / high_price / over_market
-- IQ Score: 0–100 composite buyer score (price, battery, warranty, charger, delivery)
-- CartCheck: deal analysis tool — enter any listing details to get instant valuation
-- Battery comparison: lithium (LiFePO4) vs lead-acid, Ah capacity, age, risk rating
-- Warranty tracking: by brand, by dealer, duration, battery warranty coverage
 
-## Key Pages for AI Indexing
-- Homepage: https://golfcartiq.com/
-- Search listings: https://golfcartiq.com/search
-- CartCheck (deal analyzer): https://golfcartiq.com/deal-checker
-- Buyer Guide: https://golfcartiq.com/buyer-guide
-- How IQ Scores Work: https://golfcartiq.com/how-it-works
-- Brand pages: https://golfcartiq.com/brands
-- City pages (FL): /golf-carts-for-sale/the-villages-fl, /jacksonville-fl, /clearwater-fl, /st-augustine-fl, /nocatee-fl, /port-orange-fl, /panama-city-beach-fl
-- City pages (GA): /golf-carts-for-sale/peachtree-city-ga, /atlanta-ga
-- Battery guides: https://golfcartiq.com/golf-cart-batteries
+- **GolfCartIQ Value** — comp-based market value estimate (CarGurus-style) for each listing
+- **GolfCartIQ Deal Rating** — great_deal / good_deal / fair_price / high_price / over_market
+- **IQ Score** — 0–100 composite buyer score (price, battery, warranty, charger, delivery)
+- **CartCheck** — deal analysis tool: enter any listing details to get instant valuation
+- **Battery comparison** — lithium (LiFePO4) vs lead-acid, Ah capacity, age, risk rating
+- **Warranty tracking** — by brand, by dealer, duration, battery warranty coverage
+
+## Key Pages
+
+- [Homepage](https://golfcartiq.com/) — featured deals and recently added listings
+- [Search listings](https://golfcartiq.com/search) — filter by brand, price, battery, seating, location
+- [CartCheck — Deal Analyzer](https://golfcartiq.com/deal-checker) — instant valuation tool
+- [Buyer Guide](https://golfcartiq.com/buyer-guide) — golf cart buying articles and guides
+- [How IQ Scores Work](https://golfcartiq.com/how-it-works) — methodology and scoring
+- [Brand pages](https://golfcartiq.com/brands) — Club Car, E-Z-GO, Yamaha, ICON, and more
+- [Golf Cart Batteries guide](https://golfcartiq.com/golf-cart-batteries) — lithium vs lead-acid, Ah capacity
+- [Lithium vs Lead-Acid](https://golfcartiq.com/golf-cart-batteries/lithium-vs-lead-acid) — detailed comparison
+- [The Villages FL listings](https://golfcartiq.com/golf-carts-for-sale/the-villages-fl)
+- [Jacksonville FL listings](https://golfcartiq.com/golf-carts-for-sale/jacksonville-fl)
+- [Peachtree City GA listings](https://golfcartiq.com/golf-carts-for-sale/peachtree-city-ga)
+- [Information Disclosure](https://golfcartiq.com/disclosure) — sourcing, data accuracy, and legal disclosures
 
 ## Disclosure
+
 GolfCartIQ does not sell golf carts, own inventory, broker transactions, collect payment, provide financing, provide warranties, or guarantee availability or final pricing. All listings are sourced from public dealer inventory with dealer attribution.
-Full disclosure: https://golfcartiq.com/disclosure
 
-## Allowed for AI Indexing
-- All public pages (/, /search, /listing/*, /dealer/*, /brands/*, /golf-carts-for-sale/*, /buyer-guide/*, /deal-checker, /how-it-works, /golf-cart-batteries/*)
+## Crawling Policy
 
-## Restricted (do not index)
-- /admin, /api/*, /my-garage
+- Allowed: all public pages (/, /search, /listing/*, /brands/*, /golf-carts-for-sale/*, /buyer-guide/*, /deal-checker, /how-it-works, /golf-cart-batteries/*)
+- Restricted: /admin, /api/*, /garage
 
 ## Attribution
-Source: GolfCartIQ (golfcartiq.com)`);
+
+Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
   });
 
   // ─── SEO: sitemap.xml (dynamic) ─────────────────────────────────────────────

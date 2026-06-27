@@ -49,7 +49,7 @@ function LastRefreshedLabel({ lastUpdated }: { lastUpdated?: string | null }) {
 }
 
 // ── Deal Card ─────────────────────────────────────────────────────────────────
-function DealCard({ listing }: { listing: Listing }) {
+function DealCard({ listing, priority = false }: { listing: Listing; priority?: boolean }) {
   const price = listing.salePrice ?? listing.askingPrice ?? listing.regularPrice;
   const marketVal = listing.cartiqEstimatedValue;
   const savings = marketVal && price ? marketVal - price : null;
@@ -69,8 +69,9 @@ function DealCard({ listing }: { listing: Listing }) {
             src={listing.imageUrl}
             alt={listing.title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            loading="lazy"
-            decoding="async"
+            loading={priority ? "eager" : "lazy"}
+            decoding={priority ? "sync" : "async"}
+            fetchPriority={priority ? "high" : "auto"}
             width={400}
             height={300}
             onError={(e) => {
@@ -259,9 +260,9 @@ export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
         className="flex gap-3 overflow-x-auto pb-2 scroll-smooth"
         style={{ scrollSnapType: "x mandatory", scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
-        {deals.map((listing) => (
+        {deals.map((listing, index) => (
           <div key={listing.id} style={{ scrollSnapAlign: "start" }}>
-            <DealCard listing={listing} />
+            <DealCard listing={listing} priority={index === 0} />
           </div>
         ))}
       </div>

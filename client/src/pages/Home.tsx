@@ -251,8 +251,10 @@ export default function Home() {
         </div>
       </section>
       {/* ─── Buyer Guide Cards ────────────────────────────────────────────────── */}
-      {guideCards.length > 0 && (
-        <section className="bg-white border-b border-border">
+      {/* min-h reserves space for 3-card grid while /api/buyer-guide resolves (~1.7s).
+          Prevents the late-arriving cards from shifting all content below them (CLS). */}
+      <section className="bg-white border-b border-border" style={{ minHeight: guideCards.length > 0 ? undefined : "19rem" }}>
+        {guideCards.length > 0 ? (
           <div className="max-w-7xl mx-auto px-4 py-10">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold">Learn Before You Buy</h2>
@@ -280,8 +282,22 @@ export default function Home() {
               ))}
             </div>
           </div>
-        </section>
-      )}
+        ) : (
+          /* Skeleton — 3 placeholder cards so layout doesn't shift */
+          <div className="max-w-7xl mx-auto px-4 py-10">
+            <div className="h-7 w-48 bg-muted rounded animate-pulse mb-6" />
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {[0,1,2].map(i => (
+                <div key={i} className="p-5 rounded-xl border border-border bg-gray-50 space-y-2">
+                  <div className="h-4 bg-muted rounded animate-pulse w-3/4" />
+                  <div className="h-3 bg-muted rounded animate-pulse w-full" />
+                  <div className="h-3 bg-muted rounded animate-pulse w-2/3" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
 
       {/* ─── Popular Buyer Guides ───────────────────────────────────────── */}
