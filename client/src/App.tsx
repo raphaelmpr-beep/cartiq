@@ -114,6 +114,7 @@ function AppRoutes() {
           <div className="border-t border-border pt-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
             <p>© {new Date().getFullYear()} GolfCartIQ · GolfCartIQ is a research, comparison, and lead-referral platform. We do not sell golf carts or complete transactions. Buyers should confirm all details directly with the dealer or seller.</p>
             <a href="/#/disclosure" className="hover:text-foreground underline whitespace-nowrap">Information Disclosure</a>
+            <a href="/#/admin" className="text-muted-foreground/40 hover:text-muted-foreground transition-colors whitespace-nowrap">Admin</a>
           </div>
         </div>
       </footer>

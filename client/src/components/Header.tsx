@@ -128,11 +128,7 @@ export function Header() {
         {/* Desktop right */}
         <div className="hidden md:flex items-center gap-2">
           <LocationButton />
-          <Link href="/admin">
-            <a>
-              <Button variant="outline" size="sm" data-testid="admin-login-btn">Admin</Button>
-            </a>
-          </Link>
+
           <Link href="/search">
             <a>
               <Button size="sm" className="gap-1.5" data-testid="header-search-btn">
@@ -168,11 +164,7 @@ export function Header() {
                   </a>
                 </Link>
               ))}
-              <Link href="/admin">
-                <a onClick={() => setMobileOpen(false)} className="block px-3 py-3 rounded-md text-sm font-medium text-muted-foreground hover:bg-secondary">
-                  Admin Portal
-                </a>
-              </Link>
+
             </nav>
           </SheetContent>
         </Sheet>
