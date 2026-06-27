@@ -983,7 +983,15 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
     deal_rating: 'unknown',           // always unknown on import — verify comps first
     valuation_confidence: 'low',      // always low on import — set via admin after review
     status: 'active',
-    public_listing: true,
+    // Quality gate: only go public if there is a real contact path.
+    // dealer_id is set above from the dealer slug lookup; source URL must
+    // be a product page, not a raw image file.
+    public_listing: (() => {
+      const IMAGE_EXT = /\.(jpg|jpeg|png|webp|gif|svg|avif)(\?|$)/i;
+      if (dealerId) return true;
+      if (imp.source_url && !IMAGE_EXT.test(imp.source_url)) return true;
+      return false;
+    })(),
     seller_type: 'dealer',
     ...(enrichment.seating != null ? { seating: enrichment.seating } : {}),
     ...(enrichment.power_type != null ? { power_type: enrichment.power_type } : {}),

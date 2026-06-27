@@ -1,6 +1,7 @@
 import { parse } from "csv-parse/sync";
 
 const VALID_STATES_PUBLIC = ["FL", "GA"];
+const IMAGE_URL_PATTERN = /\.(jpg|jpeg|png|webp|gif|svg|avif)(\?|$)/i;
 const VALID_BATTERY_TYPES = ["lithium", "lead_acid", "gas", "unknown"];
 const VALID_SOURCE_TYPES = [
   "dealer_direct", "private_direct", "admin_manual", "buyer_submitted",
@@ -124,6 +125,15 @@ export function parseCsv(csvText: string): CsvValidationResult {
       rowErrors.push({ row: rowNum, field: "delivery_cost", message: "Delivery cost must be a number." });
     }
 
+    // Source URL must not be a raw image file
+    if (row.source_url && IMAGE_URL_PATTERN.test(row.source_url)) {
+      rowErrors.push({
+        row: rowNum,
+        field: "source_url",
+        message: `source_url appears to be an image file URL, not a product page. Provide the dealer product page URL instead.`,
+      });
+    }
+
     // Source type validation
     if (row.source_type && !VALID_SOURCE_TYPES.includes(row.source_type)) {
       rowErrors.push({
@@ -143,15 +153,39 @@ export function parseCsv(csvText: string): CsvValidationResult {
   return { valid, errors };
 }
 
+// ── Public listing quality gate ─────────────────────────────────────────────
+// A listing may only be public if it has at least one contact path:
+// a dealer_name/seller_name, a source URL that is a real product page
+// (not a raw image file), or an explicit dealer identifier.
+// This prevents incomplete imports from surfacing to end users.
+export function canBePublic(opts: {
+  dealerName?: string | null;
+  sellerName?: string | null;
+  sourceUrl?: string | null;
+  dealerId?: number | null;
+}): boolean {
+  if (opts.dealerId) return true;
+  if (opts.dealerName?.trim()) return true;
+  if (opts.sellerName?.trim()) return true;
+  // Source URL must exist and must NOT be a raw image file
+  if (opts.sourceUrl?.trim() && !IMAGE_URL_PATTERN.test(opts.sourceUrl)) return true;
+  return false;
+}
+
 export function csvRowToListing(row: CsvRow, idx: number): Record<string, unknown> {
   const baseSlug = slugify(`${row.brand || "cart"}-${row.model || "listing"}-${row.city || "fl"}-${idx}`);
+  const isPublic = canBePublic({
+    dealerName: row.dealer_name,
+    sellerName: null, // CSV doesn't have a raw seller_name field
+    sourceUrl: row.source_url,
+  });
   return {
     title: row.title || `${row.year || ""} ${row.brand || ""} ${row.model || ""}`.trim() || "Golf Cart",
     slug: `${baseSlug}-${Date.now()}-${idx}`,
     description: row.description || null,
     sourceType: row.source_type || "dealer_csv",
     sourceUrl: row.source_url || null,
-    publicListing: true,
+    publicListing: isPublic,
     sellerType: row.seller_type || "private",
     status: "active",
     retailerName: row.retailer_name || null,

@@ -1248,7 +1248,14 @@ Source: GolfCartIQ (golfcartiq.com)`);
       sync_source:        imp.dealer_slug ?? null,
       seller_type:        "dealer",
       status:             "active",
-      public_listing:     true,
+      // Quality gate: only go public if there is a real contact path.
+      // dealer_id set below from slug lookup; source URL must be a product page.
+      public_listing: (() => {
+        const IMAGE_EXT = /\.(jpg|jpeg|png|webp|gif|svg|avif)(\?|$)/i;
+        if (imp.dealer_id) return true;
+        if (imp.source_url && !IMAGE_EXT.test(imp.source_url)) return true;
+        return false;
+      })(),
       price_confidence:   imp.price ? "confirmed" : "unavailable",
       deal_rating:        "unknown",
       valuation_confidence: "low",
