@@ -46,16 +46,37 @@
       dynamically per-page so there is never a duplicate or stale schema.
       Google will always see the correct per-page @graph.
     -->
-    <!-- Google Analytics 4 — G-6BXPEYSEB5 -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BXPEYSEB5"></script>
+
+    <!-- Google Analytics 4 — deferred until first user interaction
+         Defines gtag() stub immediately so early events queue correctly.
+         The heavy GTM script (155 KiB) only loads after click/scroll/touch,
+         keeping it off the critical path for FCP and LCP. -->
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
       gtag('js', new Date());
       gtag('config', 'G-6BXPEYSEB5');
+
+      // Lazy-load the GTM script after first user interaction
+      (function() {
+        var loaded = false;
+        function loadGA() {
+          if (loaded) return;
+          loaded = true;
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://www.googletagmanager.com/gtag/js?id=G-6BXPEYSEB5';
+          document.head.appendChild(s);
+        }
+        ['click','scroll','touchstart','keydown'].forEach(function(evt) {
+          window.addEventListener(evt, loadGA, { once: true, passive: true });
+        });
+        // Fallback: load after 5s even if no interaction (covers bots / PSI)
+        setTimeout(loadGA, 5000);
+      })();
     </script>
-    <script type="module" crossorigin src="/assets/index-by9gY8qV.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DVKfNRwQ.css">
+    <script type="module" crossorigin src="/assets/index-CVaqTZKg.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-ZQzeFv1x.css">
   </head>
   <body>
     <div id="root"></div>
