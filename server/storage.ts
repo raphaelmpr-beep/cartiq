@@ -296,7 +296,7 @@ class SupabaseStorage implements IStorage {
 
   async getDealers(): Promise<Dealer[]> {
     const { data } = await db().from("dealers").select("*").order("name");
-    return (data ?? []) as Dealer[];
+    return ((data ?? []) as Dealer[]).filter(d => !d.slug?.startsWith("__"));
   }
 
   async getDealerById(id: number): Promise<Dealer | undefined> {

@@ -632,6 +632,15 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
     }
   });
 
+  app.get("/api/listings/all", async (_req, res) => {
+    try {
+      const listings = await storage.getListings({ status: "active", public_listing: true, limit: 500 });
+      res.json(normList(listings.map(suppressDeliveryIfUnavailable)));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/listings/:id", async (req, res) => {
     try {
       // Use strict numeric check — parseInt("2027-some-slug") = 2027 which is wrong.

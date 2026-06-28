@@ -51,6 +51,7 @@ const SORT_OPTIONS = [
   { label: "Warranty Included", value: "warranty" },
 ];
 const RADIUS_OPTIONS = [
+  { label: "Any distance", value: "any" },
   { label: "10 miles", value: "10" },
   { label: "25 miles", value: "25" },
   { label: "50 miles", value: "50" },
@@ -282,8 +283,8 @@ export default function Search() {
       const saved = getSavedLocation();
       if (saved?.zip) {
         init.zip = saved.zip;
-        // Default radius to 25 miles if none set
-        if (!init.radius) init.radius = "25";
+        // Leave radius unset (Any) by default — user can narrow from there
+        // if (!init.radius) init.radius = "25";
         // Pre-populate zipCoords from saved location
         setZipCoords([saved.lat, saved.lng]);
       }
@@ -522,8 +523,8 @@ export default function Search() {
         </div>
         {zipError && <p className="text-xs text-destructive mb-2">{zipError}</p>}
         <Select
-          value={filters.radius ?? ""}
-          onValueChange={(v) => v ? setFilter("radius", v) : clearFilter("radius")}
+          value={filters.radius ?? "any"}
+          onValueChange={(v) => { if (v && v !== "any") setFilter("radius", v); else clearFilter("radius"); }}
         >
           <SelectTrigger className="text-sm w-full">
             <SelectValue placeholder="Select radius" />
