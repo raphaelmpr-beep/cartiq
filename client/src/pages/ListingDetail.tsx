@@ -60,14 +60,22 @@ export default function ListingDetail() {
     retry: false,
   });
 
-  // SEO — injected once listing loads
+  // SEO — injected once listing loads.
+  // Any lifecycle state other than "active" is marked noindex so Google drops
+  // the URL from its index even if the page is still reachable via an inbound
+  // link. Sitemap already excludes these; the tag is defense-in-depth.
   useEffect(() => {
     if (!listing) return;
+    const INDEXABLE_STATUSES = new Set(["active"]);
+    const isIndexable =
+      INDEXABLE_STATUSES.has(String(listing.status ?? "active")) &&
+      listing.publicListing !== false;
     setSEO({
       title: listing.title,
       description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"} — GolfCartIQ GolfCartIQ Deal Rating: ${listing.dealRating ?? "unknown"}.`,
       image: listing.imageUrl ?? undefined,
       canonical: `https://golfcartiq.com/listing/${listing.slug ?? listing.id}`,
+      noindex: !isIndexable,
       jsonLd: [
         listingToProductSchema(listing),
         breadcrumbSchema([
@@ -102,6 +110,46 @@ export default function ListingDetail() {
   }
 
   const effectivePrice = listing.salePrice ?? listing.askingPrice ?? listing.regularPrice;
+
+  // ── SEO summary paragraph ───────────────────────────────────────────────
+  // Short, unique block using available data (dealer, city/market, make/model/year,
+  // seating, battery/fuel type, condition, nearby market context). Rendered
+  // inline so Google sees it in the initial HTML. Used only when at least one
+  // meaningful attribute exists — matches the sitemap eligibility gate.
+  const seoSummary: string = (() => {
+    const parts: string[] = [];
+    const ymm = [listing.year, listing.brand, listing.model].filter(Boolean).join(" ");
+    const geo = [listing.city, listing.state].filter(Boolean).join(", ");
+    const dealerName = dealer?.name ?? listing.sellerName;
+
+    if (ymm && geo) parts.push(`${ymm} for sale in ${geo}.`);
+    else if (ymm)   parts.push(`${ymm} available.`);
+    else if (geo)   parts.push(`Golf cart for sale in ${geo}.`);
+
+    if (dealerName && listing.sellerType === "dealer") {
+      parts.push(`Listed by ${dealerName}.`);
+    } else if (listing.sellerType === "private") {
+      parts.push("Private-seller listing.");
+    } else if (listing.sellerType === "retail" && listing.retailerName) {
+      parts.push(`Retail listing from ${listing.retailerName}.`);
+    }
+
+    const specs: string[] = [];
+    if (listing.seating)     specs.push(`${listing.seating}-passenger`);
+    if (listing.batteryType && listing.batteryType !== "unknown") {
+      specs.push(batteryTypeLabel(listing.batteryType));
+    } else if (listing.powerType && listing.powerType !== "unknown") {
+      specs.push(listing.powerType);
+    }
+    if (listing.batteryAh) specs.push(`${listing.batteryAh}Ah`);
+    if (listing.condition && listing.condition !== "unknown") specs.push(listing.condition);
+    if (specs.length) parts.push(`${specs.join(" · ")}.`);
+
+    if (listing.city && listing.state) {
+      parts.push(`Serving the ${listing.city}, ${listing.state} golf cart market.`);
+    }
+    return parts.join(" ");
+  })();
 
   // Generate questions and red flags from listing data
   const questions: string[] = [];
@@ -163,6 +211,9 @@ export default function ListingDetail() {
             <div>
               <h1 className="text-xl font-bold leading-snug">{listing.title}</h1>
               <p className="text-sm text-muted-foreground mt-1">{listing.city}{listing.city && listing.state ? ", " : ""}{listing.state}</p>
+              {seoSummary && (
+                <p className="text-sm text-foreground/80 mt-2 leading-relaxed">{seoSummary}</p>
+              )}
               {listing.brand && (() => {
                 const wiki = getBrandWikiByDbName(listing.brand);
                 return wiki ? (

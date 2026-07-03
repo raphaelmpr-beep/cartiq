@@ -136,17 +136,24 @@ export default function CityPage() {
           ))}
         </div>
 
-        {/* Listings */}
+        {/* Listings — direct links to /listing/{slug} for Google to crawl */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-bold text-base">
-              {loading ? "Loading listings…" : `${listings.length} Listings Near ${cfg.city}`}
+              {loading
+                ? "Loading listings…"
+                : `Available Golf Carts Near ${cfg.city}`}
             </h2>
             <a href={`/#/search?${qs}`}
               className="text-xs text-green-700 hover:underline flex items-center gap-1">
               See all <ChevronRight className="h-3 w-3" />
             </a>
           </div>
+          {!loading && listings.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {listings.length} active listing{listings.length === 1 ? "" : "s"} in the {cfg.city}, {cfg.state} market.
+            </p>
+          )}
 
           {loading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
