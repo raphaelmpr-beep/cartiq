@@ -120,7 +120,7 @@ export default function BrandPage() {
     );
   }
 
-  const searchHref = `/#/search?brand=${encodeURIComponent(brand.dbBrand)}`;
+  const searchHref = `/search?brand=${encodeURIComponent(brand.dbBrand)}`;
 
   return (
     <div className="min-h-screen bg-background">
@@ -277,7 +277,7 @@ export default function BrandPage() {
                   <p className="text-xs text-muted-foreground">
                     GolfCartIQ is expanding {brand.name} coverage. Check back soon or browse all listings.
                   </p>
-                  <a href="/#/search" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm hover:bg-secondary transition-colors">
+                  <a href="/search" className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm hover:bg-secondary transition-colors">
                     Browse All Listings <ChevronRight className="h-4 w-4" />
                   </a>
                 </div>
@@ -363,7 +363,7 @@ export default function BrandPage() {
               <p className="text-xs text-muted-foreground">
                 Paste any listing URL to get an instant market price comparison.
               </p>
-              <a href="/#/deal-checker"
+              <a href="/deal-checker"
                 className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition-colors">
                 Check a Deal <ChevronRight className="h-4 w-4" />
               </a>

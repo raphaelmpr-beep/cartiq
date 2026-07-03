@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { useRoute, Link } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
+import { useRoute, Link, useLocation } from "wouter";
 import { setSEO } from "@/lib/seo";
 import { CITY_CONFIGS, type CityConfig } from "@/lib/seo-config";
 import { ListingCard } from "@/components/ListingCard";
@@ -65,7 +64,7 @@ function FAQ({ faqs }: { faqs: { q: string; a: string }[] }) {
 
 export default function CityPage() {
   const [, params] = useRoute("/golf-carts-for-sale/:slug");
-  const [, navigate] = useHashLocation();
+  const [, navigate] = useLocation();
   const slug = params?.slug ?? "";
   const cfg = CITY_CONFIGS.find(c => c.slug === slug);
 
@@ -144,7 +143,7 @@ export default function CityPage() {
                 ? "Loading listings…"
                 : `Available Golf Carts Near ${cfg.city}`}
             </h2>
-            <a href={`/#/search?${qs}`}
+            <a href={`/search?${qs}`}
               className="text-xs text-green-700 hover:underline flex items-center gap-1">
               See all <ChevronRight className="h-3 w-3" />
             </a>
@@ -168,7 +167,7 @@ export default function CityPage() {
               <p className="text-xs text-muted-foreground max-w-sm mx-auto">
                 Expand your search or use Deal Checker to evaluate any outside listing.
               </p>
-              <a href="/#/deal-checker"
+              <a href="/deal-checker"
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm hover:bg-secondary transition-colors">
                 Open Deal Checker <ChevronRight className="h-4 w-4" />
               </a>
@@ -210,7 +209,7 @@ export default function CityPage() {
             <p className="font-bold text-sm">Found a listing outside GolfCartIQ?</p>
             <p className="text-xs text-muted-foreground mt-0.5">Paste any URL — Facebook, Craigslist, or dealer site — and get an instant market comparison.</p>
           </div>
-          <a href="/#/deal-checker"
+          <a href="/deal-checker"
             className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition-colors">
             Check a Deal <ChevronRight className="h-4 w-4" />
           </a>
