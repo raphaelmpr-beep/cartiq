@@ -49,7 +49,15 @@ function norm(row: any): any { return toCamel(row); }
 import { getMetaConnectorStatus } from "./connectors/metaMarketplace";
 import { getRetailConnectorStatus } from "./connectors/retailSource";
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "cartiq2024";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) {
+  // Fail loudly at startup rather than fall back to a hard-coded default.
+  // A leaked default is worse than a boot failure — an unset ADMIN_PASSWORD
+  // must be treated as a misconfiguration, not silently patched.
+  throw new Error(
+    "ADMIN_PASSWORD environment variable is required. Set it in Vercel Project Settings → Environment Variables."
+  );
+}
 const PILOT_STATES = ["FL", "GA"];
 
 function slugify(text: string): string {
@@ -268,6 +276,13 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
     if (token === ADMIN_PASSWORD) return next();
     return res.status(401).json({ error: "Unauthorized" });
   }
+
+  // GET /api/admin/verify — lightweight endpoint the Admin UI uses to gate
+  // the client login. Replaces the old client-side hash comparison, which
+  // had to ship a fingerprint of the admin password in the public bundle.
+  app.get("/api/admin/verify", requireAdmin, (_req, res) => {
+    res.json({ ok: true });
+  });
 
 
   // ─── Homepage rotation engine ─────────────────────────────────────────────
@@ -2390,7 +2405,7 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
         try {
           const r = await fetch(`${BASE}/api/admin/dealers/${dealer.slug}/google-validate`, {
             method: "POST",
-            headers: { "x-admin-token": process.env.ADMIN_PASSWORD || "cartiq2024" },
+            headers: { "x-admin-token": ADMIN_PASSWORD },
             signal: AbortSignal.timeout(15000),
           });
           const result = await r.json();

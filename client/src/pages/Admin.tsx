@@ -16,33 +16,43 @@ import { apiRequest } from "@/lib/queryClient";
 import type { Listing, Dealer, InventorySource } from "@/lib/types";
 import InventoryCoverage from "@/pages/InventoryCoverage";
 
-// The admin token is whatever the user typed — never a compiled constant.
-// The server validates it; the client just forwards it.
-const CORRECT_HASH = "0dcb739de87d7278"; // sha-256 prefix of "cartiq2024" for UI gating only
-async function hashToken(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
-}
-
-// Simple admin auth gate
+// The admin token is whatever the user types — never a compiled constant.
+// The server is the source of truth: we probe /api/admin/verify with the
+// entered password and unlock the UI only on a 200 response. No hash of the
+// production password is embedded in the client bundle.
 function useAdminAuth() {
   const [authed, setAuthed] = useState(false);
   const [adminToken, setAdminToken] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function login() {
-    const h = await hashToken(password);
-    if (h === CORRECT_HASH) {
-      setAdminToken(password);
-      setAuthed(true);
-      setError("");
-    } else {
-      setError("Incorrect password.");
+    if (!password) {
+      setError("Enter the admin password.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/verify", {
+        method: "GET",
+        headers: { "x-admin-token": password },
+      });
+      if (res.ok) {
+        setAdminToken(password);
+        setAuthed(true);
+      } else {
+        setError("Incorrect password.");
+      }
+    } catch (e) {
+      setError("Login failed. Try again.");
+    } finally {
+      setLoading(false);
     }
   }
 
-  return { authed, adminToken, password, setPassword, login, error };
+  return { authed, adminToken, password, setPassword, login, error, loading };
 }
 
 // ── Listing Form ──────────────────────────────────────────────────────────────
@@ -999,7 +1009,7 @@ function PendingImports({ adminToken }: { adminToken: string }) {
 
 // ── Main Admin Page ────────────────────────────────────────────────────────────
 export default function Admin() {
-  const { authed, adminToken, password, setPassword, login, error: authError } = useAdminAuth();
+  const { authed, adminToken, password, setPassword, login, error: authError, loading: authLoading } = useAdminAuth();
   const ADMIN_HEADERS = { "x-admin-token": adminToken };
   const qc = useQueryClient();
 
@@ -1041,7 +1051,7 @@ export default function Admin() {
               data-testid="input-admin-password"
             />
             {authError && <p className="text-sm text-red-600">{authError}</p>}
-            <Button onClick={login} className="w-full" data-testid="btn-admin-login">Sign In</Button>
+            <Button onClick={login} disabled={authLoading} className="w-full" data-testid="btn-admin-login">{authLoading ? "Signing in…" : "Sign In"}</Button>
             
           </CardContent>
         </Card>
