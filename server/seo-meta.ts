@@ -13,9 +13,9 @@
 
 const BASE_URL = "https://golfcartiq.com";
 const SITE_NAME = "GolfCartIQ";
-const DEFAULT_TITLE = `${SITE_NAME} | Golf Cart Price Intelligence for Florida & Georgia`;
+const DEFAULT_TITLE = `Golf Cart Values, Prices & Deals 2026 — Florida & Georgia | ${SITE_NAME}`;
 const DEFAULT_DESC =
-  "Compare golf carts for sale, local dealers, prices, deal ratings, battery types, warranties, and delivery options across Florida and Georgia.";
+  "Know what any golf cart is worth before you buy or sell. Compare live dealer prices, get a free value estimate, and see local deals across Florida and Georgia.";
 const DEFAULT_IMAGE = `${BASE_URL}/og-image.png`;
 
 export interface RouteMeta {
