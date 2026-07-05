@@ -15,8 +15,8 @@ export default function Home() {
   // SEO
   useEffect(() => {
     setSEO({
-      title: "GolfCartIQ | Golf Cart Price Intelligence for Florida & Georgia",
-      description: "Compare golf carts for sale, local dealers, prices, deal ratings, battery types, warranties, and delivery options across Florida and Georgia.",
+      title: "Golf Cart Values, Prices & Deals 2026 — Florida & Georgia | GolfCartIQ",
+      description: "Know what any golf cart is worth before you buy or sell. Compare live dealer prices, get a free value estimate, and see local deals across Florida and Georgia.",
       canonical: "https://golfcartiq.com/",
     });
   }, []);
@@ -82,32 +82,46 @@ export default function Home() {
       <section className="bg-gradient-to-br from-gray-50 to-white border-b border-border">
         {/* Top bar: headline + search */}
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-4 md:pt-7 md:pb-5">
-          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div className="flex flex-col gap-5">
             <div className="space-y-2 md:space-y-3">
               <div className="inline-flex items-center gap-2 bg-green-50 text-green-700 border border-green-200 px-3 py-1 rounded-full text-xs font-semibold">
                 Know before you buy.
               </div>
               <h1 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-tight text-foreground">
-                Find the right golf cart{" "}
-                <span className="text-green-600">at the right price.</span>
+                Golf Cart Values, Prices &amp; Deals{" "}
+                <span className="text-green-600">— Florida &amp; Georgia</span>
               </h1>
+              <p className="text-base md:text-lg text-muted-foreground max-w-2xl">
+                Know what any cart is worth before you buy or sell. Compare live dealer prices with GolfCartIQ.
+              </p>
             </div>
-            {/* Search bar — right-aligned on desktop, full-width on mobile */}
-            <form onSubmit={handleHeroSearch} className="flex gap-2 w-full md:max-w-sm shrink-0">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  className="pl-9"
-                  placeholder="Brand, model, city, zip…"
-                  value={heroSearch}
-                  onChange={(e) => setHeroSearch(e.target.value)}
-                  data-testid="hero-search-input"
-                />
-              </div>
-              <Button type="submit" className="gap-2 shrink-0" data-testid="hero-search-btn">
-                <Search className="h-4 w-4" /> Search Golf Carts
-              </Button>
-            </form>
+            {/* Dual CTA row — Search + Value My Cart */}
+            <div className="flex flex-col sm:flex-row gap-3 w-full">
+              <form onSubmit={handleHeroSearch} className="flex gap-2 flex-1 min-w-0">
+                <div className="relative flex-1 min-w-0">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Brand, model, city, zip…"
+                    value={heroSearch}
+                    onChange={(e) => setHeroSearch(e.target.value)}
+                    data-testid="hero-search-input"
+                  />
+                </div>
+                <Button type="submit" className="gap-2 shrink-0" data-testid="hero-search-btn">
+                  <Search className="h-4 w-4" /> Search Carts
+                </Button>
+              </form>
+              <Link href="/golf-cart-value-estimator">
+                <Button
+                  variant="outline"
+                  className="gap-2 border-green-600 text-green-700 hover:bg-green-50 w-full sm:w-auto"
+                  data-testid="hero-value-btn"
+                >
+                  <ClipboardCheck className="h-4 w-4" /> Value My Cart
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
 
