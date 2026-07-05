@@ -240,6 +240,11 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
         { path: "/brands/bintelli",   priority: "0.6", changefreq: "weekly" },
         { path: "/brands/epic",       priority: "0.6", changefreq: "weekly" },
         { path: "/brands/denago",     priority: "0.6", changefreq: "weekly" },
+        { path: "/brands/teko-ev",    priority: "0.7", changefreq: "weekly" },
+        // Valuation pages
+        { path: "/golf-cart-values",           priority: "0.9", changefreq: "weekly" },
+        { path: "/used-golf-cart-value",       priority: "0.9", changefreq: "weekly" },
+        { path: "/golf-cart-value-estimator",  priority: "0.9", changefreq: "weekly" },
         // Battery guide pages
         { path: "/golf-cart-batteries",                        priority: "0.8", changefreq: "monthly" },
         { path: "/golf-cart-batteries/lithium-vs-lead-acid",   priority: "0.8", changefreq: "monthly" },

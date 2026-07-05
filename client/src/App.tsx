@@ -39,6 +39,7 @@ import CityPage from "@/pages/seo/CityPage";
 import BrandPage from "@/pages/seo/BrandPage";
 import BrandsIndex from "@/pages/seo/BrandsIndex";
 import { BatteryOverviewPage, LithiumVsLeadAcidPage, AhComparePage, ChargerIncludedPage } from "@/pages/seo/BatteryPages";
+import { GolfCartValuesPage, UsedGolfCartValuePage, GolfCartValueEstimatorPage } from "@/pages/seo/ValuePages";
 
 function NotFound() {
   return (
@@ -90,6 +91,10 @@ function AppRoutes() {
           <Route path="/golf-cart-batteries/105ah-vs-150ah" component={AhComparePage} />
           <Route path="/golf-cart-batteries/charger-included" component={ChargerIncludedPage} />
           <Route path="/golf-cart-batteries" component={BatteryOverviewPage} />
+          {/* Valuation pages */}
+          <Route path="/golf-cart-values" component={GolfCartValuesPage} />
+          <Route path="/used-golf-cart-value" component={UsedGolfCartValuePage} />
+          <Route path="/golf-cart-value-estimator" component={GolfCartValueEstimatorPage} />
           <Route component={NotFound} />
         </Switch>
       </main>
