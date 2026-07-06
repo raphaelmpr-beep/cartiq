@@ -1289,6 +1289,21 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
     const baseSlug = slugify(`${imp.make || "cart"}-${imp.model || "listing"}-${imp.location_city || imp.dealer_slug || "fl"}`);
     const slug = `${baseSlug}-${Date.now()}`;
 
+    // Inherit city/state from the dealer profile when the pending row has none.
+    // Without this, FL/GA search silently drops the listing because search filters
+    // by state and adapters frequently leave location_state NULL.
+    let inheritedCity: string | null = null;
+    let inheritedState: string | null = null;
+    if (imp.dealer_slug) {
+      const { data: dealerRow } = await sb
+        .from("dealers")
+        .select("city,state")
+        .eq("slug", imp.dealer_slug)
+        .maybeSingle();
+      inheritedCity = dealerRow?.city ?? null;
+      inheritedState = dealerRow?.state ?? null;
+    }
+
     // Pre-fetch max id to work around broken sequence (avoids duplicate key violations)
     const { data: maxRow } = await sb
       .from("listings")
@@ -1309,8 +1324,8 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       asking_price:       imp.price       ?? null,
       image_url:          imp.image_url   ?? null,
       image_urls_json:    imp.image_urls_json ?? "[]",
-      city:               imp.location_city  ?? null,
-      state:              imp.location_state ?? null,
+      city:               imp.location_city  ?? inheritedCity  ?? null,
+      state:              imp.location_state ?? inheritedState ?? null,
       source_listing_url: imp.source_url  ?? null,
       source_type:        "dealer_site",
       sync_source:        imp.dealer_slug ?? null,
@@ -1620,22 +1635,44 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       const { createClient } = await import("@supabase/supabase-js");
       const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
 
+      // Paginated fetch — Supabase/PostgREST caps at 1000 rows per request even
+      // when .limit(N) is larger. Explicit .range() pagination is required to
+      // pull every row. Without this, downstream counts silently undercount.
+      async function fetchAll<T = any>(
+        table: string,
+        select: string,
+        opts: { order?: { col: string; asc: boolean }; pageSize?: number; maxRows?: number } = {}
+      ): Promise<T[]> {
+        const pageSize = opts.pageSize ?? 1000;
+        const maxRows = opts.maxRows ?? 50000;
+        const out: T[] = [];
+        for (let from = 0; from < maxRows; from += pageSize) {
+          let q: any = sb.from(table).select(select).range(from, from + pageSize - 1);
+          if (opts.order) q = q.order(opts.order.col, { ascending: opts.order.asc });
+          const { data, error } = await q;
+          if (error) throw new Error(`${table}: ${error.message}`);
+          const rows = (data || []) as T[];
+          out.push(...rows);
+          if (rows.length < pageSize) break;
+        }
+        return out;
+      }
+
       const [
-        { data: allListings },
-        { data: allDealers },
-        { data: allPending },
-        { data: syncLogs },
-        { data: coverageLogs },
-        adapterRunsResult,
+        allListings,
+        allDealers,
+        allPending,
+        syncLogs,
+        coverageLogs,
+        adapterRuns,
       ] = await Promise.all([
-        sb.from("listings").select("id,sync_source,source_type,dealer_id,status,public_listing,price_confidence,state").limit(2000),
-        sb.from("dealers").select("id,slug,name,state,city,website_url,adapter_key,platform_type,discovery_strategy,inventory_source_url,browser_required,last_discovery_status,last_discovery_message").limit(500),
-        sb.from("pending_imports").select("dealer_slug,status").limit(2000),
-        sb.from("sync_log").select("dealer_slug,status,synced_at,notes").order("synced_at", { ascending: false }).limit(500),
-        sb.from("dealer_coverage_log").select("dealer_slug,coverage_status,source_page_type,pagination_detected,pages_visited,load_more_detected,discovered_count,pending_imports_count,duplicate_count,scanned_at,adapter_notes,valuation_review_needed,inventory_url").order("scanned_at", { ascending: false }).limit(500),
-        sb.from("adapter_run_log").select("dealer_slug,status,coverage_status,source_page_type,discovered_count,inserted_pending_count,duplicate_count,skipped_count,started_at,notes,error_message").order("started_at", { ascending: false }).limit(500).then((r: any) => r).catch(() => ({ data: [] as any[] })),
+        fetchAll("listings", "id,sync_source,source_type,dealer_id,status,public_listing,price_confidence,state"),
+        fetchAll("dealers", "id,slug,name,state,city,website_url,adapter_key,platform_type,discovery_strategy,inventory_source_url,browser_required,last_discovery_status,last_discovery_message"),
+        fetchAll("pending_imports", "dealer_slug,status"),
+        fetchAll("sync_log", "dealer_slug,status,synced_at,notes", { order: { col: "synced_at", asc: false } }),
+        fetchAll("dealer_coverage_log", "dealer_slug,coverage_status,source_page_type,pagination_detected,pages_visited,load_more_detected,discovered_count,pending_imports_count,duplicate_count,scanned_at,adapter_notes,valuation_review_needed,inventory_url", { order: { col: "scanned_at", asc: false } }),
+        fetchAll("adapter_run_log", "dealer_slug,status,coverage_status,source_page_type,discovered_count,inserted_pending_count,duplicate_count,skipped_count,started_at,notes,error_message", { order: { col: "started_at", asc: false } }).catch(() => [] as any[]),
       ]);
-      const adapterRuns = (adapterRunsResult as any).data || [];
 
       const L = allListings || [];
       const P = allPending || [];
