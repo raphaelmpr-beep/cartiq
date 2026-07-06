@@ -5,6 +5,8 @@
  *   2. Parse a listing page (via Playwright) into a normalized ListingData object
  */
 
+import { sitemapHeaders } from './http-headers.js';
+
 export interface ListingData {
   source_url: string;
   dealer_slug: string;
@@ -87,7 +89,7 @@ export async function getBoteroListingUrls(flGaOnly = true): Promise<string[]> {
   for (const sitemapUrl of sitemaps) {
     try {
       const res = await fetch(sitemapUrl, {
-        headers: { 'User-Agent': 'CartIQ-Sync/1.0' },
+        headers: sitemapHeaders(sitemapUrl),
       });
       const xml = await res.text();
       const matches = [...xml.matchAll(/<loc>(https:\/\/boterocarts\.com\/listing\/[^<]+)<\/loc>/g)];
@@ -123,8 +125,9 @@ export async function getBoteroListingUrls(flGaOnly = true): Promise<string[]> {
  */
 export async function getJaxListingUrls(): Promise<string[]> {
   try {
-    const res = await fetch('https://golfcartsjacksonville.com/auto-listing-sitemap.xml', {
-      headers: { 'User-Agent': 'CartIQ-Sync/1.0' },
+    const jaxUrl = 'https://golfcartsjacksonville.com/auto-listing-sitemap.xml';
+    const res = await fetch(jaxUrl, {
+      headers: sitemapHeaders(jaxUrl),
       signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
     });
     // SG Captcha returns 202 + HTML challenge — not real XML
@@ -169,7 +172,7 @@ export async function getGcrSitemapUrls(
   const sitemapUrl = `https://${domain}${sitemapPath}`;
   try {
     const res = await fetch(sitemapUrl, {
-      headers: { 'User-Agent': 'CartIQ-Sync/1.0' },
+      headers: sitemapHeaders(sitemapUrl),
       signal: AbortSignal.timeout ? AbortSignal.timeout(12000) : undefined,
     });
     if (!res.ok) return [];
