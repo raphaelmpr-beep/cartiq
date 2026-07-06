@@ -307,10 +307,11 @@ function ReconciliationExplainer({ totals }: { totals: ReconciliationTotals }) {
 
 // ── Mobile dealer card ─────────────────────────────────────────────────────────
 
-function DealerCard({ row, onSetBaseline, baselineState }: {
+function DealerCard({ row, onSetBaseline, baselineState, onFocusDealer }: {
   row: DealerRow;
   onSetBaseline?: (slug: string) => void;
   baselineState?: Record<string, string>;
+  onFocusDealer?: (slug: string) => void;
 }) {
   const action = ACTION_META[row.actionNeeded] || ACTION_META["none"];
   const isNeverSynced = row.coverageStatus === "not_synced";
@@ -320,7 +321,18 @@ function DealerCard({ row, onSetBaseline, baselineState }: {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-medium text-sm truncate">{row.dealerName}</p>
-          <p className="text-xs text-muted-foreground">{row.dealerSlug}</p>
+          {onFocusDealer ? (
+            <button
+              type="button"
+              onClick={() => onFocusDealer(row.dealerSlug)}
+              className="text-xs text-blue-700 hover:underline"
+              title="Open in Dealers · Source of Truth"
+            >
+              {row.dealerSlug}
+            </button>
+          ) : (
+            <p className="text-xs text-muted-foreground">{row.dealerSlug}</p>
+          )}
           <p className="text-xs text-muted-foreground">{[row.city, row.state].filter(Boolean).join(", ") || "—"}</p>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
@@ -387,7 +399,7 @@ function DealerCard({ row, onSetBaseline, baselineState }: {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function InventoryCoverage({ adminToken }: { adminToken: string }) {
+export default function InventoryCoverage({ adminToken, onFocusDealer }: { adminToken: string; onFocusDealer?: (slug: string) => void }) {
   const ADMIN_HEADERS = { "x-admin-token": adminToken };
   const qc = useQueryClient();
 
@@ -607,6 +619,7 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
               row={row}
               onSetBaseline={handleSetBaseline}
               baselineState={baselineState}
+              onFocusDealer={onFocusDealer}
             />
           ))}
           {hasSynced.length === 0 && (
@@ -631,7 +644,18 @@ export default function InventoryCoverage({ adminToken }: { adminToken: string }
                   <tr key={row.dealerSlug} className="odd:bg-white even:bg-gray-50 hover:bg-muted/40 transition-colors">
                     <td className="p-2 border border-border">
                       <p className="font-medium whitespace-nowrap">{row.dealerName}</p>
-                      <p className="text-muted-foreground">{row.dealerSlug}</p>
+                      {onFocusDealer ? (
+                        <button
+                          type="button"
+                          onClick={() => onFocusDealer(row.dealerSlug)}
+                          className="text-blue-700 hover:underline"
+                          title="Open in Dealers · Source of Truth"
+                        >
+                          {row.dealerSlug}
+                        </button>
+                      ) : (
+                        <p className="text-muted-foreground">{row.dealerSlug}</p>
+                      )}
                       {row.inventoryUrl && (
                         <a href={row.inventoryUrl} target="_blank" rel="noopener noreferrer"
                           className="flex items-center gap-0.5 text-blue-600 hover:underline mt-0.5">

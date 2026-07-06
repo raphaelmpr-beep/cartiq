@@ -419,7 +419,224 @@ function CoverageStatusBadge({ status }: { status: string }) {
   );
 }
 
-function CoverageAudit({ adminToken }: { adminToken: string }) {
+// ─── Dealer Integrity Strip ──────────────────────────────────────────────────
+// Surfaces fragmentation between the `dealers` master list and slugs referenced
+// by listings/pending_imports/sync_log/adapter_run_log. Reads /api/admin/dealers-integrity.
+type DealerIntegrityResponse = {
+  totals: {
+    dealerRows: number;
+    referencedSlugs: number;
+    orphanSlugs: number;
+    deadDealerRows: number;
+    duplicateDealerRows: number;
+  };
+  orphanSlugs: Array<{ slug: string; listings: number; pending: number; syncLog: number; adapterRun: number }>;
+  deadDealerRows: Array<{ id: number; slug: string; name: string; state: string | null; city: string | null; websiteUrl: string | null }>;
+  duplicateDealerRows: Array<{ id: number; slug: string; name: string; state: string | null; isDuplicateOf: number }>;
+};
+
+function DealerIntegrityStrip({ adminToken }: { adminToken: string }) {
+  const ADMIN_HEADERS = { "x-admin-token": adminToken };
+  const { data, isLoading, error, refetch, isFetching } = useQuery<DealerIntegrityResponse>({
+    queryKey: ["/api/admin/dealers-integrity"],
+    queryFn: () => apiRequest("GET", "/api/admin/dealers-integrity", undefined, ADMIN_HEADERS).then(r => r.json()),
+  });
+
+  const [expanded, setExpanded] = useState<"orphans" | "dead" | "duplicates" | null>(null);
+
+  if (isLoading) {
+    return <p className="text-xs text-muted-foreground py-2">Loading integrity check…</p>;
+  }
+  if (error || !data) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
+        Failed to load dealer integrity check.
+        <Button size="sm" variant="outline" className="ml-2 h-6 text-xs" onClick={() => refetch()}>Retry</Button>
+      </div>
+    );
+  }
+
+  const { totals, orphanSlugs, deadDealerRows, duplicateDealerRows } = data;
+  const anyIssue = totals.orphanSlugs > 0 || totals.deadDealerRows > 0 || totals.duplicateDealerRows > 0;
+
+  const cards: Array<{
+    key: "orphans" | "dead" | "duplicates";
+    label: string;
+    value: number;
+    color: string;
+    tooltip: string;
+  }> = [
+    {
+      key: "orphans",
+      label: "Orphan Sync Sources",
+      value: totals.orphanSlugs,
+      color: totals.orphanSlugs > 0 ? "text-red-600" : "text-muted-foreground",
+      tooltip: "Slugs referenced by listings/pending/sync logs but missing from the Dealers table.",
+    },
+    {
+      key: "dead",
+      label: "Dead Dealer Rows",
+      value: totals.deadDealerRows,
+      color: totals.deadDealerRows > 0 ? "text-amber-600" : "text-muted-foreground",
+      tooltip: "Dealers table rows with no listings, no pending imports, no sync history.",
+    },
+    {
+      key: "duplicates",
+      label: "Duplicate Dealers",
+      value: totals.duplicateDealerRows,
+      color: totals.duplicateDealerRows > 0 ? "text-orange-600" : "text-muted-foreground",
+      tooltip: "Dealers flagged via is_duplicate_of. Merge or delete.",
+    },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold">Dealer Master List Integrity</p>
+          <p className="text-xs text-muted-foreground">
+            {totals.dealerRows} dealer rows · {totals.referencedSlugs} referenced slugs
+            {anyIssue ? " · issues below" : " · all clean"}
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching} className="h-7 text-xs">
+          <RefreshCw className={`h-3 w-3 mr-1 ${isFetching ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {cards.map(c => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setExpanded(expanded === c.key ? null : c.key)}
+            className={`text-left bg-muted rounded-lg p-3 hover:bg-muted/70 transition-colors border ${expanded === c.key ? "border-primary" : "border-transparent"}`}
+            title={c.tooltip}
+            data-testid={`integrity-card-${c.key}`}
+          >
+            <p className={`text-2xl font-bold ${c.color}`}>{c.value}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{c.label}</p>
+            <p className="text-[10px] text-muted-foreground/70 mt-1">{expanded === c.key ? "click to collapse" : "click to view"}</p>
+          </button>
+        ))}
+      </div>
+
+      {expanded === "orphans" && (
+        <div className="border border-red-200 rounded-lg bg-red-50/40 p-3">
+          <p className="text-xs font-semibold text-red-800 mb-2">
+            Orphan sync sources ({orphanSlugs.length}) — appear in activity tables but not in Dealers
+          </p>
+          {orphanSlugs.length === 0 ? (
+            <p className="text-xs text-muted-foreground">None. All referenced slugs have a Dealers row.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-white/60 text-left">
+                    {["Slug", "Listings", "Pending", "Sync Log", "Adapter Runs"].map(h => (
+                      <th key={h} className="p-1.5 border border-red-200 font-semibold">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {orphanSlugs.map(o => (
+                    <tr key={o.slug} className="bg-white/40">
+                      <td className="p-1.5 border border-red-200 font-mono">{o.slug}</td>
+                      <td className="p-1.5 border border-red-200 text-center">{o.listings || "—"}</td>
+                      <td className="p-1.5 border border-red-200 text-center">{o.pending || "—"}</td>
+                      <td className="p-1.5 border border-red-200 text-center">{o.syncLog || "—"}</td>
+                      <td className="p-1.5 border border-red-200 text-center">{o.adapterRun || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-[11px] text-red-700 mt-2">
+                Fix by adding a matching row to the Dealers table (POST /api/dealers), or by remapping listings to the correct existing slug.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {expanded === "dead" && (
+        <div className="border border-amber-200 rounded-lg bg-amber-50/40 p-3">
+          <p className="text-xs font-semibold text-amber-800 mb-2">
+            Dead dealer rows ({deadDealerRows.length}) — no activity anywhere
+          </p>
+          {deadDealerRows.length === 0 ? (
+            <p className="text-xs text-muted-foreground">None. Every Dealers row has activity.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-white/60 text-left">
+                    {["Slug", "Name", "State", "City", "Website"].map(h => (
+                      <th key={h} className="p-1.5 border border-amber-200 font-semibold">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {deadDealerRows.map(d => (
+                    <tr key={d.id} className="bg-white/40">
+                      <td className="p-1.5 border border-amber-200 font-mono">{d.slug}</td>
+                      <td className="p-1.5 border border-amber-200">{d.name}</td>
+                      <td className="p-1.5 border border-amber-200">{d.state || "—"}</td>
+                      <td className="p-1.5 border border-amber-200">{d.city || "—"}</td>
+                      <td className="p-1.5 border border-amber-200 truncate max-w-[200px]">
+                        {d.websiteUrl ? (
+                          <a href={d.websiteUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                            {d.websiteUrl.replace(/^https?:\/\//, "")}
+                          </a>
+                        ) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-[11px] text-amber-700 mt-2">
+                Either run discovery on these (they may be new adds not yet synced) or archive them.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {expanded === "duplicates" && (
+        <div className="border border-orange-200 rounded-lg bg-orange-50/40 p-3">
+          <p className="text-xs font-semibold text-orange-800 mb-2">
+            Duplicate dealer rows ({duplicateDealerRows.length}) — flagged via is_duplicate_of
+          </p>
+          {duplicateDealerRows.length === 0 ? (
+            <p className="text-xs text-muted-foreground">None. No duplicates flagged.</p>
+          ) : (
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="bg-white/60 text-left">
+                  {["Slug", "Name", "State", "Duplicate Of (id)"].map(h => (
+                    <th key={h} className="p-1.5 border border-orange-200 font-semibold">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {duplicateDealerRows.map(d => (
+                  <tr key={d.id} className="bg-white/40">
+                    <td className="p-1.5 border border-orange-200 font-mono">{d.slug}</td>
+                    <td className="p-1.5 border border-orange-200">{d.name}</td>
+                    <td className="p-1.5 border border-orange-200">{d.state || "—"}</td>
+                    <td className="p-1.5 border border-orange-200 text-center">{d.isDuplicateOf}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CoverageAudit({ adminToken, onFocusDealer }: { adminToken: string; onFocusDealer?: (slug: string) => void }) {
   const ADMIN_HEADERS = { "x-admin-token": adminToken };
   const { data: rows = [], isLoading, error, refetch, isFetching } = useQuery<CoverageRow[]>({
     queryKey: ["/api/admin/coverage-audit"],
@@ -515,7 +732,18 @@ function CoverageAudit({ adminToken }: { adminToken: string }) {
                 }`}
               >
                 <td className="p-2 border border-border">
-                  <p className="font-medium text-xs whitespace-nowrap">{row.dealer_slug}</p>
+                  {onFocusDealer ? (
+                    <button
+                      type="button"
+                      onClick={() => onFocusDealer(row.dealer_slug)}
+                      className="font-medium text-xs whitespace-nowrap text-blue-700 hover:underline"
+                      title="Open in Dealers · Source of Truth"
+                    >
+                      {row.dealer_slug}
+                    </button>
+                  ) : (
+                    <p className="font-medium text-xs whitespace-nowrap">{row.dealer_slug}</p>
+                  )}
                 </td>
 
                 <td className="p-2 border border-border text-xs max-w-[180px]">
@@ -1010,6 +1238,24 @@ function PendingImports({ adminToken }: { adminToken: string }) {
 // ── Main Admin Page ────────────────────────────────────────────────────────────
 export default function Admin() {
   const { authed, adminToken, password, setPassword, login, error: authError, loading: authLoading } = useAdminAuth();
+  const [activeTab, setActiveTab] = useState("listings");
+
+  // Cross-link helper — called by audit tabs to jump to a dealer's row in the master list.
+  // Switches to the Dealers tab, then scrolls the matching row into view and highlights it.
+  function focusDealer(slug: string) {
+    setActiveTab("dealers");
+    // Two rAFs so the tab content mounts before we look up the target element.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`dealer-row-${slug}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          // Update the URL hash so the :target CSS pseudo-class fires and highlights the row.
+          history.replaceState(null, "", `#dealer-row-${slug}`);
+        }
+      });
+    });
+  }
   const ADMIN_HEADERS = { "x-admin-token": adminToken };
   const qc = useQueryClient();
 
@@ -1072,14 +1318,14 @@ export default function Admin() {
           </div>
         </div>
 
-        <Tabs defaultValue="listings">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6 flex overflow-x-auto whitespace-nowrap w-full">
             <TabsTrigger value="listings" data-testid="tab-listings">All Listings ({listings.length})</TabsTrigger>
             <TabsTrigger value="csv" data-testid="tab-csv">CSV Import</TabsTrigger>
-            <TabsTrigger value="dealers" data-testid="tab-dealers">Dealers ({dealers.length})</TabsTrigger>
+            <TabsTrigger value="dealers" data-testid="tab-dealers">Dealers · Source of Truth ({dealers.length})</TabsTrigger>
             <TabsTrigger value="sources" data-testid="tab-sources">Inventory Sources</TabsTrigger>
-            <TabsTrigger value="coverage" data-testid="tab-coverage">Coverage Audit</TabsTrigger>
-            <TabsTrigger value="inventory" data-testid="tab-inventory">Inventory Gap</TabsTrigger>
+            <TabsTrigger value="coverage" data-testid="tab-coverage">Discovery Health</TabsTrigger>
+            <TabsTrigger value="inventory" data-testid="tab-inventory">Listing Health</TabsTrigger>
             <TabsTrigger value="pending" data-testid="tab-pending">Pending Imports</TabsTrigger>
           </TabsList>
 
@@ -1146,38 +1392,59 @@ export default function Admin() {
             </Card>
           </TabsContent>
 
-          {/* Dealers Tab */}
+          {/* Dealers Tab — Source of Truth */}
           <TabsContent value="dealers">
-            <Card>
-              <CardHeader><CardTitle className="text-base">Dealers</CardTitle></CardHeader>
-              <CardContent>
-                {dealers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No dealers configured.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm border-collapse">
-                      <thead>
-                        <tr className="bg-muted">
-                          {["Name", "City/State", "Delivery", "Warranty"].map(h => (
-                            <th key={h} className="p-2 border border-border text-left font-semibold text-xs">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dealers.map((d) => (
-                          <tr key={d.id} className="odd:bg-white even:bg-gray-50" data-testid={`row-dealer-${d.id}`}>
-                            <td className="p-2 border border-border font-medium">{d.name}</td>
-                            <td className="p-2 border border-border text-xs">{d.city}, {d.state}</td>
-                            <td className="p-2 border border-border text-xs">{d.deliveryAvailable ? `Yes (from $${d.deliveryBaseFee})` : "No"}</td>
-                            <td className="p-2 border border-border text-xs">{d.defaultWarrantyIncluded ? `${d.defaultWarrantyMonths} months` : "No default"}</td>
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Master List Integrity</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    The Dealers table is the source of truth. Discovery Health and Listing Health are derived views on top of it.
+                    This strip surfaces any drift between the master list and the activity tables.
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <DealerIntegrityStrip adminToken={adminToken} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle className="text-base">Dealers ({dealers.length})</CardTitle></CardHeader>
+                <CardContent>
+                  {dealers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No dealers configured.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="bg-muted">
+                            {["Slug", "Name", "City/State", "Delivery", "Warranty"].map(h => (
+                              <th key={h} className="p-2 border border-border text-left font-semibold text-xs">{h}</th>
+                            ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                        </thead>
+                        <tbody>
+                          {dealers.map((d) => (
+                            <tr
+                              key={d.id}
+                              id={`dealer-row-${d.slug}`}
+                              className="odd:bg-white even:bg-gray-50 target:bg-yellow-100 target:ring-2 target:ring-yellow-400"
+                              data-testid={`row-dealer-${d.id}`}
+                            >
+                              <td className="p-2 border border-border font-mono text-xs">{d.slug}</td>
+                              <td className="p-2 border border-border font-medium">{d.name}</td>
+                              <td className="p-2 border border-border text-xs">{d.city}, {d.state}</td>
+                              <td className="p-2 border border-border text-xs">{d.deliveryAvailable ? `Yes (from $${d.deliveryBaseFee})` : "No"}</td>
+                              <td className="p-2 border border-border text-xs">{d.defaultWarrantyIncluded ? `${d.defaultWarrantyMonths} months` : "No default"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           {/* Inventory Sources Tab */}
@@ -1206,34 +1473,34 @@ export default function Admin() {
             </Card>
           </TabsContent>
 
-          {/* Coverage Audit Tab */}
+          {/* Discovery Health Tab (formerly "Coverage Audit") */}
           <TabsContent value="coverage">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Dealer Coverage Audit</CardTitle>
+                <CardTitle className="text-base">Discovery Health</CardTitle>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Per-source inventory coverage status. Run DDL migration + backfill to populate log data.
-                  Live listing/pending counts are always current from the DB.
+                  Per-source discovery status derived from the Dealers master list — pagination, source page type, Google verification,
+                  duplicate detection. Live listing / pending counts are always current from the DB.
                 </p>
               </CardHeader>
               <CardContent>
-                <CoverageAudit adminToken={adminToken} />
+                <CoverageAudit adminToken={adminToken} onFocusDealer={focusDealer} />
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Inventory Coverage Tab */}
+          {/* Listing Health Tab (formerly "Inventory Gap") */}
           <TabsContent value="inventory">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Inventory Gap Audit</CardTitle>
+                <CardTitle className="text-base">Listing Health</CardTitle>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Full reconciliation: mapped dealers vs synced vs pending vs public search.
+                  Full reconciliation derived from the Dealers master list: mapped dealers vs synced vs pending vs public search.
                   Requires adapter_run_log DDL migration to be applied.
                 </p>
               </CardHeader>
               <CardContent>
-                <InventoryCoverage adminToken={adminToken} />
+                <InventoryCoverage adminToken={adminToken} onFocusDealer={focusDealer} />
               </CardContent>
             </Card>
           </TabsContent>
