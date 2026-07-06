@@ -1877,6 +1877,93 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
     }
   });
 
+  // GET /api/admin/dealers-integrity — surfaces fragmentation between the
+  // `dealers` master list and slugs referenced by listings/pending_imports/sync_log/adapter_run_log.
+  // Returns three actionable buckets so the Dealers tab can display a health strip:
+  //   • orphanSlugs        — slug appears in sync/listing/pending/adapter tables but has no `dealers` row
+  //   • deadDealerRows     — `dealers` row exists but has zero activity anywhere (no listings, no pending, no sync log, no adapter run)
+  //   • duplicateDealerRows— `dealers` row with is_duplicate_of IS NOT NULL
+  // Read-only. Does not modify any backend process.
+  app.get("/api/admin/dealers-integrity", requireAdmin, async (_req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      // Paginated fetch (Supabase/PostgREST caps at 1000 rows even when .limit is larger)
+      async function fetchAll<T = any>(table: string, select: string, pageSize = 1000, maxRows = 50000): Promise<T[]> {
+        const out: T[] = [];
+        for (let from = 0; from < maxRows; from += pageSize) {
+          const { data, error } = await sb.from(table).select(select).range(from, from + pageSize - 1);
+          if (error) throw new Error(`${table}: ${error.message}`);
+          const rows = (data || []) as T[];
+          out.push(...rows);
+          if (rows.length < pageSize) break;
+        }
+        return out;
+      }
+
+      const [dealers, listings, pending, syncLogs, adapterRuns] = await Promise.all([
+        fetchAll<any>("dealers", "id,slug,name,state,city,website_url,is_duplicate_of"),
+        fetchAll<any>("listings", "sync_source"),
+        fetchAll<any>("pending_imports", "dealer_slug"),
+        fetchAll<any>("sync_log", "dealer_slug"),
+        fetchAll<any>("adapter_run_log", "dealer_slug").catch(() => [] as any[]),
+      ]);
+
+      const knownSlugs = new Set<string>(dealers.map(d => d.slug).filter(Boolean));
+
+      // Collect referenced slugs from all activity tables (skip null/empty).
+      const referencedSlugs = new Map<string, { listings: number; pending: number; syncLog: number; adapterRun: number }>();
+      function bump(slug: string | null | undefined, key: "listings" | "pending" | "syncLog" | "adapterRun") {
+        if (!slug) return;
+        const cur = referencedSlugs.get(slug) || { listings: 0, pending: 0, syncLog: 0, adapterRun: 0 };
+        cur[key]++;
+        referencedSlugs.set(slug, cur);
+      }
+      for (const l of listings)    bump(l.sync_source, "listings");
+      for (const p of pending)     bump(p.dealer_slug, "pending");
+      for (const s of syncLogs)    bump(s.dealer_slug, "syncLog");
+      for (const r of adapterRuns) bump(r.dealer_slug, "adapterRun");
+
+      // 1) Orphans — referenced but not in dealers table
+      const orphanSlugs = Array.from(referencedSlugs.entries())
+        .filter(([slug]) => !knownSlugs.has(slug))
+        .map(([slug, counts]) => ({ slug, ...counts }))
+        .sort((a, b) =>
+          (b.listings + b.pending + b.syncLog + b.adapterRun) -
+          (a.listings + a.pending + a.syncLog + a.adapterRun) ||
+          a.slug.localeCompare(b.slug)
+        );
+
+      // 2) Dead dealer rows — in dealers table but referenced nowhere
+      const deadDealerRows = dealers
+        .filter(d => !referencedSlugs.has(d.slug))
+        .map(d => ({ id: d.id, slug: d.slug, name: d.name, state: d.state, city: d.city, websiteUrl: d.website_url }))
+        .sort((a, b) => (a.state || "").localeCompare(b.state || "") || a.slug.localeCompare(b.slug));
+
+      // 3) Duplicate dealer rows — flagged via is_duplicate_of
+      const duplicateDealerRows = dealers
+        .filter(d => d.is_duplicate_of != null)
+        .map(d => ({ id: d.id, slug: d.slug, name: d.name, state: d.state, isDuplicateOf: d.is_duplicate_of }))
+        .sort((a, b) => a.slug.localeCompare(b.slug));
+
+      res.json({
+        totals: {
+          dealerRows: dealers.length,
+          referencedSlugs: referencedSlugs.size,
+          orphanSlugs: orphanSlugs.length,
+          deadDealerRows: deadDealerRows.length,
+          duplicateDealerRows: duplicateDealerRows.length,
+        },
+        orphanSlugs,
+        deadDealerRows,
+        duplicateDealerRows,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // POST /api/admin/run-migration — execute DDL using service-role key
   app.post("/api/admin/run-migration", requireAdmin, async (req, res) => {
     try {
