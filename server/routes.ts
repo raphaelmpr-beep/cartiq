@@ -373,9 +373,10 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       const { createClient } = await import("@supabase/supabase-js");
       const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
 
-      // Fetch candidate pool: active, public, priced, imaged
-      // 200-row limit keeps response fast without caching
-      const { data, error } = await sb
+      // Fetch candidate pool: active, public, priced, imaged.
+      // 500-row pool ordered by updated_at (for Hot Deals / Featured freshness);
+      // Recently Added draws from a separate query below ordered by created_at.
+      const baseQuery = () => sb
         .from("listings")
         .select("*")
         .eq("status", "active")
@@ -384,11 +385,24 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
         .gt("asking_price", 0)
         .not("image_url", "is", null)
         .neq("image_url", "")
-        .not("deal_rating", "eq", "overpriced")
+        .not("deal_rating", "eq", "overpriced");
+
+      const { data, error } = await baseQuery()
         .order("updated_at", { ascending: false })
-        .limit(200);
+        .limit(500);
       if (error) throw new Error(error.message);
       const pool: any[] = (data ?? []).filter(isEligible);
+
+      // Separate pool for Recently Added — ordered by created_at so we surface
+      // listings that are genuinely new to buyers, not just re-synced by adapters.
+      // Draws from the last 500 newly-created listings across ALL brands and dealers,
+      // preventing high-sync-frequency dealers (Venom EV, Club Car aggregators) from
+      // dominating the section just because their updated_at bumps often.
+      const { data: recentData, error: recentError } = await baseQuery()
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (recentError) throw new Error(recentError.message);
+      const recentPool: any[] = (recentData ?? []).filter(isEligible);
 
       // Per-request seed — changes on every load so listings rotate freely
       const seed = Date.now();
@@ -415,8 +429,12 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       // Blend recency with jitter: score = recency_score (0–50) + jitter (0–15)
       // so listings added within a few days of each other shuffle between visits
       // rather than always showing the same strict top-6 by created_at.
-      const recentCandidates = [...pool]
-        .filter(l => isEligible(l) && !usedIds.has(l.id))
+      //
+      // Diversity: max 1 per brand and max 1 per dealer. With 6 cards and ~20
+      // eligible brands / 28 eligible dealers in the pool, we should always be
+      // able to fill 6 unique-brand + unique-dealer slots.
+      const recentCandidates = recentPool
+        .filter(l => !usedIds.has(l.id))
         .map(l => {
           const ageDays = (Date.now() - new Date(l.created_at).getTime()) / 86_400_000;
           const recencyScore = Math.max(0, 50 - ageDays * 1.5); // 0–50, decays over ~33 days
@@ -424,7 +442,16 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
           return { ...l, _rscore: recencyScore + jitter };
         })
         .sort((a, b) => b._rscore - a._rscore);
-      const recentlyAdded = applyDiversity(recentCandidates, 6, usedIds, 2, 2);
+      let recentlyAdded = applyDiversity(recentCandidates, 6, usedIds, 1, 1);
+      // Safety net — if the strict caps under-fill (edge case with tiny catalogs
+      // or one brand truly dominating recent additions), relax to 2/2 to still
+      // return 6 cards. In practice this rarely fires with current inventory.
+      if (recentlyAdded.length < 6) {
+        recentlyAdded = [
+          ...recentlyAdded,
+          ...applyDiversity(recentCandidates, 6 - recentlyAdded.length, usedIds, 2, 2),
+        ];
+      }
 
       // ── Section 3: Featured / Promoted ───────────────────────────────
       // Use buyer_score as proxy for featured tier weight; rotate fairly
