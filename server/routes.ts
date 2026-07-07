@@ -1174,13 +1174,18 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
 
             const pricing = enrichListing(listing, comps, brandComps);
 
-            // Only write fields managed by the pricing engine
+            // Only write fields managed by the pricing engine.
+            // NOTE: price_confidence is owned by the sync pipeline (values:
+            // confirmed|estimated|stale|unavailable, enforced by a CHECK
+            // constraint). The pricer's high|medium|low signal is already
+            // captured by valuation_confidence, so we do NOT write
+            // price_confidence here — writing pricer vocab would violate the
+            // CHECK constraint and abort the row.
             const patch: Record<string, any> = {
               cartiq_estimated_value: pricing.cartiq_estimated_value,
               deal_rating:            pricing.deal_rating,
               deal_delta:             pricing.deal_delta,
               buyer_score:            pricing.buyer_score,
-              price_confidence:       pricing.price_confidence,
               valuation_confidence:   pricing.valuation_confidence,
             };
             if (pricing.estimated_delivery_cost !== null) patch.estimated_delivery_cost = pricing.estimated_delivery_cost;
