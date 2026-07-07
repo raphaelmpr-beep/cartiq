@@ -206,7 +206,9 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
   // ─── SEO: sitemap.xml (dynamic) ─────────────────────────────────────────────
   app.get("/sitemap.xml", async (_req, res) => {
     try {
-      const listings = await storage.getListings({ status: "active", public_listing: true });
+      // Sitemap: only expose renderable listings — Google shouldn't index blank
+      // product pages that lack image/price.
+      const listings = await storage.getListings({ status: "active", public_listing: true, renderable: true });
       const articles = await storage.getSeoArticles() as any[];
       const base = "https://golfcartiq.com";
       const today = new Date().toISOString().split("T")[0];
@@ -755,7 +757,9 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       // Sanitize: cap string params to prevent large input abuse
       const safeStr = (v: unknown, max = 100): string =>
         typeof v === "string" ? v.slice(0, max).replace(/[<>'"`;]/g, "") : "";
-      const filters: Record<string, unknown> = {};
+      // Public search: hide listings that would render as broken cards
+      // (missing image or missing price). Admin routes bypass this.
+      const filters: Record<string, unknown> = { renderable: true };
       if (req.query.state) filters.state = safeStr(req.query.state);
       if (req.query.city) filters.city = safeStr(req.query.city);
       if (req.query.brand) filters.brand = safeStr(req.query.brand);

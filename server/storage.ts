@@ -110,6 +110,11 @@ class SupabaseStorage implements IStorage {
     // Paginate internally with PAGE_SIZE=1000 to fetch all rows up to hardLimit.
     const PAGE_SIZE = 1000;
 
+    // renderable=true drops listings that would render as broken cards on the
+    // public search/sitemap (missing image or missing price). Admin routes leave
+    // this false so they still see every row for triage.
+    const renderable = filters.renderable === true;
+
     function buildQuery(from: number, to: number) {
       let q = db()
         .from("listings")
@@ -118,6 +123,12 @@ class SupabaseStorage implements IStorage {
         .eq("public_listing", true)
         .order("created_at", { ascending: false })
         .range(from, to);
+      if (renderable) {
+        q = q
+          .not("image_url", "is", null)
+          .neq("image_url", "")
+          .not("asking_price", "is", null);
+      }
       if (filters.state)       q = q.eq("state", filters.state);
       if (filters.brand)       q = q.ilike("brand", filters.brand as string);
       if (filters.sellerType)  q = q.eq("seller_type", filters.sellerType);
