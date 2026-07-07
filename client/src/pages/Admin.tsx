@@ -1250,8 +1250,13 @@ export default function Admin() {
         const el = document.getElementById(`dealer-row-${slug}`);
         if (el) {
           el.scrollIntoView({ behavior: "smooth", block: "center" });
-          // Update the URL hash so the :target CSS pseudo-class fires and highlights the row.
-          history.replaceState(null, "", `#dealer-row-${slug}`);
+          // Apply a temporary highlight class. (history.replaceState does not fire
+          // the :target pseudo-class in most browsers, so we drive the highlight
+          // directly instead of relying on the URL hash.)
+          el.classList.add("dealer-row-flash");
+          window.setTimeout(() => {
+            el.classList.remove("dealer-row-flash");
+          }, 2400);
         }
       });
     });
@@ -1428,7 +1433,7 @@ export default function Admin() {
                             <tr
                               key={d.id}
                               id={`dealer-row-${d.slug}`}
-                              className="odd:bg-white even:bg-gray-50 target:bg-yellow-100 target:ring-2 target:ring-yellow-400"
+                              className="odd:bg-white even:bg-gray-50 transition-colors duration-500"
                               data-testid={`row-dealer-${d.id}`}
                             >
                               <td className="p-2 border border-border font-mono text-xs">{d.slug}</td>
