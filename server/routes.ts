@@ -441,7 +441,48 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       const hotPool = hotCandidates.length >= 6
         ? hotCandidates
         : [...hotCandidates, ...scored.filter(l => l.deal_rating === "fair_price")];
-      const hotDeals = applyDiversity(hotPool, 12, usedIds, 1, 2);
+      // Hot Deals: round-robin across dealers so every active dealer gets a
+      // roughly equal share of the 12 slots, no matter how many listings each
+      // has in the hot pool. With the current dealer graph (~5 hot-eligible
+      // dealers) a fixed maxPerDealer=1 caps output at 5, and any static cap
+      // still lets the largest dealer dominate. Round-robin picks each
+      // dealer's best-scored listing in turn, cycling until we reach 12.
+      // Brand cap of 2 still enforced to prevent a single-brand takeover.
+      const hotByDealer = new Map<string, any[]>();
+      for (const l of hotPool) {
+        const dk = String(l.dealer_id ?? l.seller_name ?? 'private');
+        if (!hotByDealer.has(dk)) hotByDealer.set(dk, []);
+        hotByDealer.get(dk)!.push(l);
+      }
+      // Order dealer buckets by their best listing's score so the highest-
+      // scoring dealer picks first each round (stable, quality-preserving).
+      const dealerBuckets: Array<{ dk: string; ls: any[] }> = [];
+      hotByDealer.forEach((ls, dk) => {
+        dealerBuckets.push({ dk, ls: ls.slice().sort((a: any, b: any) => b._score - a._score) });
+      });
+      dealerBuckets.sort((a, b) => (b.ls[0]?._score ?? 0) - (a.ls[0]?._score ?? 0));
+      const hotDeals: any[] = [];
+      const hotBrandCount: Record<string, number> = {};
+      const HOT_MAX_PER_BRAND = 2;
+      let progress = true;
+      while (hotDeals.length < 12 && progress) {
+        progress = false;
+        for (const bucket of dealerBuckets) {
+          if (hotDeals.length >= 12) break;
+          // Pop next listing from this dealer that passes the brand cap
+          while (bucket.ls.length) {
+            const cand = bucket.ls.shift()!;
+            const bk = (cand.brand ?? 'unknown').toLowerCase();
+            if ((hotBrandCount[bk] ?? 0) >= HOT_MAX_PER_BRAND) continue;
+            if (usedIds.has(cand.id)) continue;
+            hotDeals.push(cand);
+            usedIds.add(cand.id);
+            hotBrandCount[bk] = (hotBrandCount[bk] ?? 0) + 1;
+            progress = true;
+            break;
+          }
+        }
+      }
 
       // ── Section 2: Recently Added ─────────────────────────────────────
       //
