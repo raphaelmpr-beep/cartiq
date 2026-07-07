@@ -817,12 +817,21 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       const id = parseInt(req.params.id);
       const data = req.body as Record<string, any>;
       const oldListing = await storage.getListingById(id);
-      const oldEffectivePrice = oldListing
-        ? (oldListing.asking_price ?? oldListing.sale_price ?? oldListing.regular_price ?? 0)
-        : null;
+      // Distinguish "row doesn't exist" (404) from "update returned no row"
+      // (503, RLS-blocked or DB error) so admins can actually diagnose failures.
+      if (!oldListing) return res.status(404).json({ error: "Listing not found" });
+      const oldEffectivePrice = oldListing.asking_price ?? oldListing.sale_price ?? oldListing.regular_price ?? 0;
       const enriched = await enrichListingWithComps(data, id);
       const listing = await storage.updateListing(id, enriched as any);
-      if (!listing) return res.status(404).json({ error: "Listing not found" });
+      if (!listing) {
+        // Row exists but update returned nothing — almost always RLS blocking
+        // the SELECT after UPDATE. Surface loudly instead of pretending it's 404.
+        console.error(`[PATCH /api/listings/${id}] update returned no row (likely RLS-blocked). Enriched keys:`, Object.keys(enriched || {}));
+        return res.status(503).json({
+          error: "Update accepted but no row returned. Likely RLS-blocked write. Check server logs.",
+          id,
+        });
+      }
       const newEffectivePrice = listing.asking_price ?? listing.sale_price ?? listing.regular_price ?? 0;
       let alerts: any[] = [];
       if (oldEffectivePrice !== null && newEffectivePrice < oldEffectivePrice) {
@@ -830,6 +839,7 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       }
       res.json({ ...norm(suppressDeliveryIfUnavailable(listing as any)), _alertsFired: alerts.length });
     } catch (e: any) {
+      console.error(`[PATCH /api/listings/${req.params.id}] threw:`, e);
       res.status(400).json({ error: e.message });
     }
   });
@@ -837,10 +847,20 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
   app.delete("/api/listings/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      // Check row exists first so we can distinguish 404 from an RLS-blocked delete.
+      const existing = await storage.getListingById(id);
+      if (!existing) return res.status(404).json({ error: "Listing not found" });
       const deleted = await storage.deleteListing(id);
-      if (!deleted) return res.status(404).json({ error: "Listing not found" });
+      if (!deleted) {
+        console.error(`[DELETE /api/listings/${id}] row exists but delete returned 0. Likely RLS-blocked. Callers should archive (status=archived) instead.`);
+        return res.status(503).json({
+          error: "Delete accepted but no row removed. Likely RLS-blocked. Try archiving (PATCH status=archived) instead.",
+          id,
+        });
+      }
       res.json({ success: true });
     } catch (e: any) {
+      console.error(`[DELETE /api/listings/${req.params.id}] threw:`, e);
       res.status(500).json({ error: e.message });
     }
   });
