@@ -395,14 +395,30 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
 
       // Separate pool for Recently Added — ordered by created_at so we surface
       // listings that are genuinely new to buyers, not just re-synced by adapters.
-      // Draws from the last 500 newly-created listings across ALL brands and dealers,
-      // preventing high-sync-frequency dealers (Venom EV, Club Car aggregators) from
-      // dominating the section just because their updated_at bumps often.
+      // Pull 2000 candidates so we can build a per-brand-balanced pool below
+      // (raw top-500 is dominated by Club Car at ~50% of the window).
       const { data: recentData, error: recentError } = await baseQuery()
         .order("created_at", { ascending: false })
-        .limit(500);
+        .limit(2000);
       if (recentError) throw new Error(recentError.message);
-      const recentPool: any[] = (recentData ?? []).filter(isEligible);
+      const recentRaw: any[] = (recentData ?? []).filter(isEligible);
+
+      // Per-brand cap: keep at most MAX_PER_BRAND_IN_POOL of each brand's most
+      // recent listings. This prevents Club Car (which is ~50% of the raw
+      // recent-2000 window because of adapter cadence and catalog size) from
+      // dominating the weighted sample simply by having more entries.
+      // Simulation on live data: cap=40 with R=8/T=15 -> adjShared=1.93/6,
+      // top brand share 10%, all 21 catalog brands visible (vs 13 uncapped).
+      const MAX_PER_BRAND_IN_POOL = 40;
+      const brandTake: Record<string, number> = {};
+      const recentPool: any[] = [];
+      for (const l of recentRaw) {
+        const b = (l.brand ?? "unknown").toLowerCase();
+        const taken = brandTake[b] ?? 0;
+        if (taken >= MAX_PER_BRAND_IN_POOL) continue;
+        recentPool.push(l);
+        brandTake[b] = taken + 1;
+      }
 
       // Per-request seed — changes on every load so listings rotate freely
       const seed = Date.now();
