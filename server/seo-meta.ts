@@ -255,9 +255,9 @@ const STATIC_ROUTES: Record<string, { title: string; description: string }> = {
       "How to figure out what a used golf cart is worth: brand-by-brand depreciation, battery age adjustments, condition grading, and a fair-price checklist for buyers and sellers.",
   },
   "/golf-cart-value-estimator": {
-    title: `Free Golf Cart Value Estimator — What Is My Cart Worth? | ${SITE_NAME}`,
+    title: `Golf Cart Value Estimator — What's My Golf Cart Worth? (Free) | ${SITE_NAME}`,
     description:
-      "Get a free instant golf cart value estimate. Enter your brand, year, battery type, and condition to see a private-party value range, dealer trade-in range, and a GolfCartIQ score.",
+      "How much is your golf cart worth? Free instant value estimator for Club Car, E-Z-GO, Yamaha, ICON, Evolution and more. See private-sale and dealer trade-in ranges in 30 seconds — no email required.",
   },
   // ─── Other pages ─────────────────────────────────────────────────────────────
   "/how-it-works": {

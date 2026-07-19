@@ -504,6 +504,18 @@ export function UsedGolfCartValuePage() {
 
 const ESTIMATOR_FAQS: { q: string; a: string }[] = [
   {
+    q: "How much is my golf cart worth?",
+    a: "Enter your brand, model, year, condition, and battery type and the estimator returns a private-sale range and a dealer trade-in range in about 30 seconds. As a rough rule of thumb: a well-kept 4-year-old Club Car, E-Z-GO, or Yamaha typically sells private-party for 55–70% of its original MSRP in Florida and Georgia, while trade-in offers usually land 20–30% below that private-sale range.",
+  },
+  {
+    q: "What is my golf cart worth on a dealer trade-in?",
+    a: "Dealer trade-in values are almost always lower than private-sale values because the dealer needs margin to recondition and resell the cart. GolfCartIQ shows both numbers side-by-side so you can walk into any Florida or Georgia dealer knowing your floor before you negotiate.",
+  },
+  {
+    q: "Is there a Kelley Blue Book (KBB) for golf carts?",
+    a: "Kelley Blue Book has added a limited golf cart category, but it does not weight battery age, lithium vs. lead-acid, or regional FL and GA demand — all of which materially move real sale prices. GolfCartIQ's Value Estimator is built specifically for golf carts and pulls from live Florida and Georgia dealer listings, so it is generally more accurate for this market. Use both if you want a second data point.",
+  },
+  {
     q: "How accurate is the GolfCartIQ Value Estimator?",
     a: "The estimator returns a market-derived range, not a single price. Actual sale prices in Florida and Georgia typically land inside the estimated range 80–85% of the time. Extreme condition, rare accessories, or unusual battery states can push the sale price outside the range.",
   },
@@ -513,15 +525,15 @@ const ESTIMATOR_FAQS: { q: string; a: string }[] = [
   },
   {
     q: "Does the estimator cover every brand?",
-    a: "It covers all major brands: Club Car, E-Z-GO, Yamaha, Icon, Evolution, Bintelli, Denago, Epic, Venom EV, Teko EV, and more. Very rare or discontinued models may return a wider range with lower confidence.",
+    a: "It covers all major brands: Club Car, E-Z-GO, Yamaha, ICON, Evolution, Bintelli, Denago EV, Epic, Venom EV, Teko EV, and more. Very rare or discontinued models may return a wider range with lower confidence.",
   },
   {
     q: "How often is the estimator updated?",
     a: "The underlying listing data refreshes daily; depreciation curves are recalibrated weekly against actual sale prices.",
   },
   {
-    q: "Is this an official Kelley Blue Book replacement?",
-    a: "No — GolfCartIQ is not affiliated with Kelley Blue Book. KBB has recently added a limited golf cart category, but it does not weight battery age or regional demand the way this estimator does. Use both if you want a second data point.",
+    q: "Does battery age or lithium vs. lead-acid change my golf cart's value?",
+    a: "Yes — battery condition is one of the biggest single value drivers. A cart with a recent lithium pack can be worth $1,500–$3,000 more than the same cart with 5+ year-old lead-acid batteries, because the buyer avoids a near-term replacement bill. The estimator applies this adjustment automatically when you select battery type and age.",
   },
 ];
 
@@ -668,9 +680,9 @@ export function GolfCartValueEstimatorPage() {
 
   useEffect(() => {
     setSEO({
-      title: "Golf Cart Value Estimator — Free Instant Price Calculator",
+      title: "Golf Cart Value Estimator — What's My Golf Cart Worth? (Free)",
       description:
-        "Instantly estimate your golf cart's private-sale and trade-in value. Enter brand, model, year, and condition — free, no email, results in 30 seconds.",
+        "How much is your golf cart worth? Free instant value estimator for Club Car, E-Z-GO, Yamaha, ICON, Evolution and more. See private-sale and dealer trade-in ranges in 30 seconds — no email required.",
       canonical: "https://golfcartiq.com/golf-cart-value-estimator",
       jsonLd: [
         faqPageSchema(ESTIMATOR_FAQS),
@@ -716,10 +728,10 @@ export function GolfCartValueEstimatorPage() {
 
       <header className="space-y-3 mb-6">
         <h1 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-tight text-foreground">
-          Free Golf Cart Value Estimator
+          What's My Golf Cart Worth? Free Value Estimator
         </h1>
         <p className="text-base md:text-lg text-muted-foreground">
-          Get an instant private-sale and trade-in estimate for your golf cart. No email required.
+          How much is your golf cart worth? Get an instant private-sale and dealer trade-in estimate for Club Car, E-Z-GO, Yamaha, ICON, Evolution and more. Free, no email required, results in 30 seconds.
         </p>
       </header>
 
