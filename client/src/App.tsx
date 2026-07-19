@@ -1,5 +1,4 @@
-import { Switch, Route, Router } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
+import { Switch, Route } from "wouter";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
@@ -47,7 +46,7 @@ function NotFound() {
       <div className="text-center">
         <h1 className="text-2xl font-bold mb-2">Page Not Found</h1>
         <p className="text-muted-foreground mb-4">The page you're looking for doesn't exist.</p>
-        <a href="/#/" className="text-green-600 hover:underline">Go Home</a>
+        <a href="/" className="text-green-600 hover:underline">Go Home</a>
       </div>
     </div>
   );
@@ -107,19 +106,19 @@ function AppRoutes() {
               <span>Know before you buy — Florida &amp; Georgia</span>
             </div>
             <div className="flex flex-wrap gap-4">
-              <a href="/#/buyer-guide" className="hover:text-foreground">Buyer Guide</a>
-              <a href="/#/deal-checker" className="hover:text-foreground">Deal Checker</a>
-              <a href="/#/search" className="hover:text-foreground">Search</a>
-              <a href="/#/garage" className="hover:text-foreground">My Garage</a>
-              <a href="/#/how-it-works" className="hover:text-foreground">How It Works</a>
-              <a href="/#/disclosure" className="hover:text-foreground font-medium text-foreground/70">Disclosure</a>
+              <a href="/buyer-guide" className="hover:text-foreground">Buyer Guide</a>
+              <a href="/deal-checker" className="hover:text-foreground">Deal Checker</a>
+              <a href="/search" className="hover:text-foreground">Search</a>
+              <a href="/garage" className="hover:text-foreground">My Garage</a>
+              <a href="/how-it-works" className="hover:text-foreground">How It Works</a>
+              <a href="/disclosure" className="hover:text-foreground font-medium text-foreground/70">Disclosure</a>
             </div>
           </div>
           {/* Bottom row — legal line */}
           <div className="border-t border-border pt-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
             <p>© {new Date().getFullYear()} GolfCartIQ · GolfCartIQ is a research, comparison, and lead-referral platform. We do not sell golf carts or complete transactions. Buyers should confirm all details directly with the dealer or seller.</p>
-            <a href="/#/disclosure" className="hover:text-foreground underline whitespace-nowrap">Information Disclosure</a>
-            <a href="/#/admin" className="text-muted-foreground/40 hover:text-muted-foreground transition-colors whitespace-nowrap">Admin</a>
+            <a href="/disclosure" className="hover:text-foreground underline whitespace-nowrap">Information Disclosure</a>
+            <a href="/admin" className="text-muted-foreground/40 hover:text-muted-foreground transition-colors whitespace-nowrap">Admin</a>
           </div>
         </div>
       </footer>
@@ -131,9 +130,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <Router hook={useHashLocation}>
-          <AppRoutes />
-        </Router>
+        <AppRoutes />
         <Toaster />
         <SpeedInsights />
         <Analytics />

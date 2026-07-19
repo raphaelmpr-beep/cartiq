@@ -271,8 +271,7 @@ export default function Search() {
 
   // Parse URL params on mount, then auto-fill zip from saved location if no zip in URL.
   useEffect(() => {
-    const searchStr = window.location.search
-      || window.location.hash.split("?")[1] || "";
+    const searchStr = window.location.search;
     const params = new URLSearchParams(searchStr);
     const init: ClientFilters = {};
     params.forEach((v, k) => { (init as any)[k] = v; });
@@ -296,7 +295,7 @@ export default function Search() {
     const params = new URLSearchParams();
     Object.entries(next).forEach(([k, v]) => { if (v) params.set(k, v); });
     const qs = params.toString();
-    window.history.replaceState(null, "", `#/search${qs ? `?${qs}` : ""}`);
+    window.history.replaceState(null, "", `/search${qs ? `?${qs}` : ""}`);
   }, []);
 
   function setFilter(key: keyof ClientFilters, value: string) {
@@ -419,7 +418,7 @@ export default function Search() {
           const params = new URLSearchParams();
           Object.entries(next).forEach(([k, v]) => { if (v) params.set(k, v as string); });
           const qs = params.toString();
-          window.history.replaceState(null, "", `#/search${qs ? `?${qs}` : ""}`);
+          window.history.replaceState(null, "", `/search${qs ? `?${qs}` : ""}`);
           return next;
         });
         setZipCoords([saved.lat, saved.lng]);

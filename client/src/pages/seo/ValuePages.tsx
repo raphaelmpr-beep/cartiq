@@ -11,7 +11,6 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
 import { setSEO } from "@/lib/seo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -659,7 +658,7 @@ export function GolfCartValueEstimatorPage() {
   const [batteryType, setBatteryType] = useState<string>("");
   const [batteryAge, setBatteryAge]   = useState<string>("");
   const [result, setResult]       = useState<EstimateResult | null>(null);
-  const [, hashNav] = useHashLocation();
+  const [, hashNav] = useLocation();
 
   const modelsForBrand = useMemo(
     () => BRAND_MODELS.find(b => b.brand === brand)?.models ?? [],
