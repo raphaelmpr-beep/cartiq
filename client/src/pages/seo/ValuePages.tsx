@@ -69,6 +69,62 @@ function faqPageSchema(faqs: { q: string; a: string }[]): object {
   };
 }
 
+function howToSchema(args: {
+  name: string;
+  description: string;
+  steps: { name: string; text: string }[];
+}): object {
+  return {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: args.name,
+    description: args.description,
+    step: args.steps.map((s, i) => ({
+      "@type": "HowToStep",
+      position: i + 1,
+      name: s.name,
+      text: s.text,
+    })),
+  };
+}
+
+/**
+ * SnippetAnswer — a snippet-optimized direct-answer block designed to win
+ * Google Featured Snippets. Google preferentially promotes a concise
+ * 40–60 word answer paragraph placed at the top of the page, immediately
+ * under H1, using the exact question phrasing.
+ */
+function SnippetAnswer({
+  question,
+  answer,
+  bullets,
+}: {
+  question: string;
+  answer: string;
+  bullets?: string[];
+}) {
+  return (
+    <div className="bg-green-50 border border-green-200 rounded-xl p-5 md:p-6 my-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-green-700 mb-2">
+        {question}
+      </p>
+      <p className="text-base md:text-lg text-foreground leading-relaxed font-medium">
+        {answer}
+      </p>
+      {bullets && bullets.length > 0 && (
+        <ul className="mt-3 space-y-1.5 text-sm md:text-base text-foreground">
+          {bullets.map((b, i) => (
+            <li key={i} className="flex gap-2">
+              <span className="text-green-600 font-bold shrink-0">•</span>
+              <span>{b}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Page 1 — /golf-cart-values (pillar)
 // ────────────────────────────────────────────────────────────────────────────
@@ -130,6 +186,18 @@ export function GolfCartValuesPage() {
       canonical: "https://golfcartiq.com/golf-cart-values",
       jsonLd: [
         faqPageSchema(PILLAR_FAQS),
+        howToSchema({
+          name: "How to Determine Your Golf Cart's Value",
+          description:
+            "A 5-step method for figuring out what your golf cart is worth in 2026, based on brand, age, condition, battery health, and local market comparables.",
+          steps: [
+            { name: "Start with the brand's retention rate", text: "Look up your brand's 5-year value retention (Club Car ~55%, Yamaha ~53%, E-Z-GO ~52%, ICON ~45%). Multiply by original MSRP or current new-cart replacement cost." },
+            { name: "Apply age depreciation", text: "Subtract 15–20% for year one, then 10–12% per year through year five. After year five, depreciation slows to 3–5% per year." },
+            { name: "Adjust for condition", text: "Add 10–15% for excellent condition. Subtract 15–25% for fair or poor condition. Focus on paint, seats, tires, and functional accessories." },
+            { name: "Factor in battery type and age", text: "Add $1,000–$2,000 for a healthy lithium pack. Subtract $800–$1,500 if lead-acid batteries are 4+ years old and showing reduced range." },
+            { name: "Compare against local listings", text: "Check at least 5 similar carts in your ZIP code on GolfCartIQ, Facebook Marketplace, and dealer sites. Your fair-market value is the median of comparable carts, not the highest asking price." },
+          ],
+        }),
         {
           "@context": "https://schema.org",
           "@type": "WebPage",
@@ -148,12 +216,30 @@ export function GolfCartValuesPage() {
         <h1 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-tight text-foreground">
           Golf Cart Values: 2026 Price Guide for Every Brand &amp; Year
         </h1>
+
+        {/* Featured-snippet direct answer */}
+        <SnippetAnswer
+          question="How much is a golf cart worth in 2026?"
+          answer="Most golf carts in 2026 are worth between $2,000 and $13,000. A clean 3–5 year old cart from a top brand retains about 55–70% of its MSRP; a 10-year-old cart is typically worth 25–35% of new. Battery health, brand, and lithium conversion move the number more than age alone."
+          bullets={[
+            "Club Car: 55–70% retained at 3–5 years — top of the market",
+            "Yamaha & E-Z-GO: 50–65% retained at 3–5 years",
+            "ICON, Evolution, Venom EV: 40–55% retained at 3–5 years",
+            "Add $1,000–$2,000 for a healthy lithium (LiFePO4) pack",
+            "Subtract $800–$1,500 for lead-acid batteries past year 4",
+          ]}
+        />
+
         <p className="text-base md:text-lg text-muted-foreground leading-relaxed">
-          What is a golf cart actually worth? Unlike cars, there is no single Kelley Blue Book for golf carts — but the answer is not guesswork either.
+          Unlike cars, there is no single Kelley Blue Book for golf carts — but the answer is not guesswork either.
           GolfCartIQ tracks live dealer listings across Florida and Georgia, cross-references MSRP data, and gives you honest value ranges by
           brand, year, condition, and battery type. For a personalized number, use our{" "}
           <Link href="/golf-cart-value-estimator" className="text-green-700 hover:underline font-medium">
             Golf Cart Value Estimator
+          </Link>{" "}
+          or read our{" "}
+          <Link href="/used-golf-cart-value" className="text-green-700 hover:underline font-medium">
+            used golf cart pricing guide
           </Link>.
         </p>
         <div>
@@ -354,7 +440,22 @@ export function UsedGolfCartValuePage() {
       description:
         "Get a fair-market value for your used golf cart. See private-sale and trade-in ranges by brand, year, and condition. Free instant estimate, no email required.",
       canonical: "https://golfcartiq.com/used-golf-cart-value",
-      jsonLd: faqPageSchema(USED_FAQS),
+      jsonLd: [
+        faqPageSchema(USED_FAQS),
+        howToSchema({
+          name: "How to Price a Used Golf Cart",
+          description:
+            "A 6-step method to price a used golf cart in 2026 for a private sale, trade-in, or purchase — using brand retention, battery health, and comparable listings.",
+          steps: [
+            { name: "Identify the brand, model, and year", text: "Find the serial number on the frame or under the seat. Confirm the exact model (e.g., Club Car Precedent vs. Onward) and build year — these change the value by 20–40%." },
+            { name: "Start with the age-based value range", text: "1–2 years old: 70–80% of MSRP. 3–4 years: 55–70%. 5–6 years: 45–55%. 7–8 years: 35–45%. 9–10 years: 25–35%. 10+ years: 15–25%." },
+            { name: "Adjust for brand retention", text: "Club Car retains 5–10% more than the age curve; Yamaha and E-Z-GO track the curve; ICON, Evolution, and newer imports fall 5–10% below it." },
+            { name: "Grade the condition honestly", text: "Excellent adds 10–15%. Good is baseline. Fair subtracts 15–25%. Poor subtracts 30% or more. Battery health is the single biggest factor — test it before pricing." },
+            { name: "Adjust for battery type and age", text: "Add $1,000–$2,000 for lithium in good health. Subtract $800–$1,500 for lead-acid past year 4. New lithium conversion adds $1,500–$3,000." },
+            { name: "Verify against 5+ local comparables", text: "Search GolfCartIQ, Facebook Marketplace, and Craigslist for the same brand, model year, and battery type within 100 miles. Your fair price is the median — not the highest ask." },
+          ],
+        }),
+      ],
     });
   }, []);
 
@@ -366,10 +467,31 @@ export function UsedGolfCartValuePage() {
         <h1 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-tight text-foreground">
           What Is My Used Golf Cart Worth?
         </h1>
+
+        {/* Featured-snippet direct answer */}
+        <SnippetAnswer
+          question="How much is a used golf cart worth?"
+          answer="A used golf cart in good condition is typically worth $2,000–$9,500 in 2026, depending on age, brand, and battery health. A 5-year-old Club Car or Yamaha sells for roughly $4,500–$6,500 privately, or $3,200–$4,600 as a trade-in. Battery condition is the single biggest factor after brand and age."
+          bullets={[
+            "1–3 year old cart: $6,500–$9,500+ (70–80% of MSRP retained)",
+            "5–7 year old cart: $4,000–$6,500 (best value zone)",
+            "8–10 year old cart: $2,500–$4,000",
+            "10+ year old cart: $1,500–$3,000 (project territory)",
+            "Private sale nets 20–30% more than dealer trade-in",
+          ]}
+        />
+
         <p className="text-base md:text-lg text-muted-foreground leading-relaxed">
           If you're selling, trading, or buying a used golf cart, the first question is always the same: what's it actually worth?
-          This guide breaks down 2026 used golf cart values by brand, year, condition, and power type — and lets you get a
-          personalized estimate in under a minute.
+          This guide breaks down 2026 used golf cart values by brand, year, condition, and power type. For a personalized number,
+          use the{" "}
+          <Link href="/golf-cart-value-estimator" className="text-green-700 hover:underline font-medium">
+            Golf Cart Value Estimator
+          </Link>{" "}
+          or see the full{" "}
+          <Link href="/golf-cart-values" className="text-green-700 hover:underline font-medium">
+            brand-by-brand value guide
+          </Link>.
         </p>
         <div>
           <Link href="/golf-cart-value-estimator">
@@ -674,6 +796,17 @@ export function GolfCartValueEstimatorPage() {
       canonical: "https://golfcartiq.com/golf-cart-value-estimator",
       jsonLd: [
         faqPageSchema(ESTIMATOR_FAQS),
+        howToSchema({
+          name: "How to Estimate Your Golf Cart's Value",
+          description:
+            "A 4-step process for getting an instant, accurate private-sale and trade-in estimate for your golf cart using the free GolfCartIQ Value Estimator.",
+          steps: [
+            { name: "Enter brand and model", text: "Select your golf cart's brand (Club Car, E-Z-GO, Yamaha, ICON, Evolution, etc.) and specific model. Legacy brands hold value 10–15% better than newer entrants." },
+            { name: "Enter model year and condition", text: "Enter the year the cart was manufactured (typically found on the frame plate). Rate condition Excellent, Good, Fair, or Poor based on paint, seats, tires, and functional accessories." },
+            { name: "Enter power type and battery info", text: "Select Electric or Gas. For electric carts, choose lead-acid or lithium and estimate battery age. Battery health is the single biggest swing factor on carts 5+ years old." },
+            { name: "Review your private-sale and trade-in ranges", text: "You will see two ranges: private-sale value (higher, requires effort) and trade-in value (lower, instant). Compare against 5+ local listings before setting your final price." },
+          ],
+        }),
         {
           "@context": "https://schema.org",
           "@type": "WebApplication",
@@ -714,12 +847,34 @@ export function GolfCartValueEstimatorPage() {
     <div className="max-w-4xl mx-auto px-4 py-8 md:py-12">
       <Breadcrumb crumbs={[{ label: "Golf Cart Value Estimator" }]} />
 
-      <header className="space-y-3 mb-6">
+      <header className="space-y-4 mb-6">
         <h1 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-tight text-foreground">
           Free Golf Cart Value Estimator
         </h1>
+
+        {/* Featured-snippet direct answer */}
+        <SnippetAnswer
+          question="How do I estimate my golf cart's value?"
+          answer="To estimate a golf cart's value, enter the brand, model, year, and condition into the calculator below. The estimator returns both a private-sale range (typically $2,000–$13,000) and a dealer trade-in range — usually 20–30% lower. Results reflect current 2026 dealer listings from Florida and Georgia."
+          bullets={[
+            "Step 1: Pick your brand and model from the dropdown",
+            "Step 2: Enter year and select condition (Excellent → Poor)",
+            "Step 3: Choose gas or electric — add battery type & age if electric",
+            "Step 4: See instant private-sale and trade-in ranges",
+            "100% free · no email required · 30-second estimate",
+          ]}
+        />
+
         <p className="text-base md:text-lg text-muted-foreground">
-          Get an instant private-sale and trade-in estimate for your golf cart. No email required.
+          Get an instant private-sale and trade-in estimate for your golf cart. See the full{" "}
+          <Link href="/golf-cart-values" className="text-green-700 hover:underline font-medium">
+            brand-by-brand value guide
+          </Link>{" "}
+          or read{" "}
+          <Link href="/used-golf-cart-value" className="text-green-700 hover:underline font-medium">
+            what a used golf cart is worth
+          </Link>{" "}
+          in 2026.
         </p>
       </header>
 

@@ -127,8 +127,8 @@ return fn.apply(this, arguments)
         setTimeout(loadGA, 5000);
       })();
     </script>
-    <script type="module" crossorigin src="/assets/index-kIRkwkwI.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-f8Mw2np4.css">
+    <script type="module" crossorigin src="/assets/index-B7XAZwnA.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BUHuBEi2.css">
   </head>
   <body>
     <div id="root"></div>

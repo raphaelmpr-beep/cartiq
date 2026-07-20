@@ -264,6 +264,72 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* ─── Golf Cart Values by Brand (internal linking module) ─────────────── */}
+      <section className="bg-white border-b border-border">
+        <div className="max-w-7xl mx-auto px-4 py-10">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-bold">Golf Cart Values &amp; Pricing</h2>
+              <p className="text-sm text-muted-foreground mt-1">Free guides, calculators, and 2026 price data — no signup required.</p>
+            </div>
+            <Link href="/golf-cart-values" className="text-sm text-green-700 hover:underline flex items-center gap-1">
+              All value guides <ChevronRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Link
+              href="/golf-cart-value-estimator"
+              className="group border border-border rounded-xl p-5 bg-gradient-to-br from-green-50 to-white hover:border-green-300 hover:shadow-sm transition-all"
+            >
+              <div className="text-xs font-semibold uppercase tracking-wide text-green-700 mb-2">Instant Estimate</div>
+              <h3 className="font-bold text-base mb-1 group-hover:text-green-700">Golf Cart Value Estimator</h3>
+              <p className="text-sm text-muted-foreground">Get a private-sale &amp; trade-in price in 30 seconds. Enter brand, model, year, condition.</p>
+            </Link>
+
+            <Link
+              href="/used-golf-cart-value"
+              className="group border border-border rounded-xl p-5 bg-white hover:border-green-300 hover:shadow-sm transition-all"
+            >
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Pricing Guide</div>
+              <h3 className="font-bold text-base mb-1 group-hover:text-green-700">Used Golf Cart Value Guide</h3>
+              <p className="text-sm text-muted-foreground">What's a used golf cart worth in 2026? Age &amp; battery-adjusted ranges by brand.</p>
+            </Link>
+
+            <Link
+              href="/golf-cart-values"
+              className="group border border-border rounded-xl p-5 bg-white hover:border-green-300 hover:shadow-sm transition-all"
+            >
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Full Guide</div>
+              <h3 className="font-bold text-base mb-1 group-hover:text-green-700">Golf Cart Values by Brand</h3>
+              <p className="text-sm text-muted-foreground">Club Car, Yamaha, E-Z-GO, ICON, Evolution &amp; more — 5-year retention data.</p>
+            </Link>
+          </div>
+
+          <div className="mt-5 pt-5 border-t border-border">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Popular value searches</div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { label: "Club Car value",     href: "/golf-cart-values#club-car" },
+                { label: "Yamaha value",       href: "/golf-cart-values#yamaha" },
+                { label: "E-Z-GO value",       href: "/golf-cart-values#e-z-go" },
+                { label: "ICON EV value",      href: "/golf-cart-values#icon" },
+                { label: "Evolution value",    href: "/golf-cart-values#evolution" },
+                { label: "Star EV value",      href: "/golf-cart-values#star-ev" },
+                { label: "Teko EV value",      href: "/brands/teko-ev" },
+                { label: "Lithium vs lead-acid", href: "/golf-cart-values#battery" },
+              ].map(({ label, href }) => (
+                <Link key={href} href={href}
+                  className="inline-flex items-center px-3 py-1.5 rounded-full border border-border text-xs hover:bg-secondary hover:border-green-200 transition-colors">
+                  {label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ─── Buyer Guide Cards ────────────────────────────────────────────────── */}
       {/* min-h reserves space for 3-card grid while /api/buyer-guide resolves (~1.7s).
           Prevents the late-arriving cards from shifting all content below them (CLS). */}
