@@ -424,28 +424,23 @@ export async function runBrowserSync(
       try {
         log(`  Parsing: ${url}`);
         const data = await parseFn(page, url);
-
-      const parseTasks = newUrls.map(url => async (): Promise<ListingData | null> => {
-        const page = await context.newPage();
-        try {
-          log(`  Parsing: ${url}`);
-          const data = await parseFn!(page, url);
-
-          // Fallback: fill in city/state from dealer config if parser couldn't extract it
-          if (!data.location_city) data.location_city = dealerCfg.locationCity;
-          if (!data.location_state) data.location_state = dealerCfg.locationState;
+        if (data && !data.location_city) data.location_city = dealerCfg.locationCity;
+        if (data && !data.location_state) data.location_state = dealerCfg.locationState;
+        return data;
+      } catch (e: any) {
+        result.parse_errors++;
+        log(`  Parse error: ${url} — ${e?.message}`);
+        return null;
+      } finally {
+        await page.close();
+      }
+    });
 
     const parseResults = await runWithConcurrency(parseTasks, MAX_CONCURRENCY);
     await parseBrowser.close();
     const validListings = parseResults.filter((l): l is ListingData => l !== null);
     result.listings = validListings;
-
-      const parseResults = await runWithConcurrency(parseTasks, MAX_CONCURRENCY);
-      validListings = parseResults.filter((l): l is ListingData => l !== null);
-      result.listings = validListings;
-
-      log(`[BrowserSync] Parsed ${validListings.length}/${newUrls.length} successfully`);
-    }
+    log(`[BrowserSync] Parsed ${validListings.length}/${urlsToProcess.length} successfully`);
 
     // ── Step 4: Persist results ──────────────────────────────────────────────────
     // Re-parse path: reactivate inactive listings with fresh page data

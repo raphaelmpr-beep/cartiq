@@ -640,35 +640,18 @@ async function runDiscoverSitemap(
           bsResult.summary[bsResult.summary.length - 1] || 'Browser sync complete'
         );
       } catch (e: any) {
-        const msg = `[${slug}] Browser sync error: ${e.message}`;
+        // Playwright unavailable in Lambda — mark for next Playwright-capable run.
+        const isPlaywrightMissing = /playwright|chromium|browserType|Executable doesn/i.test(e?.message || '');
+        const msg = isPlaywrightMissing
+          ? `[${slug}] Playwright not available in this environment — will retry from weekly cron`
+          : `[${slug}] Browser sync error: ${e?.message || e}`;
         result.errors++;
         result.summary.push(msg);
-        await writeDiscoveryStatus(supabase, slug, 'needs_browser', msg);
-        return;
+        await writeDiscoveryStatus(supabase, slug, isPlaywrightMissing ? 'needs_browser' : 'error', msg);
       }
-
-      result.new_queued    += bsResult.new_queued;
-      result.already_known += bsResult.already_known;
-      result.processed     += bsResult.discovered;
-      if (bsResult.parse_errors > 0 || bsResult.db_errors > 0) result.errors++;
-      bsResult.summary.forEach(s => result.summary.push(s));
-      await writeDiscoveryStatus(
-        supabase, slug,
-        bsResult.new_queued > 0 ? 'ok' : 'no_new',
-        bsResult.summary[bsResult.summary.length - 1] || 'Browser sync complete'
-      );
-    } catch (e: any) {
-      // Playwright unavailable in Lambda — mark for the next cron run.
-      const isPlaywrightMissing = /playwright|chromium|browserType|Executable doesn/i.test(e?.message || '');
-      const msg = isPlaywrightMissing
-        ? `[${slug}] Playwright not available in this environment — will retry from weekly cron`
-        : `[${slug}] Browser sync error: ${e?.message || e}`;
-      result.errors++;
-      result.summary.push(msg);
-      await writeDiscoveryStatus(supabase, slug, isPlaywrightMissing ? 'needs_browser' : 'error', msg);
+      return;
+      }
     }
-    return;
-  }
 
   // ── Resolve listing URLs ──────────────────────────────────────────────────
   let sitemapUrls: string[] = [];

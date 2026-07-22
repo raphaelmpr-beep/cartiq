@@ -175,7 +175,7 @@ const CITY_CENTROIDS: Record<string, [number, number]> = {
   "albany":              [31.578, -84.156],
   "brunswick":           [31.150, -81.492],
   "dalton":              [34.770, -84.970],
-  "gainesville":         [34.298, -83.824],
+  "gainesville ga":      [34.298, -83.824],
   "rome":                [34.257, -85.165],
   "statesboro":          [32.449, -81.783],
   "warner robins":       [32.613, -83.600],
