@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { calculateGolfCartWiseValue, enrichListing } from "./pricing";
 import { parseCsv, csvRowToListing } from "./csvParser";
+import { registerSitemapRoutes } from "./sitemaps";
 
 // ─── snake_case → camelCase normalizer ───────────────────────────────────────
 // Supabase returns column names as snake_case. The frontend expects camelCase.
