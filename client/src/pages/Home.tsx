@@ -110,13 +110,17 @@ export default function Home() {
                   <Search className="h-4 w-4" /> Search Carts
                 </Button>
               </form>
-              <Link href="/golf-cart-value-estimator">
+              <Link
+                href="/golf-cart-value-estimator"
+                title="What's my golf cart worth? Free value estimator"
+                aria-label="What's my golf cart worth? Free value estimator"
+              >
                 <Button
                   variant="outline"
                   className="gap-2 border-green-600 text-green-700 hover:bg-green-50 w-full sm:w-auto"
                   data-testid="hero-value-btn"
                 >
-                  <ClipboardCheck className="h-4 w-4" /> Value My Cart
+                  <ClipboardCheck className="h-4 w-4" /> What's my cart worth?
                 </Button>
               </Link>
             </div>
