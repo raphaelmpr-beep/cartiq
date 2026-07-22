@@ -1,5 +1,4 @@
-import { Link } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
+import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Search, ClipboardCheck, TrendingDown, ShieldCheck, Truck, BookOpen, ChevronRight, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,11 +21,10 @@ export default function Home() {
   }, []);
   const [dealUrl, setDealUrl] = useState("");
   const [heroSearch, setHeroSearch] = useState("");
-  const [, navigate] = useHashLocation();
+  const [, navigate] = useLocation();
 
   // Navigate to a route with query params using wouter's native navigate.
-  // wouter puts params in location.search (not inside location.hash), so
-  // Search.tsx reads them from location.search.
+  // Uses browser history routing; params live in location.search.
   function navWithParams(path: string, params: Record<string, string> = {}) {
     const qs = new URLSearchParams(params).toString();
     navigate(qs ? `${path}?${qs}` : path);

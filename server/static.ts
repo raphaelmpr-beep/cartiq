@@ -2,7 +2,7 @@ import express from 'express';
 import type { Express } from 'express';
 import fs from "node:fs";
 import path from "node:path";
-import { getRouteMeta } from "./seo-meta";
+import { getRouteMeta, getRouteMetaAsync } from "./seo-meta";
 
 /**
  * Inject per-route SEO meta tags into index.html before serving.
@@ -63,9 +63,14 @@ export function serveStatic(app: Express) {
   }));
 
   // SPA catch-all: inject per-route meta then serve modified index.html
-  app.use("/{*path}", (req, res) => {
+  app.use("/{*path}", async (req, res) => {
+    // Parse pathname from originalUrl. With `app.use("/{*path}")`, req.path
+    // may be "/" because Express strips the mount; originalUrl preserves
+    // the real request path.
+    const { pathname } = new URL(req.originalUrl || req.url || "/", "https://golfcartiq.com");
+
     // Skip requests that look like files (has extension) — serve 404 rather than SPA
-    const ext = path.extname(req.path);
+    const ext = path.extname(pathname);
     if (ext && ext !== ".html") {
       return res.status(404).json({ error: "Not found" });
     }
@@ -77,8 +82,15 @@ export function serveStatic(app: Express) {
       return res.status(500).send("Server error: could not read index.html");
     }
 
-    // Derive route meta from request path (strips query string, keeps pathname)
-    const meta = getRouteMeta(req.path);
+    // Derive route meta from request path.
+    // Async variant fetches per-listing data for /listing/:slug so Google sees
+    // unique title/description/JSON-LD in the initial response.
+    let meta;
+    try {
+      meta = await getRouteMetaAsync(pathname);
+    } catch {
+      meta = getRouteMeta(pathname);
+    }
 
     // ── Replace <title> ───────────────────────────────────────────────────
     html = html.replace(
@@ -136,6 +148,29 @@ export function serveStatic(app: Express) {
         '<script type="application/ld+json" data-server-injected>'
       );
       html = html.replace("</head>", `${taggedScript}\n</head>`);
+    }
+
+    // ── Inject noindex robots meta when listing is non-indexable ─────────
+    if (meta.noindex) {
+      // Replace existing robots meta if present, otherwise inject before </head>.
+      const noindexTag = `<meta name="robots" content="noindex,follow" data-server-injected />`;
+      if (/<meta\s+name="robots"[^>]*>/i.test(html)) {
+        html = html.replace(/<meta\s+name="robots"[^>]*>/i, noindexTag);
+      } else {
+        html = html.replace("</head>", `${noindexTag}\n</head>`);
+      }
+    }
+
+    // ── Inject server-rendered body content just after <div id="root"> ──
+    // This block is hidden from the user (`hidden` attribute) but visible to
+    // Googlebot in the initial DOM. React re-renders inside #root on hydrate.
+    if (meta.bodyContent) {
+      // Remove any prior server-injected block first (safety on re-request).
+      html = html.replace(/<div id="__seo_ssr__"[\s\S]*?<\/div>/, "");
+      html = html.replace(
+        /(<div id="root"[^>]*>)/,
+        `$1${meta.bodyContent}`
+      );
     }
 
     res

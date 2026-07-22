@@ -3071,10 +3071,11 @@ ${pageUrls.join("\n")}
     // Static synchronous imports — pulled in at module top level
     // (registerRoutes is called once at startup so these are effectively cached)
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getRouteMeta: _getRouteMeta } = require("./seo-meta");
+    const { getRouteMeta: _getRouteMeta, getRouteMetaAsync: _getRouteMetaAsync } = require("./seo-meta");
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { INDEX_HTML: _INDEX_HTML } = require("./generated/index-html-loader");
     const getRouteMeta = _getRouteMeta as typeof import("./seo-meta").getRouteMeta;
+    const getRouteMetaAsync = _getRouteMetaAsync as typeof import("./seo-meta").getRouteMetaAsync;
     const INDEX_HTML = _INDEX_HTML as string;
 
     function _escHtml(str: string): string {
@@ -3086,7 +3087,7 @@ ${pageUrls.join("\n")}
         .replace(/>/g, "&gt;");
     }
 
-    app.use("/{*path}", (req: import("express").Request, res: import("express").Response) => {
+    app.use("/{*path}", async (req: import("express").Request, res: import("express").Response) => {
       // Skip non-HTML file extensions
       const { pathname } = new URL(req.originalUrl || req.url || "/", "https://golfcartiq.com");
       const ext = pathname.split(".").pop();
@@ -3095,7 +3096,14 @@ ${pageUrls.join("\n")}
       }
 
       let html = INDEX_HTML;
-      const meta = getRouteMeta(pathname);
+      // Async variant fetches per-listing data for /listing/:slug so Google
+      // sees unique title/description/JSON-LD in the initial response.
+      let meta;
+      try {
+        meta = await getRouteMetaAsync(pathname);
+      } catch {
+        meta = getRouteMeta(pathname);
+      }
 
       html = html.replace(/<title>[^<]*<\/title>/, `<title>${_escHtml(meta.title)}</title>`);
       html = html.replace(
@@ -3116,6 +3124,22 @@ ${pageUrls.join("\n")}
       if (meta.jsonLd) {
         const jld = `<script type="application/ld+json" data-server-injected>${JSON.stringify(meta.jsonLd)}</script>`;
         html = html.replace(/<\/head>/, `${jld}\n</head>`);
+      }
+
+      // Inject noindex robots meta when listing is non-indexable
+      if (meta.noindex) {
+        const noindexTag = `<meta name="robots" content="noindex,follow" data-server-injected />`;
+        if (/<meta\s+name="robots"[^>]*>/i.test(html)) {
+          html = html.replace(/<meta\s+name="robots"[^>]*>/i, noindexTag);
+        } else {
+          html = html.replace(/<\/head>/, `${noindexTag}\n</head>`);
+        }
+      }
+
+      // Inject server-rendered body content after <div id="root">
+      if (meta.bodyContent) {
+        html = html.replace(/<div id="__seo_ssr__"[\s\S]*?<\/div>/, "");
+        html = html.replace(/(<div id="root"[^>]*>)/, `$1${meta.bodyContent}`);
       }
 
       res

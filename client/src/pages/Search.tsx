@@ -307,7 +307,7 @@ export default function Search() {
     const params = new URLSearchParams();
     Object.entries(next).forEach(([k, v]) => { if (v) params.set(k, v); });
     const qs = params.toString();
-    window.history.replaceState(null, "", `#/search${qs ? `?${qs}` : ""}`);
+    window.history.replaceState(null, "", `/search${qs ? `?${qs}` : ""}`);
   }, []);
 
   function setFilter(key: keyof ClientFilters, value: string) {
@@ -434,7 +434,7 @@ export default function Search() {
           const params = new URLSearchParams();
           Object.entries(next).forEach(([k, v]) => { if (v) params.set(k, v as string); });
           const qs = params.toString();
-          window.history.replaceState(null, "", `#/search${qs ? `?${qs}` : ""}`);
+          window.history.replaceState(null, "", `/search${qs ? `?${qs}` : ""}`);
           return next;
         });
         setZipCoords([saved.lat, saved.lng]);

@@ -11,6 +11,9 @@
  * IMPORTANT: Keep slugs/titles in sync with client/src/lib/seo-config.ts
  */
 
+import { storage } from "./storage";
+import type { Listing } from "@shared/schema";
+
 const BASE_URL = "https://golfcartiq.com";
 const SITE_NAME = "GolfCartIQ";
 const DEFAULT_TITLE = `${SITE_NAME} | Golf Cart Prices & Deals — FL & GA`;
@@ -27,6 +30,11 @@ export interface RouteMeta {
   ogUrl: string;
   ogImage: string;
   jsonLd: object | null;
+  /** Optional server-rendered content block injected into <body> before React hydrates.
+   *  Ensures Google sees unique visible content on the first response even before JS runs. */
+  bodyContent?: string;
+  /** Set to true when the page should be marked noindex (sold/expired/inactive listings). */
+  noindex?: boolean;
 }
 
 // ─── Static route map ─────────────────────────────────────────────────────────
@@ -409,6 +417,163 @@ export function getRouteMeta(pathname: string): RouteMeta {
 
   // 6. Fallback — homepage defaults (no per-page canonical signal for unknown routes)
   return buildMeta(DEFAULT_TITLE, DEFAULT_DESC, `${BASE_URL}/`, websiteSchema());
+}
+
+// ─── Async listing meta ───────────────────────────────────────────────────────
+
+/** Product JSON-LD for a single listing. */
+function productSchema(l: Listing, canonical: string, imageUrl: string | null): object {
+  const name = String(l.title ?? "").trim() || `Golf Cart Listing #${l.id}`;
+  const brand = l.brand ? { "@type": "Brand", name: String(l.brand) } : undefined;
+  const offers =
+    l.asking_price != null && Number(l.asking_price) > 0
+      ? {
+          "@type": "Offer",
+          price: Number(l.asking_price).toFixed(2),
+          priceCurrency: "USD",
+          availability:
+            l.status === "active" && l.public_listing === true
+              ? "https://schema.org/InStock"
+              : "https://schema.org/OutOfStock",
+          url: canonical,
+        }
+      : undefined;
+  return {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name,
+    ...(brand ? { brand } : {}),
+    ...(l.model ? { model: String(l.model) } : {}),
+    ...(imageUrl ? { image: imageUrl } : {}),
+    ...(offers ? { offers } : {}),
+    url: canonical,
+  };
+}
+
+/** HTML-escape (mirror of static.ts esc — kept local to avoid a circular import). */
+function escHtml(str: string): string {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/** Build a human-readable descriptor line for a listing.
+ *  Used both in <title>/description and the body-content block. */
+function listingDescriptor(l: Listing): {
+  headline: string;
+  descriptionSentence: string;
+  locationLine: string;
+  attrLine: string;
+  priceLine: string;
+} {
+  const cityState = [l.city, l.state].filter(Boolean).join(", ").trim();
+  const yearBrandModel = [l.year, l.brand, l.model].filter(Boolean).join(" ").trim();
+  const dealer = (l as any).dealer_name ?? (l as any).seller_name ?? "";
+  const priceNum = l.asking_price != null ? Number(l.asking_price) : NaN;
+  const priceStr =
+    Number.isFinite(priceNum) && priceNum > 0
+      ? `$${Math.round(priceNum).toLocaleString("en-US")}`
+      : "";
+
+  const headlineCore = yearBrandModel || String(l.title ?? "").trim() || "Golf Cart";
+  const headline = cityState
+    ? `${headlineCore} for sale in ${cityState}`
+    : `${headlineCore} for sale`;
+
+  const parts: string[] = [];
+  if (priceStr) parts.push(`Listed at ${priceStr}`);
+  if (dealer) parts.push(`from ${dealer}`);
+  if (cityState) parts.push(`in ${cityState}`);
+  if (l.battery_type) parts.push(`${String(l.battery_type)} battery`);
+  if (l.seating) parts.push(`${l.seating}-seat`);
+  if (l.condition) parts.push(String(l.condition));
+
+  const descriptionSentence = parts.length
+    ? `${headline}. ${parts.join(", ")}.`
+    : `${headline}. Compare price, deal rating, and dealer details on ${SITE_NAME}.`;
+
+  const attrLine = [l.year, l.brand, l.model].filter(Boolean).join(" · ");
+
+  return {
+    headline,
+    descriptionSentence,
+    locationLine: cityState,
+    attrLine,
+    priceLine: priceStr,
+  };
+}
+
+/** Build per-listing RouteMeta including body content for the initial DOM. */
+function buildListingMeta(l: Listing): RouteMeta {
+  const slug = l.slug ?? String(l.id);
+  const canonical = `${BASE_URL}/listing/${slug}`;
+  const d = listingDescriptor(l);
+  const title = `${d.headline} | ${SITE_NAME}`;
+  const description = d.descriptionSentence;
+  const imageUrl =
+    l.image_url && String(l.image_url).trim().length > 0 ? String(l.image_url) : DEFAULT_IMAGE;
+  const jsonLd = productSchema(l, canonical, imageUrl);
+
+  // Non-active listings should be noindex, but the page can stay live for link equity.
+  const isIndexable = l.status === "active" && l.public_listing === true;
+
+  // Server-rendered content block. Hidden from user (React re-renders on hydrate)
+  // but visible to Googlebot in the initial HTML. Includes title, geo, dealer,
+  // price if any, year/brand/model, and an SEO paragraph.
+  const dealer = (l as any).dealer_name ?? (l as any).seller_name ?? "";
+  const bodyContent =
+    `<div id="__seo_ssr__" data-seo="listing" hidden>` +
+    `<h1>${escHtml(d.headline)}</h1>` +
+    (d.attrLine ? `<p>${escHtml(d.attrLine)}</p>` : "") +
+    (d.locationLine ? `<p>Location: ${escHtml(d.locationLine)}</p>` : "") +
+    (dealer ? `<p>Dealer: ${escHtml(dealer)}</p>` : "") +
+    (d.priceLine ? `<p>Price: ${escHtml(d.priceLine)}</p>` : "") +
+    `<p>${escHtml(d.descriptionSentence)}</p>` +
+    `</div>`;
+
+  return {
+    title,
+    description,
+    canonical,
+    ogTitle: title,
+    ogDescription: description,
+    ogUrl: canonical,
+    ogImage: imageUrl,
+    jsonLd,
+    bodyContent,
+    noindex: !isIndexable,
+  };
+}
+
+/**
+ * Async variant of getRouteMeta.
+ * For /listing/:slug, fetches the listing from storage and produces rich per-
+ * listing meta + a body-content block. All other routes delegate to the
+ * synchronous getRouteMeta so existing behavior is unchanged.
+ */
+export async function getRouteMetaAsync(pathname: string): Promise<RouteMeta> {
+  const normalized =
+    pathname === "/" ? "/" : pathname.replace(/\/$/, "").toLowerCase();
+
+  if (normalized.startsWith("/listing/")) {
+    const idOrSlug = normalized.replace("/listing/", "").split("?")[0];
+    if (idOrSlug) {
+      try {
+        const isNumeric = /^\d+$/.test(idOrSlug);
+        const listing = isNumeric
+          ? await storage.getListingById(Number(idOrSlug))
+          : await storage.getListingBySlug(idOrSlug);
+        if (listing) return buildListingMeta(listing as Listing);
+      } catch {
+        // fall through to generic listing meta below
+      }
+    }
+  }
+
+  return getRouteMeta(pathname);
 }
 
 function buildJsonLd(

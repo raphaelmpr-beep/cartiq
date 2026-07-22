@@ -439,7 +439,7 @@ export default function ListingDetail() {
           <div className="space-y-5">
             <MarketCompareCard listing={listing} />
             <WiseScoreBadge score={listing.buyerScore} className="text-lg" />
-            <a href="/#/how-it-works" className="block text-xs text-green-700 hover:underline text-right -mt-3">
+            <a href="/how-it-works" className="block text-xs text-green-700 hover:underline text-right -mt-3">
               How is this score calculated? →
             </a>
 
