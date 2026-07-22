@@ -7,7 +7,6 @@ import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone,
 import SaveButton from "@/components/SaveButton";
 import WatchButton from "@/components/WatchButton";
 import { ImageCarousel } from "@/components/ImageCarousel";
-import { parseJsonField } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";

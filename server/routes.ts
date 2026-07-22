@@ -329,6 +329,11 @@ ${pageUrls.join("\n")}
     }
   });
 
+  // ─── Supplemental sitemap routes (sitemap-pages, city-pages, dealers, listings) ──
+  // /sitemap.xml and /sitemap-:page.xml are handled inline above.
+  // registerSitemapRoutes adds the child sitemaps that routes.ts doesn't cover.
+  registerSitemapRoutes(app);
+
   // ─── Auth middleware ─────────────────────────────────────────────────────────
   function requireAdmin(req: any, res: any, next: any) {
     const token = req.headers["x-admin-token"];
@@ -424,7 +429,7 @@ ${pageUrls.join("\n")}
     // Each request gets its own seed → fresh shuffle every load.
 
     // ── Eligibility gate ──────────────────────────────────────────────────
-    function isEligible(l: any): boolean {
+    const isEligible = (l: any): boolean => {
       const hasImage = l.image_url != null && String(l.image_url).trim().length > 0;
       const BAD_STATUSES = ["sold","inactive","unavailable","rejected","blocked","expired"];
       const BAD_RATINGS  = ["overpriced","over_market","unknown","insufficient_data"];
@@ -440,7 +445,7 @@ ${pageUrls.join("\n")}
     }
 
     // ── Per-listing score (0–100) ─────────────────────────────────────────
-    function score(l: any, seed: number): number {
+    const score = (l: any, seed: number): number => {
       let s = 0;
       // Deal rating (0–35)
       const dr: Record<string,number> = { great_deal:35, good_deal:28, fair_price:18, unknown:8, high_price:2 };
@@ -465,13 +470,13 @@ ${pageUrls.join("\n")}
     }
 
     // ── Dealer + brand diversity filter ──────────────────────────────────
-    function applyDiversity(
+    const applyDiversity = (
       candidates: any[],
       n: number,
       usedIds: Set<number>,
       maxPerDealer = 2,
       maxPerBrand = 2,
-    ): any[] {
+    ): any[] => {
       const out: any[] = [];
       const dealerCount: Record<string, number> = {};
       const brandCount:  Record<string, number> = {};
@@ -491,7 +496,7 @@ ${pageUrls.join("\n")}
     }
 
     // ── Build homepage payload ────────────────────────────────────────────
-    async function buildHomepage(): Promise<Record<string, unknown>> {
+    const buildHomepage = async (): Promise<Record<string, unknown>> => {
       const { createClient } = await import("@supabase/supabase-js");
       const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
 
@@ -1988,11 +1993,11 @@ ${pageUrls.join("\n")}
       // Paginated fetch — Supabase/PostgREST caps at 1000 rows per request even
       // when .limit(N) is larger. Explicit .range() pagination is required to
       // pull every row. Without this, downstream counts silently undercount.
-      async function fetchAll<T = any>(
+      const fetchAll = async <T = any>(
         table: string,
         select: string,
         opts: { order?: { col: string; asc: boolean }; pageSize?: number; maxRows?: number } = {}
-      ): Promise<T[]> {
+      ): Promise<T[]> => {
         const pageSize = opts.pageSize ?? 1000;
         const maxRows = opts.maxRows ?? 50000;
         const out: T[] = [];
@@ -2240,7 +2245,7 @@ ${pageUrls.join("\n")}
       const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
 
       // Paginated fetch (Supabase/PostgREST caps at 1000 rows even when .limit is larger)
-      async function fetchAll<T = any>(table: string, select: string, pageSize = 1000, maxRows = 50000): Promise<T[]> {
+      const fetchAll = async <T = any>(table: string, select: string, pageSize = 1000, maxRows = 50000): Promise<T[]> => {
         const out: T[] = [];
         for (let from = 0; from < maxRows; from += pageSize) {
           const { data, error } = await sb.from(table).select(select).range(from, from + pageSize - 1);
@@ -2264,7 +2269,7 @@ ${pageUrls.join("\n")}
 
       // Collect referenced slugs from all activity tables (skip null/empty).
       const referencedSlugs = new Map<string, { listings: number; pending: number; syncLog: number; adapterRun: number }>();
-      function bump(slug: string | null | undefined, key: "listings" | "pending" | "syncLog" | "adapterRun") {
+      const bump = (slug: string | null | undefined, key: "listings" | "pending" | "syncLog" | "adapterRun") => {
         if (!slug) return;
         const cur = referencedSlugs.get(slug) || { listings: 0, pending: 0, syncLog: 0, adapterRun: 0 };
         cur[key]++;
@@ -2638,7 +2643,7 @@ ${pageUrls.join("\n")}
       let imgBuffer: Buffer | null = null;
       let contentType = "image/jpeg";
 
-      async function fetchBuf(url: string): Promise<{ buf: Buffer; ct: string } | null> {
+      const fetchBuf = async (url: string): Promise<{ buf: Buffer; ct: string } | null> => {
         try {
           const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
           if (!r.ok) return null;
@@ -3078,7 +3083,7 @@ ${pageUrls.join("\n")}
     const getRouteMetaAsync = _getRouteMetaAsync as typeof import("./seo-meta").getRouteMetaAsync;
     const INDEX_HTML = _INDEX_HTML as string;
 
-    function _escHtml(str: string): string {
+    const _escHtml = (str: string): string => {
       return str
         .replace(/&/g, "&amp;")
         .replace(/"/g, "&quot;")
