@@ -135,7 +135,8 @@ Allow: /
 Disallow: /admin
 Disallow: /api/
 
-Sitemap: https://golfcartiq.com/sitemap.xml`);
+Sitemap: https://golfcartiq.com/sitemap.xml
+IndexNow: https://golfcartiq.com/e30f3629e2ecd188cd4d15079818ce06.txt`);
   });
 
   // ─── SEO: llms.txt (AI crawler guidance) ────────────────────────────────────
@@ -195,70 +196,127 @@ GolfCartIQ does not sell golf carts, own inventory, broker transactions, collect
 Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
   });
 
-  // ─── SEO: sitemap.xml (dynamic) ─────────────────────────────────────────────
+  // ─── SEO: IndexNow key verification file ────────────────────────────────────
+  const INDEXNOW_KEY = "e30f3629e2ecd188cd4d15079818ce06";
+  app.get(`/${INDEXNOW_KEY}.txt`, (_req, res) => {
+    res.type("text/plain").send(INDEXNOW_KEY);
+  });
+
+  // ─── SEO: Sitemap helpers ─────────────────────────────────────────────────────
+  const SITEMAP_BASE = "https://golfcartiq.com";
+  const SITEMAP_PAGE_SIZE = 500;
+
+  function buildStaticUrls(today: string): string[] {
+    const staticPages = [
+      { path: "/",             priority: "1.0", changefreq: "weekly"  },
+      { path: "/search",       priority: "0.9", changefreq: "daily"   },
+      { path: "/deal-checker", priority: "0.8", changefreq: "weekly"  },
+      { path: "/buyer-guide",  priority: "0.8", changefreq: "weekly"  },
+      { path: "/sell-my-cart", priority: "0.5", changefreq: "monthly" },
+      { path: "/how-it-works", priority: "0.7", changefreq: "monthly" },
+      { path: "/disclosure",   priority: "0.3", changefreq: "yearly"  },
+      // City landing pages
+      { path: "/golf-carts-for-sale/the-villages-fl",      priority: "0.8", changefreq: "daily" },
+      { path: "/golf-carts-for-sale/wildwood-fl",          priority: "0.8", changefreq: "daily" },
+      { path: "/golf-carts-for-sale/lady-lake-fl",         priority: "0.8", changefreq: "daily" },
+      { path: "/golf-carts-for-sale/nocatee-fl",           priority: "0.8", changefreq: "daily" },
+      { path: "/golf-carts-for-sale/st-augustine-fl",      priority: "0.8", changefreq: "daily" },
+      { path: "/golf-carts-for-sale/jacksonville-fl",      priority: "0.8", changefreq: "daily" },
+      { path: "/golf-carts-for-sale/clearwater-fl",        priority: "0.8", changefreq: "daily" },
+      { path: "/golf-carts-for-sale/port-orange-fl",       priority: "0.7", changefreq: "daily" },
+      { path: "/golf-carts-for-sale/panama-city-beach-fl", priority: "0.7", changefreq: "daily" },
+      { path: "/golf-carts-for-sale/peachtree-city-ga",    priority: "0.8", changefreq: "daily" },
+      { path: "/golf-carts-for-sale/atlanta-ga",           priority: "0.8", changefreq: "daily" },
+      // Brand pages
+      { path: "/brands/ezgo",      priority: "0.8", changefreq: "weekly" },
+      { path: "/brands/club-car",  priority: "0.8", changefreq: "weekly" },
+      { path: "/brands/yamaha",    priority: "0.7", changefreq: "weekly" },
+      { path: "/brands/icon",      priority: "0.7", changefreq: "weekly" },
+      { path: "/brands/evolution", priority: "0.7", changefreq: "weekly" },
+      { path: "/brands/venom-ev",  priority: "0.7", changefreq: "weekly" },
+      { path: "/brands/bintelli",  priority: "0.6", changefreq: "weekly" },
+      { path: "/brands/epic",      priority: "0.6", changefreq: "weekly" },
+      { path: "/brands/denago",    priority: "0.6", changefreq: "weekly" },
+      // Battery guide pages
+      { path: "/golf-cart-batteries",                      priority: "0.8", changefreq: "monthly" },
+      { path: "/golf-cart-batteries/lithium-vs-lead-acid", priority: "0.8", changefreq: "monthly" },
+      { path: "/golf-cart-batteries/105ah-vs-150ah",       priority: "0.7", changefreq: "monthly" },
+      { path: "/golf-cart-batteries/charger-included",     priority: "0.7", changefreq: "monthly" },
+    ];
+    return staticPages.map(p =>
+      `  <url><loc>${SITEMAP_BASE}${p.path}</loc><lastmod>${today}</lastmod><changefreq>${p.changefreq}</changefreq><priority>${p.priority}</priority></url>`
+    );
+  }
+
+  function urlTag(loc: string, lastmod: string, changefreq: string, priority: string): string {
+    return `  <url><loc>${loc}</loc><lastmod>${lastmod}</lastmod><changefreq>${changefreq}</changefreq><priority>${priority}</priority></url>`;
+  }
+
+  // ─── SEO: Sitemap index ───────────────────────────────────────────────────────
   app.get("/sitemap.xml", async (_req, res) => {
     try {
       const listings = await storage.getListings({ status: "active", public_listing: true });
-      const articles = await storage.getSeoArticles() as any[];
-      const base = "https://golfcartiq.com";
+      const articles = (await storage.getSeoArticles() as any[]).filter((a: any) => a.published);
       const today = new Date().toISOString().split("T")[0];
-      const staticPages = [
-        { path: "/",             priority: "1.0", changefreq: "weekly" },
-        { path: "/search",       priority: "0.9", changefreq: "daily"  },
-        { path: "/deal-checker", priority: "0.8", changefreq: "weekly" },
-        { path: "/buyer-guide",  priority: "0.8", changefreq: "weekly" },
-        { path: "/sell-my-cart",  priority: "0.5", changefreq: "monthly" },
-        { path: "/how-it-works",   priority: "0.7", changefreq: "monthly" },
-        { path: "/disclosure",     priority: "0.3", changefreq: "yearly"  },
-        // City landing pages
-        { path: "/golf-carts-for-sale/the-villages-fl",      priority: "0.8", changefreq: "daily" },
-        { path: "/golf-carts-for-sale/wildwood-fl",          priority: "0.8", changefreq: "daily" },
-        { path: "/golf-carts-for-sale/lady-lake-fl",         priority: "0.8", changefreq: "daily" },
-        { path: "/golf-carts-for-sale/nocatee-fl",           priority: "0.8", changefreq: "daily" },
-        { path: "/golf-carts-for-sale/st-augustine-fl",      priority: "0.8", changefreq: "daily" },
-        { path: "/golf-carts-for-sale/jacksonville-fl",      priority: "0.8", changefreq: "daily" },
-        { path: "/golf-carts-for-sale/clearwater-fl",        priority: "0.8", changefreq: "daily" },
-        { path: "/golf-carts-for-sale/port-orange-fl",       priority: "0.7", changefreq: "daily" },
-        { path: "/golf-carts-for-sale/panama-city-beach-fl", priority: "0.7", changefreq: "daily" },
-        { path: "/golf-carts-for-sale/peachtree-city-ga",    priority: "0.8", changefreq: "daily" },
-        { path: "/golf-carts-for-sale/atlanta-ga",           priority: "0.8", changefreq: "daily" },
-        // Brand pages
-        { path: "/brands/ezgo",       priority: "0.8", changefreq: "weekly" },
-        { path: "/brands/club-car",   priority: "0.8", changefreq: "weekly" },
-        { path: "/brands/yamaha",     priority: "0.7", changefreq: "weekly" },
-        { path: "/brands/icon",       priority: "0.7", changefreq: "weekly" },
-        { path: "/brands/evolution",  priority: "0.7", changefreq: "weekly" },
-        { path: "/brands/venom-ev",   priority: "0.7", changefreq: "weekly" },
-        { path: "/brands/bintelli",   priority: "0.6", changefreq: "weekly" },
-        { path: "/brands/epic",       priority: "0.6", changefreq: "weekly" },
-        { path: "/brands/denago",     priority: "0.6", changefreq: "weekly" },
-        // Battery guide pages
-        { path: "/golf-cart-batteries",                        priority: "0.8", changefreq: "monthly" },
-        { path: "/golf-cart-batteries/lithium-vs-lead-acid",   priority: "0.8", changefreq: "monthly" },
-        { path: "/golf-cart-batteries/105ah-vs-150ah",         priority: "0.7", changefreq: "monthly" },
-        { path: "/golf-cart-batteries/charger-included",       priority: "0.7", changefreq: "monthly" },
-      ];
-      const urls = [
-        ...staticPages.map(p =>
-          `  <url><loc>${base}${p.path}</loc><lastmod>${today}</lastmod><changefreq>${p.changefreq}</changefreq><priority>${p.priority}</priority></url>`
-        ),
-        // Buyer Guide articles
-        ...articles.filter((a: any) => a.published).map((a: any) => {
+
+      // Build full URL list for page count calculation
+      const staticCount = buildStaticUrls(today).length;
+      const articleCount = articles.length;
+      const listingCount = listings.length;
+      const totalUrls = staticCount + articleCount + listingCount;
+      const pageCount = Math.ceil(totalUrls / SITEMAP_PAGE_SIZE);
+
+      const sitemapTags = Array.from({ length: pageCount }, (_, i) =>
+        `  <sitemap><loc>${SITEMAP_BASE}/sitemap-${i + 1}.xml</loc><lastmod>${today}</lastmod></sitemap>`
+      );
+
+      res.type("application/xml").send(
+        `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${sitemapTags.join("\n")}
+</sitemapindex>`
+      );
+    } catch (e: any) {
+      res.status(500).send("<!-- sitemap index error -->");
+    }
+  });
+
+  // ─── SEO: Paginated child sitemaps ───────────────────────────────────────────
+  app.get("/sitemap-:page.xml", async (req, res) => {
+    try {
+      const page = parseInt(req.params.page, 10);
+      if (isNaN(page) || page < 1) return res.status(404).send("<!-- not found -->");
+
+      const listings = await storage.getListings({ status: "active", public_listing: true });
+      const articles = (await storage.getSeoArticles() as any[]).filter((a: any) => a.published);
+      const today = new Date().toISOString().split("T")[0];
+
+      // Build the complete ordered URL list
+      const allUrls: string[] = [
+        ...buildStaticUrls(today),
+        ...articles.map((a: any) => {
           const lastmod = (a.updated_at ?? a.updatedAt ?? today).toString().slice(0, 10);
-          return `  <url><loc>${base}/buyer-guide/${a.slug}</loc><lastmod>${lastmod}</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>`;
+          return urlTag(`${SITEMAP_BASE}/buyer-guide/${a.slug}`, lastmod, "monthly", "0.8");
         }),
-        // Listing detail pages
         ...listings.map((l: any) => {
           const slug = l.slug ?? l.id;
           const lastmod = (l.updatedAt ?? l.updated_at ?? today).toString().slice(0, 10);
-          return `  <url><loc>${base}/listing/${slug}</loc><lastmod>${lastmod}</lastmod><changefreq>weekly</changefreq><priority>0.6</priority></url>`;
+          return urlTag(`${SITEMAP_BASE}/listing/${slug}`, lastmod, "weekly", "0.6");
         }),
       ];
+
+      const start = (page - 1) * SITEMAP_PAGE_SIZE;
+      const pageUrls = allUrls.slice(start, start + SITEMAP_PAGE_SIZE);
+      if (pageUrls.length === 0) return res.status(404).send("<!-- page out of range -->");
+
       res.type("application/xml").send(
-        `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`
+        `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${pageUrls.join("\n")}
+</urlset>`
       );
     } catch (e: any) {
-      res.status(500).send("<!-- sitemap error -->");
+      res.status(500).send("<!-- sitemap page error -->");
     }
   });
 
@@ -269,6 +327,74 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+
+  // ─── Site Settings (in-memory, survives warm instances) ──────────────────────
+  // Stored as a simple object; persists for the lifetime of the Lambda warm instance.
+  // On cold start, defaults are used. Admin can update via PATCH.
+  interface SiteSettings {
+    defaultRadius: number;          // miles, shown as default in distance filter (25)
+    featuredDealers: Array<{        // dealers pinned to top of homepage by city
+      dealerId: number;
+      dealerName: string;
+      cities: string[];             // e.g. ["Jacksonville", "all"]
+      priority: number;             // 1 = first, 2 = second
+    }>;
+  }
+  const siteSettings: SiteSettings = {
+    defaultRadius: 25,
+    featuredDealers: [],
+  };
+
+  app.get("/api/admin/site-settings", requireAdmin, (_req, res) => {
+    res.json(siteSettings);
+  });
+
+  app.patch("/api/admin/site-settings", requireAdmin, (req, res) => {
+    const body = req.body as Partial<SiteSettings>;
+    if (typeof body.defaultRadius === "number") siteSettings.defaultRadius = body.defaultRadius;
+    if (Array.isArray(body.featuredDealers)) siteSettings.featuredDealers = body.featuredDealers;
+    res.json({ ok: true, settings: siteSettings });
+  });
+
+  // ─── Pricing Config ───────────────────────────────────────────────────────
+  // GET  /api/admin/pricing-config        → return all config keys as { key: value }
+  // PATCH /api/admin/pricing-config       → body: { key, value } — upsert one section
+  // POST  /api/admin/pricing-config/reset → restore a key to compiled defaults
+
+  app.get("/api/admin/pricing-config", requireAdmin, async (_req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { data, error } = await sb.from("pricing_config").select("key,value,updated_at,updated_by");
+      if (error) return res.status(500).json({ error: error.message });
+      const config: Record<string, any> = {};
+      for (const row of (data || [])) config[row.key] = { value: row.value, updated_at: row.updated_at, updated_by: row.updated_by };
+      res.json(config);
+    } catch (e: any) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  app.patch("/api/admin/pricing-config", requireAdmin, async (req, res) => {
+    try {
+      const { key, value } = req.body as { key: string; value: any };
+      if (!key || value === undefined) return res.status(400).json({ error: "key and value required" });
+      const ALLOWED_KEYS = ["thresholds", "geo_tiers", "feature_adjustments", "depreciation", "brand_bases", "buyer_score_weights"];
+      if (!ALLOWED_KEYS.includes(key)) return res.status(400).json({ error: `Unknown config key: ${key}` });
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const { error } = await sb.from("pricing_config").upsert({
+        key,
+        value,
+        updated_at: new Date().toISOString(),
+        updated_by: "admin",
+      }, { onConflict: "key" });
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ ok: true, key });
+    } catch (e: any) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
 
   // ─── Homepage rotation engine ─────────────────────────────────────────────
   // GET /api/listings/homepage
@@ -353,9 +479,21 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       const { createClient } = await import("@supabase/supabase-js");
       const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
 
-      // Fetch candidate pool: active, public, priced, imaged
-      // 200-row limit keeps response fast without caching
-      const { data, error } = await sb
+      // Per-request seed — used both for scoring jitter and offset randomisation
+      const seed = Date.now();
+
+      // ── Fetch candidate pool across randomised windows ────────────────────
+      // 1,399 eligible listings exist. Pull three non-overlapping 300-row windows
+      // anchored at random offsets so each load draws from a different region of
+      // the corpus. Union + deduplicate → up to ~600 unique candidates.
+      const CORPUS_SIZE = 1399;
+      const WINDOW = 300;
+      // Three anchors spread across the corpus, randomised each request
+      const anchorA = Math.floor(((seed)           % CORPUS_SIZE));
+      const anchorB = Math.floor(((seed * 1234567) % CORPUS_SIZE));
+      const anchorC = Math.floor(((seed * 9876543) % CORPUS_SIZE));
+
+      const baseQuery = () => sb
         .from("listings")
         .select("*")
         .eq("status", "active")
@@ -365,62 +503,117 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
         .not("image_url", "is", null)
         .neq("image_url", "")
         .not("deal_rating", "eq", "overpriced")
-        .order("updated_at", { ascending: false })
-        .limit(200);
-      if (error) throw new Error(error.message);
-      const pool: any[] = (data ?? []).filter(isEligible);
+        .order("id", { ascending: true });
 
-      // Per-request seed — changes on every load so listings rotate freely
-      const seed = Date.now();
+      const [r1, r2, r3] = await Promise.all([
+        baseQuery().range(anchorA, anchorA + WINDOW - 1),
+        baseQuery().range(anchorB, anchorB + WINDOW - 1),
+        baseQuery().range(anchorC, anchorC + WINDOW - 1),
+      ]);
+
+      // Union and deduplicate by id
+      const seen = new Set<number>();
+      const raw: any[] = [];
+      for (const row of [...(r1.data ?? []), ...(r2.data ?? []), ...(r3.data ?? [])]) {
+        if (!seen.has(row.id)) { seen.add(row.id); raw.push(row); }
+      }
+      if (r1.error && r2.error && r3.error) throw new Error(r1.error.message);
+      const pool: any[] = raw.filter(isEligible);
+
+      // ── Brand shuffle: interleave so one brand doesn't dominate ──────────────
+      // Group pool by brand, shuffle each bucket, then round-robin interleave
+      const brandBuckets: Record<string, any[]> = {};
+      for (const l of pool) {
+        const bk = (l.brand ?? "unknown").toLowerCase();
+        if (!brandBuckets[bk]) brandBuckets[bk] = [];
+        brandBuckets[bk].push(l);
+      }
+      for (const bk of Object.keys(brandBuckets)) {
+        const arr = brandBuckets[bk];
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = Math.floor(((seed ^ (i * 2654435761)) >>> 0) % (i + 1));
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+      }
+      const brandKeys = Object.keys(brandBuckets);
+      // Shuffle brand key order itself so leading brand varies each request
+      for (let i = brandKeys.length - 1; i > 0; i--) {
+        const j = Math.floor(((seed * 1234567 + i) >>> 0) % (i + 1));
+        [brandKeys[i], brandKeys[j]] = [brandKeys[j], brandKeys[i]];
+      }
+      const interleavedPool: any[] = [];
+      const maxLen = Math.max(...brandKeys.map(bk => brandBuckets[bk].length));
+      for (let i = 0; i < maxLen; i++) {
+        for (const bk of brandKeys) {
+          if (brandBuckets[bk][i]) interleavedPool.push(brandBuckets[bk][i]);
+        }
+      }
 
       // Score all candidates
-      const scored = pool
+      const scored = interleavedPool
         .map(l => ({ ...l, _score: score(l, seed) }))
         .sort((a, b) => b._score - a._score);
 
       const usedIds = new Set<number>();
 
+      // ── Featured dealer pinning ───────────────────────────────────────────────
+      // Pin up to 2 listings per configured featured dealer, sorted by priority.
+      const pinnedListings: any[] = [];
+      const featuredConfig = [...siteSettings.featuredDealers].sort((a, b) => a.priority - b.priority);
+      for (const fd of featuredConfig) {
+        const dealerListings = scored.filter(l => {
+          if (usedIds.has(l.id)) return false;
+          if (l.dealer_id !== fd.dealerId) return false;
+          if (fd.cities.includes("all")) return true;
+          return fd.cities.some(c => (l.city ?? "").toLowerCase().includes(c.toLowerCase()));
+        });
+        for (const l of dealerListings.slice(0, 2)) {
+          pinnedListings.push(l);
+          usedIds.add(l.id);
+        }
+      }
+
       // ── Section 1: Hot Deals ──────────────────────────────────────────
-      // great_deal first, then good_deal; exclude high_price, insufficient_data, overpriced
       const hotCandidates = scored.filter(l =>
         ["great_deal", "good_deal"].includes(l.deal_rating)
       );
-      // Fallback: add fair_price if hot pool is thin
       const hotPool = hotCandidates.length >= 6
         ? hotCandidates
         : [...hotCandidates, ...scored.filter(l => l.deal_rating === "fair_price")];
-      const hotDeals = applyDiversity(hotPool, 12, usedIds, 1, 2);
+      const hotDeals = [
+        ...pinnedListings,
+        ...applyDiversity(hotPool, Math.max(0, 12 - pinnedListings.length), usedIds, 1, 2),
+      ];
 
       // ── Section 2: Recently Added ─────────────────────────────────────
-      // Blend recency with jitter: score = recency_score (0–50) + jitter (0–15)
-      // so listings added within a few days of each other shuffle between visits
-      // rather than always showing the same strict top-6 by created_at.
-      const recentCandidates = [...pool]
+      const recentCandidates = [...interleavedPool]
         .filter(l => isEligible(l) && !usedIds.has(l.id))
         .map(l => {
           const ageDays = (Date.now() - new Date(l.created_at).getTime()) / 86_400_000;
-          const recencyScore = Math.max(0, 50 - ageDays * 1.5); // 0–50, decays over ~33 days
-          const jitter = ((l.id * 2654435761 + seed) % 1000) / 66.7; // 0–15
+          const recencyScore = Math.max(0, 50 - ageDays * 1.5);
+          const jitter = ((l.id * 2654435761 + seed) % 1000) / 66.7;
           return { ...l, _rscore: recencyScore + jitter };
         })
         .sort((a, b) => b._rscore - a._rscore);
       const recentlyAdded = applyDiversity(recentCandidates, 6, usedIds, 2, 2);
 
       // ── Section 3: Featured / Promoted ───────────────────────────────
-      // Use buyer_score as proxy for featured tier weight; rotate fairly
-      // Exclude already-shown listings
       const featuredCandidates = scored.filter(l =>
         ["great_deal","good_deal","fair_price"].includes(l.deal_rating)
       );
       const featured = applyDiversity(featuredCandidates, 3, usedIds, 1, 2);
 
-      // Clean internal score fields before sending
-      const strip = (arr: any[]) => arr.map(({ _score, _rscore, ...l }) => l);
+      // Clean internal score fields; tag featured listings for client-side telemetry
+      const pinnedIds = new Set(pinnedListings.map((l: any) => l.id));
+      const strip = (arr: any[], section: string) => arr.map(({ _score, _rscore, ...l }) => ({
+        ...l,
+        isFeatured: section === "hot_deals" && pinnedIds.has(l.id),
+      }));
 
       return {
-        hot_deals:      normList(strip(hotDeals)),
-        recently_added: normList(strip(recentlyAdded)),
-        featured:       normList(strip(featured)),
+        hot_deals:      normList(strip(hotDeals, "hot_deals")),
+        recently_added: normList(strip(recentlyAdded, "recently_added")),
+        featured:       normList(strip(featured, "featured")),
         generated_at:   new Date().toISOString(),
         cache_window_hours: 3,
       };
@@ -444,6 +637,88 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       }
     });
   }
+
+  // ─── Telemetry: homepage impression + click tracking ─────────────────────────
+  // POST /api/track/homepage-event
+  // Fire-and-forget: always returns 200 even if DB insert fails.
+  app.post("/api/track/homepage-event", async (req, res) => {
+    res.json({ ok: true }); // respond immediately — never block the UI
+    try {
+      const { eventType, listingId, dealerId, city, state, brand, isFeatured = false, position, sessionId } = req.body as Record<string, any>;
+      if (!["impression", "click"].includes(eventType) || !listingId) return;
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      await sb.from("homepage_events").insert({
+        event_type: eventType, listing_id: listingId, dealer_id: dealerId ?? null,
+        city: city ?? null, state: state ?? null, brand: brand ?? null,
+        is_featured: Boolean(isFeatured), position: position ?? null, session_id: sessionId ?? null,
+      });
+    } catch (_) { /* silent — telemetry never crashes the app */ }
+  });
+
+  // POST /api/admin/aggregate-ctr
+  // Aggregates a day's homepage_events into homepage_ctr_daily. Idempotent.
+  app.post("/api/admin/aggregate-ctr", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const targetDate = (req.body as any)?.date ?? new Date(Date.now() - 86_400_000).toISOString().split("T")[0];
+      const { data: events, error } = await sb.from("homepage_events")
+        .select("event_type,listing_id,dealer_id,city,state,brand,is_featured")
+        .gte("created_at", `${targetDate}T00:00:00Z`)
+        .lt("created_at",  `${targetDate}T23:59:59Z`);
+      if (error) throw new Error(error.message);
+      const groups: Record<string, any> = {};
+      for (const e of (events ?? [])) {
+        const key = `${e.dealer_id}|${e.city}|${e.is_featured}`;
+        if (!groups[key]) groups[key] = { dealer_id: e.dealer_id, city: e.city, state: e.state, is_featured: Boolean(e.is_featured), impressions: 0, clicks: 0 };
+        if (e.event_type === "impression") groups[key].impressions++;
+        if (e.event_type === "click")      groups[key].clicks++;
+      }
+      const dealerIds = [...new Set(Object.values(groups).map((g: any) => g.dealer_id).filter(Boolean))];
+      let dealerNames: Record<number, string> = {};
+      if (dealerIds.length > 0) {
+        const { data: dealers } = await sb.from("dealers").select("id,name").in("id", dealerIds);
+        for (const d of (dealers ?? [])) dealerNames[d.id] = d.name;
+      }
+      const rows = Object.values(groups).map((g: any) => ({
+        date: targetDate, dealer_id: g.dealer_id,
+        dealer_name: g.dealer_id ? (dealerNames[g.dealer_id] ?? null) : null,
+        city: g.city, state: g.state, is_featured: g.is_featured,
+        impressions: g.impressions, clicks: g.clicks,
+      }));
+      if (rows.length === 0) return res.json({ ok: true, date: targetDate, rows_upserted: 0 });
+      const { error: upsertErr } = await sb.from("homepage_ctr_daily").upsert(rows, { onConflict: "date,dealer_id,city,is_featured" });
+      if (upsertErr) throw new Error(upsertErr.message);
+      res.json({ ok: true, date: targetDate, rows_upserted: rows.length });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/admin/ctr-report?days=7
+  app.get("/api/admin/ctr-report", requireAdmin, async (req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const days = parseInt((req.query as any).days as string) || 7;
+      const since = new Date(Date.now() - days * 86_400_000).toISOString().split("T")[0];
+      const { data, error } = await sb.from("homepage_ctr_daily")
+        .select("dealer_id,dealer_name,city,state,is_featured,impressions,clicks,ctr_pct,date")
+        .gte("date", since).order("ctr_pct", { ascending: false });
+      if (error) throw new Error(error.message);
+      const combos: Record<string, any> = {};
+      for (const row of (data ?? [])) {
+        const key = `${row.dealer_id}|${row.city}|${row.is_featured}`;
+        if (!combos[key]) combos[key] = { dealer_id: row.dealer_id, dealer_name: row.dealer_name, city: row.city, state: row.state, is_featured: row.is_featured, impressions: 0, clicks: 0 };
+        combos[key].impressions += row.impressions;
+        combos[key].clicks      += row.clicks;
+      }
+      const ranked = Object.values(combos)
+        .map((c: any) => ({ ...c, ctr_pct: c.impressions > 0 ? Math.round(c.clicks / c.impressions * 10000) / 100 : 0 }))
+        .filter((c: any) => c.impressions >= 5)
+        .sort((a: any, b: any) => b.ctr_pct - a.ctr_pct);
+      res.json({ ok: true, days, since, ranked: ranked.slice(0, 20) });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
 
   // ─── Listings ────────────────────────────────────────────────────────────────
 
@@ -651,6 +926,19 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
         ? await storage.getListingBySlug(req.params.id)
         : await storage.getListingById(id);
       if (!listing) return res.status(404).json({ error: "Listing not found" });
+      // Non-public or archived listings: signal the client to redirect (SEO 301)
+      const l = listing as any;
+      if (l.public_listing === false || l.status === "archived" || l.status === "inactive") {
+        const city  = encodeURIComponent(l.city  ?? "");
+        const state = encodeURIComponent(l.state ?? "");
+        const redirectPath = city && state
+          ? `/search?city=${city}&state=${state}&radius=25`
+          : "/search";
+        return res.status(200).json({
+          ...norm(suppressDeliveryIfUnavailable(l)),
+          _redirect: redirectPath,
+        });
+      }
       res.json(norm(suppressDeliveryIfUnavailable(listing as any)));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1434,111 +1722,141 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
     }
   });
 
-  // GET /api/admin/coverage-audit — dealer coverage summary from dealer_coverage_log
-  // Falls back to a live DB aggregate when no log rows exist yet (pre-backfill state).
+  // GET /api/admin/coverage-audit — dealer coverage summary
+  // Source of truth: dealers table (all 100 dealers always appear).
+  // Enriched with: dealer_coverage_log (most-recent scan), listings counts, pending_imports counts.
+  // Stale dealer_coverage_log slugs that don't match any dealer row are excluded.
   app.get("/api/admin/coverage-audit", requireAdmin, async (_req, res) => {
     try {
       const { createClient } = await import("@supabase/supabase-js");
       const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
 
-      // Most-recent log row per dealer_slug
-      const { data: logRows, error: logErr } = await sb
+      // 1. All real dealers — the authoritative list
+      const { data: dealerRows, error: dealerErr } = await sb
+        .from("dealers")
+        .select("slug,name,city,state,inventory_source_url,sync_enabled,browser_required,last_discovery_status,last_discovery_message,last_discovery_at,google_place_id,google_verified_name,google_address,google_phone,google_rating,google_review_count,google_verified_at,google_match_score,site_platform,site_platform_notes,is_duplicate_of")
+        .neq("slug", "__test_slug_delete_me__")
+        .order("name", { ascending: true });
+
+      if (dealerErr) return res.status(500).json({ error: dealerErr.message });
+
+      // 2. Most-recent coverage log row per dealer_slug
+      const { data: logRows } = await sb
         .from("dealer_coverage_log")
         .select("*")
         .order("scanned_at", { ascending: false });
 
-      // Live listing counts per sync_source for the fallback / enrichment
-      const { data: liveCounts, error: liveErr } = await sb
+      const latestLog: Record<string, any> = {};
+      for (const row of (logRows || [])) {
+        if (!latestLog[row.dealer_slug]) latestLog[row.dealer_slug] = row;
+      }
+
+      // 3. Live listing counts per sync_source
+      const { data: liveCounts } = await sb
         .from("listings")
-        .select("sync_source, deal_rating")
+        .select("sync_source,deal_rating")
         .not("sync_source", "is", null);
 
-      // Live pending_import counts per dealer_slug
+      const liveBySource: Record<string, { total: number; greatDealCount: number; allGreatDeal: boolean }> = {};
+      for (const row of (liveCounts || [])) {
+        const k = row.sync_source;
+        if (!liveBySource[k]) liveBySource[k] = { total: 0, greatDealCount: 0, allGreatDeal: true };
+        liveBySource[k].total++;
+        if (row.deal_rating === "great_deal") liveBySource[k].greatDealCount++;
+        else liveBySource[k].allGreatDeal = false;
+      }
+
+      // 4. Pending import counts per dealer_slug
       const { data: pendingCounts } = await sb
         .from("pending_imports")
         .select("dealer_slug")
         .eq("status", "pending");
-
-      if (logErr || liveErr) return res.status(500).json({ error: logErr?.message || liveErr?.message });
-
-      // Build live aggregates
-      const liveBySource: Record<string, { total: number; allGreatDeal: boolean; greatDealCount: number }> = {};
-      for (const row of (liveCounts || [])) {
-        const k = row.sync_source;
-        if (!liveBySource[k]) liveBySource[k] = { total: 0, allGreatDeal: true, greatDealCount: 0 };
-        liveBySource[k].total++;
-        if (row.deal_rating === "great_deal") liveBySource[k].greatDealCount++;
-        if (row.deal_rating !== "great_deal") liveBySource[k].allGreatDeal = false;
-      }
 
       const pendingByDealer: Record<string, number> = {};
       for (const row of (pendingCounts || [])) {
         pendingByDealer[row.dealer_slug] = (pendingByDealer[row.dealer_slug] || 0) + 1;
       }
 
-      // Fetch dealer validation fields for all dealers in one shot
-      const { data: dealerRows } = await sb
-        .from("dealers")
-        .select("slug,google_place_id,google_verified_name,google_address,google_phone,google_rating,google_review_count,google_verified_at,google_match_score,site_platform,site_platform_notes,is_duplicate_of");
-      const dealerBySlug: Record<string, any> = {};
-      for (const d of (dealerRows || [])) dealerBySlug[d.slug] = d;
+      // 5. Block log — mark blocked dealers
+      const { data: blockRows } = await sb
+        .from("dealer_block_log")
+        .select("dealer_slug,block_reason,http_status,resolved")
+        .eq("resolved", false);
 
-      // Deduplicate log rows — keep most recent per dealer_slug
-      const latestByDealer: Record<string, any> = {};
-      for (const row of (logRows || [])) {
-        if (!latestByDealer[row.dealer_slug]) latestByDealer[row.dealer_slug] = row;
+      const blockedSlugs: Record<string, { block_reason: string; http_status: number | null }> = {};
+      for (const row of (blockRows || [])) {
+        blockedSlugs[row.dealer_slug] = { block_reason: row.block_reason, http_status: row.http_status };
       }
 
-      // Merge live data into log rows, add synthetic rows for sources with no log entry
-      const allDealers = new Set([
-        ...Object.keys(latestByDealer),
-        ...Object.keys(liveBySource),
-      ]);
-
-      const result = Array.from(allDealers).map(slug => {
-        const log = latestByDealer[slug] || null;
-        const live = liveBySource[slug] || { total: 0, allGreatDeal: false, greatDealCount: 0 };
+      // 6. Build result — one row per dealer
+      const result = (dealerRows || []).map((dealer: any) => {
+        const slug  = dealer.slug;
+        const log   = latestLog[slug] || null;
+        const live  = liveBySource[slug] || { total: 0, greatDealCount: 0, allGreatDeal: false };
         const pending = pendingByDealer[slug] || 0;
-        const valuationReview = live.total > 0 && live.allGreatDeal;
-        const dealer = dealerBySlug[slug] || null;
+        const block = blockedSlugs[slug] || null;
+
+        // Derive coverage_status: prefer log value, but override for known states
+        let coverageStatus = log?.coverage_status || "needs_manual_review";
+        if (block) coverageStatus = "blocked_public_crawl";
+        else if (dealer.last_discovery_status === "blocked_public_crawl") coverageStatus = "blocked_public_crawl";
+
         return {
-          dealer_slug: slug,
-          inventory_url:          log?.inventory_url || null,
-          discovered_count:       log?.discovered_count || 0,
-          pending_imports_count:  pending,
-          public_listings_count:  live.total,
-          duplicate_count:        log?.duplicate_count || 0,
-          skipped_count:          log?.skipped_count || 0,
-          pagination_detected:    log?.pagination_detected || false,
-          pages_visited:          log?.pages_visited || 0,
-          load_more_detected:     log?.load_more_detected || false,
-          scroll_required:        log?.scroll_required || false,
-          detail_pages_visited:   log?.detail_pages_visited || 0,
-          source_page_type:       log?.source_page_type || null,
-          coverage_status:        log?.coverage_status || "needs_manual_review",
-          valuation_review_needed: valuationReview || log?.valuation_review_needed || false,
-          adapter_notes:          log?.adapter_notes || null,
-          scanned_at:             log?.scanned_at || null,
-          // Google validation fields
-          google_place_id:        dealer?.google_place_id || null,
-          google_verified_name:   dealer?.google_verified_name || null,
-          google_address:         dealer?.google_address || null,
-          google_phone:           dealer?.google_phone || null,
-          google_rating:          dealer?.google_rating || null,
-          google_review_count:    dealer?.google_review_count || null,
-          google_verified_at:     dealer?.google_verified_at || null,
-          google_match_score:     dealer?.google_match_score || null,
-          site_platform:          dealer?.site_platform || null,
-          site_platform_notes:    dealer?.site_platform_notes || null,
-          is_duplicate_of:        dealer?.is_duplicate_of || null,
+          dealer_slug:             slug,
+          dealer_name:             dealer.name,
+          city:                    dealer.city,
+          state:                   dealer.state,
+          inventory_url:           dealer.inventory_source_url || log?.inventory_url || null,
+          sync_enabled:            dealer.sync_enabled,
+          browser_required:        dealer.browser_required,
+          last_discovery_status:   dealer.last_discovery_status || null,
+          last_discovery_message:  dealer.last_discovery_message || null,
+          last_discovery_at:       dealer.last_discovery_at || null,
+          // Coverage log fields
+          discovered_count:        log?.discovered_count || 0,
+          pending_imports_count:   pending,
+          public_listings_count:   live.total,
+          duplicate_count:         log?.duplicate_count || 0,
+          skipped_count:           log?.skipped_count || 0,
+          pagination_detected:     log?.pagination_detected || false,
+          pages_visited:           log?.pages_visited || 0,
+          load_more_detected:      log?.load_more_detected || false,
+          scroll_required:         log?.scroll_required || false,
+          detail_pages_visited:    log?.detail_pages_visited || 0,
+          source_page_type:        log?.source_page_type || null,
+          coverage_status:         coverageStatus,
+          valuation_review_needed: (live.total > 0 && live.allGreatDeal) || log?.valuation_review_needed || false,
+          adapter_notes:           log?.adapter_notes || null,
+          scanned_at:              log?.scanned_at || null,
+          // Block info
+          block_reason:            block?.block_reason || null,
+          block_http_status:       block?.http_status || null,
+          // Google validation
+          google_place_id:         dealer.google_place_id || null,
+          google_verified_name:    dealer.google_verified_name || null,
+          google_address:          dealer.google_address || null,
+          google_phone:            dealer.google_phone || null,
+          google_rating:           dealer.google_rating || null,
+          google_review_count:     dealer.google_review_count || null,
+          google_verified_at:      dealer.google_verified_at || null,
+          google_match_score:      dealer.google_match_score || null,
+          site_platform:           dealer.site_platform || null,
+          site_platform_notes:     dealer.site_platform_notes || null,
+          is_duplicate_of:         dealer.is_duplicate_of || null,
         };
       });
 
-      // Sort: active sources with listings first, then by slug
-      result.sort((a, b) => b.public_listings_count - a.public_listings_count || a.dealer_slug.localeCompare(b.dealer_slug));
+      // Sort: dealers with live listings first, then blocked, then needs_manual_review — all by name within group
+      result.sort((a: any, b: any) => {
+        const aHasListings = a.public_listings_count > 0 ? 0 : 1;
+        const bHasListings = b.public_listings_count > 0 ? 0 : 1;
+        if (aHasListings !== bHasListings) return aHasListings - bHasListings;
+        return (a.dealer_name || a.dealer_slug).localeCompare(b.dealer_name || b.dealer_slug);
+      });
+
       res.json(result);
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: (e as Error).message });
     }
   });
 
@@ -2445,6 +2763,127 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
         .limit(10);
       if (error) return res.status(500).json({ error: error.message });
       res.json(data || []);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
+  // ── Blocked Sources ──────────────────────────────────────────────────────────
+
+  /** Known blocked dealers seed data (mirrors compliant-crawler.ts KNOWN_BLOCKED_DEALERS) */
+  const KNOWN_BLOCKED_DEALERS_SEED = [
+    { dealer_slug: 'icon-golf-cars-jacksonville', dealer_name: 'ICON Golf Cars — Jacksonville', inventory_url: 'https://icongolfcartsusa.com/location/florida/', block_reason: 'http_403', http_status: 403, robots_txt_disallows: false },
+    { dealer_slug: 'icon-golf-cars-yulee',        dealer_name: 'ICON Golf Cars — Yulee',        inventory_url: 'https://icongolfcartsusa.com/location/florida/', block_reason: 'http_403', http_status: 403, robots_txt_disallows: false },
+    { dealer_slug: 'paradise-powersports-nsb',    dealer_name: 'Paradise Powersports — NSB',    inventory_url: 'https://paradisepowersports.com/inventory/',    block_reason: 'http_403', http_status: 403, robots_txt_disallows: false },
+    { dealer_slug: 'total-golf-cart-vero-beach',  dealer_name: 'Total Golf Cart — Vero Beach',  inventory_url: 'https://www.totalgolfcart.com/inventory/',       block_reason: 'http_403', http_status: 403, robots_txt_disallows: false },
+    { dealer_slug: 'pooler-golf-cars',            dealer_name: 'Pooler Golf Cars',              inventory_url: 'https://www.poolergolfcars.com/',               block_reason: 'http_402', http_status: 402, robots_txt_disallows: false },
+    { dealer_slug: 'golden-coast-golf-carts-brunswick', dealer_name: 'Golden Coast Golf Carts — Brunswick', inventory_url: 'https://www.goldencoastgolfcarts.com/Major_Unit_List', block_reason: 'http_403', http_status: 403, robots_txt_disallows: false },
+    { dealer_slug: 'jax-golf-carts-jacksonville', dealer_name: 'JAX Golf Carts — Jacksonville', inventory_url: 'https://golfcartsjacksonville.com/auto-listing-sitemap.xml', block_reason: 'captcha_detected', http_status: 202, robots_txt_disallows: false },
+    { dealer_slug: 'tsa-golf-evans',              dealer_name: 'TSA Golf — Evans',              inventory_url: 'https://www.tsagolf.com/',                       block_reason: 'captcha_detected', http_status: 202, robots_txt_disallows: false },
+    { dealer_slug: 'budget-golf-carts-yulee',     dealer_name: 'Budget Golf Carts — Yulee',     inventory_url: 'https://budgetgolfcarts.com/shop-now/',          block_reason: 'captcha_detected', http_status: 202, robots_txt_disallows: false },
+    { dealer_slug: 'sunshine-golf-car',           dealer_name: 'Sunshine Golf Car',             inventory_url: 'https://www.sunshinegolfcar.com/inventory/',     block_reason: 'ssl_error',       http_status: 0,   robots_txt_disallows: false },
+    { dealer_slug: 'whitakers-golf-cars-waycross',dealer_name: "Whitaker's Golf Cars — Waycross", inventory_url: 'https://www.whitakersgolfcars.com/',           block_reason: 'dns_failure',     http_status: 0,   robots_txt_disallows: false },
+  ] as const;
+
+  // GET /api/admin/blocked-sources
+  // Returns all dealer_block_log rows, enriched with live dealer name + website_url.
+  app.get("/api/admin/blocked-sources", requireAdmin, async (_req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      const { data: rows, error } = await sb
+        .from("dealer_block_log")
+        .select("*")
+        .order("attempted_at", { ascending: false });
+
+      if (error) return res.status(500).json({ error: error.message });
+
+      const slugs: string[] = (rows || []).map((r: any) => r.dealer_slug);
+      const dealerMap: Record<string, { name: string; website_url: string | null }> = {};
+
+      if (slugs.length > 0) {
+        const { data: dealers } = await sb
+          .from("dealers")
+          .select("slug,name,website_url,inventory_source_url")
+          .in("slug", slugs);
+        for (const d of dealers || []) {
+          dealerMap[d.slug] = { name: d.name, website_url: d.website_url };
+        }
+      }
+
+      const enriched = (rows || []).map((r: any) => ({
+        ...r,
+        dealer_name_live: dealerMap[r.dealer_slug]?.name ?? r.dealer_name,
+        dealer_website_url: dealerMap[r.dealer_slug]?.website_url ?? null,
+      }));
+
+      res.json(enriched);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PATCH /api/admin/blocked-sources/:slug
+  // Update outreach_status, outreach_notes, and/or resolved flag.
+  app.patch("/api/admin/blocked-sources/:slug", requireAdmin, async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const { outreach_status, outreach_notes, resolved } = req.body as {
+        outreach_status?: string;
+        outreach_notes?: string;
+        resolved?: boolean;
+      };
+
+      if (!slug) return res.status(400).json({ error: "slug is required" });
+
+      const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+      if (outreach_status !== undefined) patch.outreach_status = outreach_status;
+      if (outreach_notes  !== undefined) patch.outreach_notes  = outreach_notes;
+      if (resolved        !== undefined) patch.resolved        = resolved;
+
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      const { error } = await sb
+        .from("dealer_block_log")
+        .update(patch)
+        .eq("dealer_slug", slug);
+
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/admin/blocked-sources/seed
+  // Seeds dealer_block_log with all 11 known-blocked dealers. Safe to re-run (upsert).
+  app.post("/api/admin/blocked-sources/seed", requireAdmin, async (_req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      const now = new Date().toISOString();
+      const rows = KNOWN_BLOCKED_DEALERS_SEED.map((d) => ({
+        dealer_slug:          d.dealer_slug,
+        dealer_name:          d.dealer_name,
+        inventory_url:        d.inventory_url,
+        block_reason:         d.block_reason,
+        http_status:          d.http_status ?? null,
+        robots_txt_disallows: d.robots_txt_disallows ?? false,
+        resolved:             false,
+        attempted_at:         now,
+        updated_at:           now,
+      }));
+
+      const { error } = await sb
+        .from("dealer_block_log")
+        .upsert(rows, { onConflict: "dealer_slug" });
+
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ ok: true, seeded: rows.length });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

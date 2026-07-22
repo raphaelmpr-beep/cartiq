@@ -10,6 +10,39 @@ import { DealBadge } from "./Badges";
 import { formatPrice } from "@/lib/utils";
 import type { Listing } from "@/lib/types";
 
+// ── Telemetry ─────────────────────────────────────────────────────────────────
+// Generates a stable anonymous session ID for this browser tab (not persisted).
+function getSessionId(): string {
+  if (typeof window === "undefined") return "";
+  if (!(window as any).__ciq_sid) {
+    (window as any).__ciq_sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+  return (window as any).__ciq_sid;
+}
+
+function trackHomepageEvent(
+  eventType: "impression" | "click",
+  listing: Listing,
+  position: number,
+) {
+  fetch("/api/track/homepage-event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      eventType,
+      listingId:  listing.id,
+      dealerId:   listing.dealerId,
+      city:       listing.city,
+      state:      listing.state,
+      brand:      listing.brand,
+      isFeatured: (listing as any).isFeatured ?? false,
+      position,
+      sessionId:  getSessionId(),
+    }),
+    keepalive: true, // survives page navigation
+  }).catch(() => {/* silent */});
+}
+
 // ── Freshness helpers ─────────────────────────────────────────────────────────
 function daysSince(iso: string | null | undefined): number | null {
   if (!iso) return null;
@@ -49,7 +82,7 @@ function LastRefreshedLabel({ lastUpdated }: { lastUpdated?: string | null }) {
 }
 
 // ── Deal Card ─────────────────────────────────────────────────────────────────
-function DealCard({ listing, priority = false }: { listing: Listing; priority?: boolean }) {
+function DealCard({ listing, priority = false, position = 0 }: { listing: Listing; priority?: boolean; position?: number }) {
   const price = listing.salePrice ?? listing.askingPrice ?? listing.regularPrice;
   const marketVal = listing.cartiqEstimatedValue;
   const savings = marketVal && price ? marketVal - price : null;
@@ -61,6 +94,7 @@ function DealCard({ listing, priority = false }: { listing: Listing; priority?: 
       href={`/listing/${listing.slug || listing.id}`}
       className="block shrink-0 w-56 sm:w-64 rounded-xl border border-border bg-white overflow-hidden hover:shadow-md transition-shadow group"
       data-testid={`carousel-card-${listing.id}`}
+      onClick={() => trackHomepageEvent("click", listing, position)}
     >
       {/* Image */}
       <div className="relative aspect-[4/3] bg-muted overflow-hidden">
@@ -171,6 +205,16 @@ export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
     setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 8);
   }, []);
 
+  // Fire impression events once when the carousel mounts with real listings
+  useEffect(() => {
+    if (!deals.length) return;
+    // Only fire for the first visible ~5 cards (avoid spamming for off-screen cards)
+    const visible = deals.slice(0, 5);
+    visible.forEach((listing, idx) => {
+      trackHomepageEvent("impression", listing, idx);
+    });
+  }, [deals.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-advance every 5 seconds; wraps back to start when at the end
   useEffect(() => {
     if (isPaused || !deals.length) return;
@@ -262,7 +306,7 @@ export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
       >
         {deals.map((listing, index) => (
           <div key={listing.id} style={{ scrollSnapAlign: "start" }}>
-            <DealCard listing={listing} priority={index === 0} />
+            <DealCard listing={listing} priority={index === 0} position={index} />
           </div>
         ))}
       </div>

@@ -28,12 +28,25 @@ function formatDate(raw?: string | null): string {
   }
 }
 
-// Render bold inline: **text** → <strong>
+// Render inline markdown: **bold** and [text](url)
 function renderInline(text: string): (string | JSX.Element)[] {
-  const parts = text.split(/\*\*(.*?)\*\*/g);
-  return parts.map((part, pi) =>
-    pi % 2 === 1 ? <strong key={pi} className="font-semibold text-foreground">{part}</strong> : part
-  );
+  // Split on **bold** and [text](url) patterns
+  const parts = text.split(/(\*\*.*?\*\*|\[.*?\]\(.*?\))/g);
+  return parts.map((part, pi) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={pi} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
+    }
+    const linkMatch = part.match(/^\[(.*?)\]\((.*?)\)$/);
+    if (linkMatch) {
+      return (
+        <a key={pi} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
+          className="text-green-700 underline underline-offset-2 hover:text-green-900 transition-colors">
+          {linkMatch[1]}
+        </a>
+      );
+    }
+    return part;
+  });
 }
 
 // Render markdown body: ## h2, ### h3, | tables, - lists, paragraphs
@@ -120,16 +133,17 @@ function renderBody(body: string): JSX.Element[] {
 
 // ── Related articles relevance map (module-level, no runtime cost) ───────────
 const RELATED_MAP: Record<string, string[]> = {
-  'how-much-does-a-golf-cart-cost-in-florida': ['best-golf-cart-brands-florida-georgia', 'new-vs-used-golf-cart', 'how-to-check-golf-cart-deal'],
-  'lithium-vs-lead-acid-golf-cart-battery': ['how-much-does-a-golf-cart-cost-in-florida', 'best-golf-cart-brands-florida-georgia', 'golf-cart-warranty-what-to-know'],
-  'best-golf-cart-brands-florida-georgia': ['how-much-does-a-golf-cart-cost-in-florida', 'new-vs-used-golf-cart', 'lithium-vs-lead-acid-golf-cart-battery'],
-  'new-vs-used-golf-cart': ['how-much-does-a-golf-cart-cost-in-florida', 'golf-cart-dealer-vs-private-seller', 'golf-cart-warranty-what-to-know'],
-  'street-legal-golf-cart-florida': ['golf-cart-communities-florida', 'how-much-does-a-golf-cart-cost-in-florida', 'best-golf-cart-brands-florida-georgia'],
-  'golf-cart-dealer-vs-private-seller': ['new-vs-used-golf-cart', 'how-to-check-golf-cart-deal', 'golf-cart-delivery-florida'],
-  'how-to-check-golf-cart-deal': ['how-much-does-a-golf-cart-cost-in-florida', 'new-vs-used-golf-cart', 'golf-cart-dealer-vs-private-seller'],
-  'golf-cart-warranty-what-to-know': ['new-vs-used-golf-cart', 'best-golf-cart-brands-florida-georgia', 'golf-cart-dealer-vs-private-seller'],
-  'golf-cart-delivery-florida': ['how-much-does-a-golf-cart-cost-in-florida', 'golf-cart-dealer-vs-private-seller', 'golf-cart-communities-florida'],
-  'golf-cart-communities-florida': ['street-legal-golf-cart-florida', 'how-much-does-a-golf-cart-cost-in-florida', 'how-to-check-golf-cart-deal'],
+  'how-much-does-a-golf-cart-cost-in-florida': ['used-golf-cart-cost-florida', 'best-golf-cart-brands-florida-georgia', 'new-vs-used-golf-cart'],
+  'used-golf-cart-cost-florida': ['lithium-vs-lead-acid-golf-cart-battery', 'street-legal-golf-cart-florida', 'golf-cart-dealer-vs-private-seller'],
+  'lithium-vs-lead-acid-golf-cart-battery': ['used-golf-cart-cost-florida', 'best-golf-cart-brands-florida-georgia', 'golf-cart-warranty-what-to-know'],
+  'best-golf-cart-brands-florida-georgia': ['used-golf-cart-cost-florida', 'new-vs-used-golf-cart', 'lithium-vs-lead-acid-golf-cart-battery'],
+  'new-vs-used-golf-cart': ['used-golf-cart-cost-florida', 'golf-cart-dealer-vs-private-seller', 'golf-cart-warranty-what-to-know'],
+  'street-legal-golf-cart-florida': ['golf-cart-communities-florida', 'used-golf-cart-cost-florida', 'best-golf-cart-brands-florida-georgia'],
+  'golf-cart-dealer-vs-private-seller': ['used-golf-cart-cost-florida', 'new-vs-used-golf-cart', 'golf-cart-delivery-florida'],
+  'how-to-check-golf-cart-deal': ['used-golf-cart-cost-florida', 'new-vs-used-golf-cart', 'golf-cart-dealer-vs-private-seller'],
+  'golf-cart-warranty-what-to-know': ['used-golf-cart-cost-florida', 'new-vs-used-golf-cart', 'best-golf-cart-brands-florida-georgia'],
+  'golf-cart-delivery-florida': ['used-golf-cart-cost-florida', 'golf-cart-dealer-vs-private-seller', 'golf-cart-communities-florida'],
+  'golf-cart-communities-florida': ['street-legal-golf-cart-florida', 'used-golf-cart-cost-florida', 'how-to-check-golf-cart-deal'],
 };
 
 // ── Buyer Guide Index ──────────────────────────────────────────────────────────

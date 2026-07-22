@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { setSEO, listingToProductSchema, breadcrumbSchema } from "@/lib/seo";
 import { getBrandWikiByDbName } from "@/lib/brand-wiki-data";
 import { useQuery } from "@tanstack/react-query";
-import { useParams, Link } from "wouter";
+import { useParams, Link, useLocation } from "wouter";
 import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone, Mail, Store, User, Truck, ShieldCheck } from "lucide-react";
 import SaveButton from "@/components/SaveButton";
 import WatchButton from "@/components/WatchButton";
@@ -27,12 +27,30 @@ function usePricingResult(listing?: Listing) {
 
 export default function ListingDetail() {
   const { id } = useParams<{ id: string }>();
+  const [, navigate] = useLocation();
 
   const { data: listing, isLoading } = useQuery<Listing>({
     queryKey: ["/api/listings", id],
     queryFn: () => apiRequest("GET", `/api/listings/${id}`).then((r) => r.json()),
     enabled: !!id,
   });
+
+  // Redirect archived/non-public listings to city search (SEO 301 via meta refresh + JS redirect)
+  const redirectPath = (listing as any)?._redirect as string | undefined;
+  useEffect(() => {
+    if (!redirectPath) return;
+    // Inject meta refresh so Googlebot sees the redirect signal
+    const meta = document.createElement("meta");
+    meta.httpEquiv = "refresh";
+    meta.content = `0;url=${redirectPath}`;
+    document.head.appendChild(meta);
+    // Inject canonical pointing to the destination
+    const existing = document.querySelector("link[rel='canonical']");
+    if (existing) existing.setAttribute("href", `https://golfcartiq.com${redirectPath.split("?")[0]}`);
+    // JS redirect for real users
+    navigate(redirectPath);
+    return () => { document.head.removeChild(meta); };
+  }, [redirectPath, navigate]);
 
   const dealerSlug = listing?.syncSource;
   const { data: dealer } = useQuery<Dealer>({

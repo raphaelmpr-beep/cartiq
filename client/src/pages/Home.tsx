@@ -197,31 +197,33 @@ export default function Home() {
               <h2 className="text-sm font-bold">Popular Golf Cart Markets</h2>
               <div className="flex flex-wrap gap-2">
                 {[
-                  { label: "The Villages, FL",     slug: "the-villages-fl" },
-                  { label: "Wildwood, FL",          slug: "wildwood-fl" },
-                  { label: "Lady Lake, FL",         slug: "lady-lake-fl" },
-                  { label: "Nocatee, FL",           slug: "nocatee-fl" },
-                  { label: "Panama City Beach, FL", slug: "panama-city-beach-fl" },
-                  { label: "Peachtree City, GA",    slug: "peachtree-city-ga" },
-                  { label: "Jacksonville, FL",      slug: "jacksonville-fl" },
-                  { label: "Clearwater, FL",        slug: "clearwater-fl" },
-                ].map(({ label, slug }) => (
-                  <Link key={slug} href={`/golf-carts-for-sale/${slug}`}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-border text-xs hover:bg-secondary hover:border-green-200 transition-colors">
+                  { label: "The Villages, FL",     city: "The Villages",     state: "FL" },
+                  { label: "Wildwood, FL",          city: "Wildwood",          state: "FL" },
+                  { label: "Lady Lake, FL",         city: "Lady Lake",         state: "FL" },
+                  { label: "Nocatee, FL",           city: "Nocatee",           state: "FL" },
+                  { label: "Pensacola, FL",          city: "Pensacola",          state: "FL" },
+                  { label: "Peachtree City, GA",    city: "Peachtree City",    state: "GA" },
+                  { label: "Jacksonville, FL",      city: "Jacksonville",      state: "FL" },
+                  { label: "Clearwater, FL",        city: "Clearwater",        state: "FL" },
+                ].map(({ label, city, state }) => (
+                  <button
+                    key={label}
+                    onClick={() => navWithParams("/search", { city, state, radius: "25" })}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-border text-xs hover:bg-secondary hover:border-green-200 transition-colors cursor-pointer">
                     <MapPin className="h-3 w-3 text-green-600" />{label}
-                  </Link>
+                  </button>
                 ))}
               </div>
             </div>
             <div className="space-y-3">
               <h2 className="text-sm font-bold">Quick Search</h2>
               <div className="flex flex-wrap gap-2">
-                {["Nocatee, FL", "The Villages, FL", "Jacksonville, FL", "Orlando, FL", "Atlanta, GA", "Peachtree City, GA"].map((loc) => {
+                {["The Villages, FL", "Jacksonville, FL", "Peachtree City, GA", "Lakeland, FL", "Ocala, FL", "Woodstock, GA"].map((loc) => {
                   const [city, state] = loc.split(", ");
                   return (
                     <button
                       key={loc}
-                      onClick={() => navWithParams("/search", { city, state })}
+                      onClick={() => navWithParams("/search", { city, state, radius: "25" })}
                       className="text-xs px-2.5 py-1.5 rounded-full border border-border hover:bg-secondary transition-colors cursor-pointer"
                     >
                       {loc}

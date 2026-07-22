@@ -17,7 +17,9 @@ import {
   isNavPage,
   cleanHtmlWhitespace,
 } from './adapters.js';
-import { runBrowserSync } from './browser-sync.js';
+// browser-sync is loaded lazily (dynamic import) to avoid pulling in playwright
+// at module load time, which crashes Vercel Lambda environments without playwright installed.
+// import { runBrowserSync } from './browser-sync.js'; // DO NOT re-add as static import
 
 function getSupabase() {
   return createClient(
@@ -520,6 +522,32 @@ async function runDiscoverSitemap(
   const adapterKey = dealer.adapter_key;
   const strategy   = dealer.discovery_strategy;
 
+  // ── Known-blocked sources: skip fetch entirely, write block log ────────────
+  // Dealers in dealer_block_log with resolved=false are flagged as blocked_public_crawl.
+  // Fail-open: if the table doesn't exist yet (migration pending), skip gracefully.
+  try {
+    const { data: blockRow, error: blockErr } = await supabase
+      .from('dealer_block_log')
+      .select('block_reason,http_status,inventory_url')
+      .eq('dealer_slug', slug)
+      .eq('resolved', false)
+      .maybeSingle();
+
+    if (!blockErr && blockRow) {
+      const msg = `[${slug}] Skipped — marked blocked_public_crawl (${blockRow.block_reason}, HTTP ${blockRow.http_status ?? 'n/a'}). Resolve via admin Blocked Sources panel.`;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, 'blocked_public_crawl', msg);
+      // Stamp attempted_at so the admin panel shows a fresh "last attempt" time
+      try {
+        await supabase
+          .from('dealer_block_log')
+          .update({ attempted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .eq('dealer_slug', slug);
+      } catch { /* non-fatal */ }
+      return;
+    }
+  } catch { /* table not yet created — fail-open, continue with sync */ }
+
   // ── Requires browser — route through browser-sync.ts ───────────────────────
   // Some dealers (e.g. JAX) use SiteGround SG Captcha or similar bot-protection
   // that blocks plain HTTP fetch. browser-sync.ts uses Playwright to bypass it.
@@ -527,6 +555,7 @@ async function runDiscoverSitemap(
     const browserSyncDealers = ['jax-golf-carts-jacksonville'];
     if (browserSyncDealers.includes(slug)) {
       try {
+        const { runBrowserSync } = await import('./browser-sync.js');
         const bsResult = await runBrowserSync({
           dealer: slug,
           limit,
@@ -769,17 +798,20 @@ async function runDiscoverSitemap(
     const { error } = await supabase.from('pending_imports').upsert(rows, { onConflict: 'source_url', ignoreDuplicates: true });
     if (error) {
       result.errors++;
-      result.summary.push(`[${dealer}] DB insert error: ${error.message}`);
+      result.summary.push(`[${slug}] DB insert error: ${error.message}`);
     } else {
       result.new_queued += rows.length;
-      result.summary.push(`[${dealer}] Queued ${rows.length} new listings for review`);
+      result.summary.push(`[${slug}] Queued ${rows.length} new listings for review`);
     }
   } else if (dry_run) {
     result.new_queued = rows.length;
-    result.summary.push(`[${dealer}] [DRY RUN] Would queue ${rows.length} listings`);
-    // Show first 5 as preview
+    result.summary.push(`[${slug}] [DRY RUN] Would queue ${rows.length} listings`);
     rows.slice(0, 5).forEach(r => result.summary.push(`  → ${r.raw_title} (${r.source_url})`));
   }
+
+  // Auto-archive: mark active listings that are no longer in the dealer sitemap
+  const archiveResult = await autoArchiveRemovedListings(slug, sitemapUrls, dry_run);
+  archiveResult.summary.forEach(s => result.summary.push(s));
 }
 
 // ─── Text cleaner: strip HTML whitespace artifacts ─────────────────────────
@@ -1044,6 +1076,68 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
   } else {
     result.summary.push(`[DRY RUN] Would import: ${title} @ $${imp.price ?? 'unknown'}`);
   }
+}
+
+// ─── AUTO-ARCHIVE: mark removed listings as archived ────────────────────────
+
+/**
+ * Compare live sitemap URLs against our active listings for a dealer.
+ * Any listing whose source_listing_url is no longer in the sitemap gets
+ * set to status=archived + public_listing=false.
+ *
+ * Safe: only touches listings with a source_listing_url (sync-tracked).
+ * Never touches manually-imported listings.
+ */
+export async function autoArchiveRemovedListings(
+  dealerSlug: string,
+  liveSitemapUrls: string[],
+  dryRun = false
+): Promise<{ archived: number; summary: string[] }> {
+  const supabase = getSupabase();
+  const summary: string[] = [];
+  const liveSet = new Set(liveSitemapUrls);
+
+  const { data: activeListings, error } = await supabase
+    .from('listings')
+    .select('id, title, source_listing_url')
+    .eq('sync_source', dealerSlug)
+    .eq('status', 'active')
+    .eq('public_listing', true)
+    .not('source_listing_url', 'is', null);
+
+  if (error) {
+    summary.push(`[auto-archive] DB error: ${error.message}`);
+    return { archived: 0, summary };
+  }
+
+  const removed = (activeListings || []).filter(
+    (l: any) => l.source_listing_url && !liveSet.has(l.source_listing_url)
+  );
+
+  summary.push(`[auto-archive][${dealerSlug}] ${activeListings?.length ?? 0} active | ${removed.length} no longer in sitemap`);
+
+  if (removed.length === 0) return { archived: 0, summary };
+
+  if (dryRun) {
+    removed.forEach((l: any) => summary.push(`  [DRY RUN] Would archive: #${l.id} ${l.title}`));
+    return { archived: removed.length, summary };
+  }
+
+  const ids = removed.map((l: any) => l.id);
+  const { error: updateErr } = await supabase
+    .from('listings')
+    .update({ status: 'archived', public_listing: false, updated_at: new Date().toISOString() })
+    .in('id', ids);
+
+  if (updateErr) {
+    summary.push(`[auto-archive] Update error: ${updateErr.message}`);
+    return { archived: 0, summary };
+  }
+
+  removed.forEach((l: any) =>
+    summary.push(`  ✓ Archived #${l.id}: ${l.title}`)
+  );
+  return { archived: removed.length, summary };
 }
 
 // ─── STATUS: pipeline health summary ─────────────────────────────────────────

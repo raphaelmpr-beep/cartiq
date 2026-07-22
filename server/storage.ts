@@ -123,7 +123,7 @@ class SupabaseStorage implements IStorage {
       if (filters.sellerType)  q = q.eq("seller_type", filters.sellerType);
       if (filters.batteryType) q = q.eq("battery_type", filters.batteryType);
       if (filters.dealRating)  q = q.eq("deal_rating", filters.dealRating);
-      if (filters.warrantyIncluded) q = q.eq("warranty_included", filters.warrantyIncluded);
+      if (filters.warrantyIncluded) q = q.in("warranty_included", ["yes", "true"]);
       if (filters.minPrice)    q = q.gte("asking_price", filters.minPrice);
       if (filters.maxPrice)    q = q.lte("asking_price", filters.maxPrice);
       if (filters.streetLegal === true) q = q.eq("street_legal_claimed", true);

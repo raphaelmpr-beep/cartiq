@@ -10,32 +10,30 @@ import type { Listing } from "@/lib/types";
 const SUPA = "https://aagwrcdvhuuzwrglamrt.supabase.co";
 const KEY  = "sb_publishable_AMYcEYmVFC7zSGT_c1GTaw_IlWrtbyU";
 
+// Convert snake_case Supabase row → camelCase Listing (mirrors server norm())
+function normRow(obj: Record<string, any>): Listing {
+  const out: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    const camel = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+    out[camel] = obj[key];
+  }
+  return out as Listing;
+}
+
+const SELECT = "id,title,slug,brand,model,year,condition,asking_price,deal_rating,buyer_score,image_url,city,state,battery_type,seating,source_listing_url";
+
 async function fetchCityListings(cfg: CityConfig): Promise<Listing[]> {
-  // city+state match (lat/lng not yet geocoded for all listings)
-  const params = new URLSearchParams({
-    city: `ilike.${cfg.city}`,
-    state: `eq.${cfg.state}`,
-    status: "eq.active",
-    public_listing: "eq.true",
-    select: "id,title,slug,brand,model,year,condition,asking_price,deal_rating,buyer_score,image_url,city,state,battery_type,seating,source_listing_url",
-    order: "buyer_score.desc.nullslast",
-    limit: "24",
-  });
-  const url = `${SUPA}/rest/v1/listings?${params}`;
-  const res = await fetch(url, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } });
-  const data: Listing[] = await res.json();
+  const base = { status: "eq.active", public_listing: "eq.true", select: SELECT, order: "buyer_score.desc.nullslast", limit: "24" };
+  const p1 = new URLSearchParams({ ...base, city: `ilike.${cfg.city}`, state: `eq.${cfg.state}` });
+  const res = await fetch(`${SUPA}/rest/v1/listings?${p1}`, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } });
+  const raw: any[] = await res.json();
+  const data = raw.map(normRow);
   // Fallback: state-only if fewer than 5
   if (data.length < 5) {
-    const p2 = new URLSearchParams({
-      state: `eq.${cfg.state}`,
-      status: "eq.active",
-      public_listing: "eq.true",
-      select: "id,title,slug,brand,model,year,condition,asking_price,deal_rating,buyer_score,image_url,city,state,battery_type,seating,source_listing_url",
-      order: "buyer_score.desc.nullslast",
-      limit: "12",
-    });
+    const p2 = new URLSearchParams({ ...base, state: `eq.${cfg.state}`, limit: "12" });
     const r2 = await fetch(`${SUPA}/rest/v1/listings?${p2}`, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } });
-    return r2.json();
+    const raw2: any[] = await r2.json();
+    return raw2.map(normRow);
   }
   return data;
 }

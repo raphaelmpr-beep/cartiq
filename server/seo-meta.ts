@@ -13,7 +13,7 @@
 
 const BASE_URL = "https://golfcartiq.com";
 const SITE_NAME = "GolfCartIQ";
-const DEFAULT_TITLE = `${SITE_NAME} | Golf Cart Price Intelligence for Florida & Georgia`;
+const DEFAULT_TITLE = `${SITE_NAME} | Golf Cart Prices & Deals — FL & GA`;
 const DEFAULT_DESC =
   "Compare golf carts for sale, local dealers, prices, deal ratings, battery types, warranties, and delivery options across Florida and Georgia.";
 const DEFAULT_IMAGE = `${BASE_URL}/og-image.png`;
@@ -100,6 +100,11 @@ const STATIC_ROUTES: Record<string, { title: string; description: string }> = {
     title: `Best Golf Cart Communities in Florida | ${SITE_NAME}`,
     description:
       "The top golf cart-friendly communities in Florida — from The Villages to Nocatee. Find your next home and cart.",
+  },
+  "/buyer-guide/used-golf-cart-cost-florida": {
+    title: `Used Golf Cart Cost in Florida: 2026 Price Guide | ${SITE_NAME}`,
+    description:
+      "How much does a used golf cart cost in Florida? See 2026 price ranges by brand, condition, and battery type — with real dealer data from GolfCartIQ.",
   },
   // ─── City pages ────────────────────────────────────────────────────────────
   "/golf-carts-for-sale/the-villages-fl": {
@@ -335,7 +340,15 @@ export function getRouteMeta(pathname: string): RouteMeta {
     const title = `Golf Cart Listing | ${SITE_NAME}`;
     const description =
       "View golf cart details, deal rating, price history, and dealer information on GolfCartIQ.";
-    return buildMeta(title, description, canonical, null);
+    const jsonLd = {
+      "@context": "https://schema.org",
+      "@type": "ItemPage",
+      name: title,
+      description,
+      url: canonical,
+      isPartOf: { "@type": "WebSite", name: SITE_NAME, url: BASE_URL },
+    };
+    return buildMeta(title, description, canonical, jsonLd);
   }
 
   // 3. Dynamic: /golf-carts-for-sale/:city (not in static map)
@@ -353,7 +366,20 @@ export function getRouteMeta(pathname: string): RouteMeta {
     return buildMeta(title, description, canonical, jsonLd);
   }
 
-  // 4. Dynamic: /brands/:slug (not in static map)
+  // 4. Dynamic: /buyer-guide/:slug (not in static map — fallback for future articles)
+  if (normalized.startsWith("/buyer-guide/")) {
+    const articleSlug = normalized.replace("/buyer-guide/", "");
+    const articleLabel = articleSlug
+      .replace(/-/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    const canonical = `${BASE_URL}/buyer-guide/${articleSlug}`;
+    const title = `${articleLabel} | ${SITE_NAME}`;
+    const description = `Expert golf cart buying advice on ${articleLabel.toLowerCase()}. GolfCartIQ guides Florida and Georgia buyers with real dealer data and market intelligence.`;
+    const jsonLd = articleSchema(title, description, canonical);
+    return buildMeta(title, description, canonical, jsonLd);
+  }
+
+  // 5. Dynamic: /brands/:slug (not in static map)
   if (normalized.startsWith("/brands/")) {
     const brandSlug = normalized.replace("/brands/", "");
     const brandLabel = brandSlug
@@ -366,7 +392,7 @@ export function getRouteMeta(pathname: string): RouteMeta {
     return buildMeta(title, description, canonical, jsonLd);
   }
 
-  // 5. Fallback — homepage defaults (no per-page canonical signal for unknown routes)
+  // 6. Fallback — homepage defaults (no per-page canonical signal for unknown routes)
   return buildMeta(DEFAULT_TITLE, DEFAULT_DESC, `${BASE_URL}/`, websiteSchema());
 }
 

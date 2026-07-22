@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { DealBadge } from "@/components/Badges";
 import { formatPrice } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
@@ -354,10 +355,331 @@ function CsvImport({ adminToken }: { adminToken: string }) {
   );
 }
 
+
+// ── Blocked Sources Tab ──────────────────────────────────────────────────────
+
+type BlockLogRow = {
+  id: number;
+  dealer_slug: string;
+  dealer_name: string;
+  dealer_name_live?: string;
+  dealer_website_url?: string | null;
+  inventory_url: string | null;
+  block_reason: string;
+  http_status: number | null;
+  error_message: string | null;
+  robots_txt_disallows: boolean;
+  attempted_at: string | null;
+  resolved: boolean;
+  outreach_status: string | null;
+  outreach_notes: string | null;
+  updated_at: string | null;
+};
+
+const OUTREACH_OPTIONS = [
+  { value: 'not_started',       label: 'Not Started' },
+  { value: 'email_sent',        label: 'Email Sent' },
+  { value: 'awaiting_response', label: 'Awaiting Response' },
+  { value: 'in_progress',       label: 'In Progress' },
+  { value: 'resolved',          label: 'Resolved' },
+  { value: 'no_response',       label: 'No Response' },
+];
+
+const BLOCK_REASON_META: Record<string, { label: string; color: string }> = {
+  http_403:         { label: '403 Forbidden',    color: 'bg-red-100 text-red-700 border-red-200'       },
+  http_402:         { label: '402 Payment',      color: 'bg-orange-100 text-orange-700 border-orange-200' },
+  http_401:         { label: '401 Auth',         color: 'bg-orange-100 text-orange-700 border-orange-200' },
+  captcha_detected: { label: 'Captcha/Bot',      color: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
+  robots_txt:       { label: 'robots.txt',       color: 'bg-blue-100 text-blue-700 border-blue-200'    },
+  ssl_error:        { label: 'SSL Error',        color: 'bg-gray-100 text-gray-600 border-gray-200'    },
+  dns_failure:      { label: 'DNS Dead',         color: 'bg-gray-100 text-gray-600 border-gray-200'    },
+  timeout:          { label: 'Timeout',          color: 'bg-gray-100 text-gray-600 border-gray-200'    },
+  empty_content:    { label: 'Empty Content',    color: 'bg-gray-100 text-gray-600 border-gray-200'    },
+};
+
+function BlockReasonBadge({ reason }: { reason: string }) {
+  const meta = BLOCK_REASON_META[reason] || { label: reason, color: 'bg-gray-100 text-gray-600 border-gray-200' };
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${meta.color}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function BlockedSources({ adminToken }: { adminToken: string }) {
+  const ADMIN_HEADERS = { 'x-admin-token': adminToken };
+  const queryClient = useQueryClient();
+  const [editingSlug, setEditingSlug] = useState<string | null>(null);
+  const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
+  const [seeding, setSeeding] = useState(false);
+  const [seedMsg, setSeedMsg] = useState<string | null>(null);
+
+  const { data: rows = [], isLoading, refetch } = useQuery<BlockLogRow[]>({
+    queryKey: ['blocked-sources'],
+    queryFn: async () => {
+      const r = await fetch('/api/admin/blocked-sources', { headers: ADMIN_HEADERS });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+  });
+
+  const patchRow = useMutation({
+    mutationFn: async ({ slug, patch }: { slug: string; patch: Partial<BlockLogRow> }) => {
+      const r = await fetch(`/api/admin/blocked-sources/${slug}`, {
+        method: 'PATCH',
+        headers: { ...ADMIN_HEADERS, 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['blocked-sources'] }),
+  });
+
+  async function handleSeed() {
+    setSeeding(true);
+    setSeedMsg(null);
+    try {
+      const r = await fetch('/api/admin/blocked-sources/seed', {
+        method: 'POST',
+        headers: ADMIN_HEADERS,
+      });
+      const json = await r.json();
+      setSeedMsg(r.ok ? `Seeded ${json.seeded} dealers.` : `Error: ${json.error}`);
+      refetch();
+    } catch (e: any) {
+      setSeedMsg(`Error: ${e.message}`);
+    } finally {
+      setSeeding(false);
+    }
+  }
+
+  const activeCount  = rows.filter(r => !r.resolved).length;
+  const resolvedCount = rows.filter(r => r.resolved).length;
+
+  if (isLoading) {
+    return <div className="text-sm text-muted-foreground py-6 text-center">Loading blocked sources...</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-sm text-muted-foreground">
+          <span className="font-medium text-red-600">{activeCount} active</span>
+          {resolvedCount > 0 && <span className="ml-2 text-green-600">{resolvedCount} resolved</span>}
+          <span className="ml-2">blocked dealer source{activeCount !== 1 ? 's' : ''}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {seedMsg && <span className="text-xs text-muted-foreground">{seedMsg}</span>}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleSeed}
+            disabled={seeding}
+            className="text-xs"
+          >
+            {seeding ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Seed Known Blocked
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => refetch()} className="text-xs">
+            <RefreshCw className="h-3 w-3 mr-1" /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="text-sm text-muted-foreground py-8 text-center border rounded-lg">
+          No blocked sources logged yet. Click <strong>Seed Known Blocked</strong> to import the 11 known-blocked dealers.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {rows.map((row) => {
+            const displayName = row.dealer_name_live || row.dealer_name || row.dealer_slug;
+            const outreachMeta = OUTREACH_OPTIONS.find(o => o.value === (row.outreach_status || 'not_started'));
+            const isEditing = editingSlug === row.dealer_slug;
+            return (
+              <div
+                key={row.dealer_slug}
+                className={`border rounded-lg p-4 space-y-3 ${row.resolved ? 'opacity-60 bg-gray-50' : 'bg-white'}`}
+              >
+                {/* Top row */}
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm">{displayName}</span>
+                      <BlockReasonBadge reason={row.block_reason} />
+                      {row.http_status ? (
+                        <span className="text-xs text-muted-foreground">HTTP {row.http_status}</span>
+                      ) : null}
+                      {row.resolved && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border bg-green-100 text-green-700 border-green-200">
+                          <CheckCircle className="h-3 w-3" /> Resolved
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                      {row.inventory_url && (
+                        <div>
+                          <span className="font-medium">Inventory URL: </span>
+                          <a href={row.inventory_url} target="_blank" rel="noreferrer"
+                             className="text-blue-600 underline underline-offset-2 hover:text-blue-800">
+                            {row.inventory_url}
+                          </a>
+                        </div>
+                      )}
+                      {row.dealer_website_url && (
+                        <div>
+                          <span className="font-medium">Dealer site: </span>
+                          <a href={row.dealer_website_url} target="_blank" rel="noreferrer"
+                             className="text-blue-600 underline underline-offset-2 hover:text-blue-800">
+                            {row.dealer_website_url}
+                          </a>
+                        </div>
+                      )}
+                      {row.robots_txt_disallows && (
+                        <div className="text-orange-600">⚠ robots.txt disallows crawling this path</div>
+                      )}
+                      {row.error_message && (
+                        <div className="text-red-600 truncate max-w-lg" title={row.error_message}>
+                          {row.error_message}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground text-right shrink-0">
+                    <div>Last attempt</div>
+                    <div>{row.attempted_at ? new Date(row.attempted_at).toLocaleDateString() : '—'}</div>
+                  </div>
+                </div>
+
+                {/* Outreach + notes row */}
+                <div className="flex items-start gap-3 flex-wrap">
+                  {/* Outreach status dropdown */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">Outreach:</span>
+                    <Select
+                      value={row.outreach_status || 'not_started'}
+                      onValueChange={(val) =>
+                        patchRow.mutate({ slug: row.dealer_slug, patch: { outreach_status: val } })
+                      }
+                    >
+                      <SelectTrigger className="h-7 text-xs w-40">
+                        <SelectValue>{outreachMeta?.label || 'Not Started'}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {OUTREACH_OPTIONS.map(o => (
+                          <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Resolved toggle */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Resolved:</span>
+                    <Switch
+                      checked={row.resolved}
+                      onCheckedChange={(val) =>
+                        patchRow.mutate({ slug: row.dealer_slug, patch: { resolved: val } })
+                      }
+                      className="scale-75 origin-left"
+                    />
+                  </div>
+
+                  {/* Notes toggle */}
+                  <button
+                    className="text-xs text-blue-600 underline underline-offset-2 hover:text-blue-800 ml-auto"
+                    onClick={() => {
+                      if (isEditing) {
+                        setEditingSlug(null);
+                      } else {
+                        setEditingSlug(row.dealer_slug);
+                        setNotesDraft(d => ({ ...d, [row.dealer_slug]: row.outreach_notes || '' }));
+                      }
+                    }}
+                  >
+                    {isEditing ? 'Cancel' : (row.outreach_notes ? 'Edit notes' : 'Add notes')}
+                  </button>
+                </div>
+
+                {/* Notes editor */}
+                {isEditing && (
+                  <div className="space-y-2">
+                    <Textarea
+                      value={notesDraft[row.dealer_slug] ?? ''}
+                      onChange={(e) => setNotesDraft(d => ({ ...d, [row.dealer_slug]: e.target.value }))}
+                      placeholder="Outreach notes, contact info, follow-up status..."
+                      className="text-xs min-h-[80px]"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="text-xs h-7"
+                        onClick={() => {
+                          patchRow.mutate({
+                            slug: row.dealer_slug,
+                            patch: { outreach_notes: notesDraft[row.dealer_slug] ?? '' },
+                          });
+                          setEditingSlug(null);
+                        }}
+                      >
+                        Save Notes
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-xs h-7"
+                        onClick={() => setEditingSlug(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                    {/* Saved notes preview */}
+                    {row.outreach_notes && !isEditing && (
+                      <p className="text-xs text-muted-foreground italic">{row.outreach_notes}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Existing notes (read view) */}
+                {!isEditing && row.outreach_notes && (
+                  <p className="text-xs text-muted-foreground italic border-t pt-2">{row.outreach_notes}</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Recommended fallback callout */}
+      <div className="border border-blue-200 rounded-lg p-3 bg-blue-50 text-xs text-blue-800 space-y-1">
+        <p className="font-medium">Recommended fallback actions for blocked dealers:</p>
+        <ul className="list-disc list-inside space-y-0.5 text-blue-700">
+          <li><strong>403/Captcha:</strong> Contact dealer directly to request an inventory feed (CSV, XML, or API).</li>
+          <li><strong>robots.txt:</strong> Respect the disallow — outreach only or skip permanently.</li>
+          <li><strong>SSL/DNS:</strong> Verify dealer is still operating; may be out of business.</li>
+          <li><strong>Once resolved:</strong> Toggle "Resolved" on — pipeline will resume normal fetch on next sync.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 // ── Coverage Audit Tab ──────────────────────────────────────────────────────────
 
 type CoverageRow = {
   dealer_slug: string;
+  dealer_name?: string | null;
+  city?: string | null;
+  state?: string | null;
+  sync_enabled?: boolean;
+  browser_required?: boolean;
+  last_discovery_status?: string | null;
+  last_discovery_message?: string | null;
+  last_discovery_at?: string | null;
+  block_reason?: string | null;
+  block_http_status?: number | null;
   inventory_url: string | null;
   discovered_count: number;
   pending_imports_count: number;
@@ -398,6 +720,7 @@ const COVERAGE_STATUS_META: Record<string, { label: string; color: string }> = {
   browser_required:         { label: "Browser Required",      color: "bg-purple-100 text-purple-800 border-purple-200" },
   adapter_error:            { label: "Adapter Error",         color: "bg-red-100 text-red-800 border-red-200"          },
   needs_manual_review:      { label: "Needs Review",          color: "bg-gray-100 text-gray-600 border-gray-200"       },
+  blocked_public_crawl:     { label: "Blocked",               color: "bg-red-100 text-red-700 border-red-200"            },
 };
 
 function CoverageStatusBadge({ status }: { status: string }) {
@@ -446,6 +769,8 @@ function CoverageAudit({ adminToken }: { adminToken: string }) {
   const flaggedCount  = rows.filter(r => r.valuation_review_needed).length;
   const activeCount   = rows.filter(r => r.public_listings_count > 0).length;
   const reviewCount   = rows.filter(r => r.coverage_status === "needs_manual_review" || r.coverage_status === "adapter_error").length;
+  const blockedCount  = rows.filter(r => r.coverage_status === "blocked_public_crawl").length;
+  const noScanCount   = rows.filter(r => !r.scanned_at && r.public_listings_count === 0).length;
 
   if (isLoading) return <p className="text-sm text-muted-foreground py-4">Loading coverage data…</p>;
   if (error)     return <p className="text-sm text-red-600 py-4">Failed to load coverage data.</p>;
@@ -453,15 +778,17 @@ function CoverageAudit({ adminToken }: { adminToken: string }) {
   return (
     <div className="space-y-4">
       {/* Summary strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
         {[
-          { label: "Sources w/ Listings",  value: activeCount,   color: "text-green-700" },
+          { label: "Total Dealers",        value: rows.length,   color: "text-foreground" },
+          { label: "w/ Live Listings",     value: activeCount,   color: "text-green-700" },
           { label: "Total Live Listings",  value: rows.reduce((s, r) => s + r.public_listings_count, 0), color: "text-foreground" },
+          { label: "Blocked",              value: blockedCount,  color: blockedCount > 0 ? "text-red-600" : "text-muted-foreground" },
           { label: "Valuation Review",     value: flaggedCount,  color: flaggedCount > 0 ? "text-orange-600" : "text-muted-foreground" },
-          { label: "Needs Review",          value: reviewCount,   color: reviewCount > 0 ? "text-red-600" : "text-muted-foreground" },
+          { label: "Not Yet Scanned",      value: noScanCount,   color: noScanCount > 0 ? "text-gray-500" : "text-muted-foreground" },
         ].map(item => (
           <div key={item.label} className="bg-muted rounded-lg p-3">
-            <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
+            <p className={`text-xl font-bold ${item.color}`}>{item.value}</p>
             <p className="text-xs text-muted-foreground mt-0.5">{item.label}</p>
           </div>
         ))}
@@ -504,8 +831,22 @@ function CoverageAudit({ adminToken }: { adminToken: string }) {
                   row.valuation_review_needed ? "bg-orange-50 hover:bg-orange-100" : ""
                 }`}
               >
-                <td className="p-2 border border-border">
-                  <p className="font-medium text-xs whitespace-nowrap">{row.dealer_slug}</p>
+                <td className="p-2 border border-border min-w-[160px]">
+                  <p className="font-medium text-xs">{row.dealer_name || row.dealer_slug}</p>
+                  {(row.city || row.state) && (
+                    <p className="text-xs text-muted-foreground">{[row.city, row.state].filter(Boolean).join(", ")}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground/60 mt-0.5 font-mono">{row.dealer_slug}</p>
+                  {row.last_discovery_status && row.last_discovery_status !== "ok" && row.last_discovery_status !== "no_new" && (
+                    <span className={`inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-xs font-medium border ${
+                      row.last_discovery_status === "blocked_public_crawl" ? "bg-red-100 text-red-700 border-red-200" :
+                      row.last_discovery_status === "error" ? "bg-red-100 text-red-700 border-red-200" :
+                      row.last_discovery_status === "needs_browser" ? "bg-purple-100 text-purple-700 border-purple-200" :
+                      "bg-gray-100 text-gray-600 border-gray-200"
+                    }`}>
+                      {row.last_discovery_status}
+                    </span>
+                  )}
                 </td>
 
                 <td className="p-2 border border-border text-xs max-w-[180px]">
@@ -1068,9 +1409,12 @@ export default function Admin() {
             <TabsTrigger value="csv" data-testid="tab-csv">CSV Import</TabsTrigger>
             <TabsTrigger value="dealers" data-testid="tab-dealers">Dealers ({dealers.length})</TabsTrigger>
             <TabsTrigger value="sources" data-testid="tab-sources">Inventory Sources</TabsTrigger>
+            <TabsTrigger value="blocked" data-testid="tab-blocked">Blocked Sources</TabsTrigger>
             <TabsTrigger value="coverage" data-testid="tab-coverage">Coverage Audit</TabsTrigger>
             <TabsTrigger value="inventory" data-testid="tab-inventory">Inventory Gap</TabsTrigger>
             <TabsTrigger value="pending" data-testid="tab-pending">Pending Imports</TabsTrigger>
+            <TabsTrigger value="algorithm" data-testid="tab-algorithm">Algorithm</TabsTrigger>
+            <TabsTrigger value="settings" data-testid="tab-settings">Settings</TabsTrigger>
           </TabsList>
 
           {/* Listings Tab */}
@@ -1196,6 +1540,22 @@ export default function Admin() {
             </Card>
           </TabsContent>
 
+          {/* Blocked Sources Tab */}
+          <TabsContent value="blocked">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Blocked Dealer Sources</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Dealers where the public inventory page returned 403, a captcha wall, robots.txt denial, or a dead domain.
+                  Track outreach status and mark resolved when an alternate feed is arranged.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <BlockedSources adminToken={adminToken} />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* Coverage Audit Tab */}
           <TabsContent value="coverage">
             <Card>
@@ -1241,8 +1601,736 @@ export default function Admin() {
               </CardContent>
             </Card>
           </TabsContent>
+          {/* Algorithm Tweaker Tab */}
+          <TabsContent value="algorithm">
+            <AlgorithmTweaker adminToken={adminToken} />
+          </TabsContent>
+          {/* Settings Tab */}
+          <TabsContent value="settings">
+            <SettingsPanel adminToken={adminToken} dealers={dealers} />
+          </TabsContent>
         </Tabs>
       </div>
+    </div>
+  );
+}
+
+// ── Settings Panel ────────────────────────────────────────────────────────────
+interface SiteSettingsData {
+  defaultRadius: number;
+  featuredDealers: Array<{
+    dealerId: number;
+    dealerName: string;
+    cities: string[];
+    priority: number;
+  }>;
+}
+
+function SettingsPanel({ adminToken, dealers }: { adminToken: string; dealers: Dealer[] }) {
+  const queryClient = useQueryClient();
+  const { data: settings, isLoading } = useQuery<SiteSettingsData>({
+    queryKey: ["/api/admin/site-settings"],
+    queryFn: () =>
+      fetch("/api/admin/site-settings", {
+        headers: { "x-admin-token": adminToken },
+      }).then(r => r.json()),
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (patch: Partial<SiteSettingsData>) =>
+      fetch("/api/admin/site-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-admin-token": adminToken },
+        body: JSON.stringify(patch),
+      }).then(r => r.json()),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/admin/site-settings"] }),
+  });
+
+  const [newFeaturedDealerId, setNewFeaturedDealerId] = useState<string>("");
+  const [newFeaturedCities, setNewFeaturedCities] = useState<string>("all");
+  const [newFeaturedPriority, setNewFeaturedPriority] = useState<string>("1");
+
+  if (isLoading || !settings) return <p className="text-sm text-muted-foreground">Loading settings…</p>;
+
+  function addFeaturedDealer() {
+    const dealerId = parseInt(newFeaturedDealerId);
+    if (!dealerId) return;
+    const dealer = dealers.find(d => d.id === dealerId);
+    if (!dealer) return;
+    const cities = newFeaturedCities
+      .split(",")
+      .map(c => c.trim())
+      .filter(Boolean);
+    const updated = [
+      ...(settings.featuredDealers ?? []).filter(fd => fd.dealerId !== dealerId),
+      { dealerId, dealerName: dealer.name, cities, priority: parseInt(newFeaturedPriority) || 1 },
+    ].sort((a, b) => a.priority - b.priority);
+    saveMutation.mutate({ featuredDealers: updated });
+    setNewFeaturedDealerId("");
+    setNewFeaturedCities("all");
+    setNewFeaturedPriority("1");
+  }
+
+  function removeFeaturedDealer(dealerId: number) {
+    const updated = (settings.featuredDealers ?? []).filter(fd => fd.dealerId !== dealerId);
+    saveMutation.mutate({ featuredDealers: updated });
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Default Radius */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Search Defaults</CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            Controls default behavior for the distance filter on the search page.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="text-sm font-medium">Default radius: 25 miles</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                When enabled, the distance filter pre-fills to 25 mi when a user's saved location is detected.
+                Disable to show "Any distance" by default.
+              </p>
+            </div>
+            <Switch
+              checked={settings.defaultRadius === 25}
+              onCheckedChange={(checked) =>
+                saveMutation.mutate({ defaultRadius: checked ? 25 : 0 })
+              }
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Featured Dealers */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Featured Dealers</CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            Dealers pinned to the top of the Hot Deals section on the homepage. Priority 1 = first.
+            City can be "all" or comma-separated city names (e.g. "Jacksonville, Ocala").
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Current featured dealers */}
+          {(settings.featuredDealers ?? []).length === 0 ? (
+            <p className="text-xs text-muted-foreground">No featured dealers configured.</p>
+          ) : (
+            <div className="space-y-2">
+              {(settings.featuredDealers ?? []).map(fd => (
+                <div key={fd.dealerId} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+                  <div>
+                    <span className="text-sm font-medium">{fd.dealerName}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      Priority {fd.priority} · Cities: {fd.cities.join(", ")}
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive h-7 px-2 text-xs"
+                    onClick={() => removeFeaturedDealer(fd.dealerId)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add new featured dealer */}
+          <div className="border-t border-border pt-4">
+            <p className="text-xs font-medium mb-3">Add featured dealer</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div>
+                <Label className="text-xs mb-1 block">Dealer</Label>
+                <Select value={newFeaturedDealerId} onValueChange={setNewFeaturedDealerId}>
+                  <SelectTrigger className="text-sm">
+                    <SelectValue placeholder="Select dealer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {dealers
+                      .filter(d => !d.slug?.startsWith("__"))
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map(d => (
+                        <SelectItem key={d.id} value={String(d.id)}>
+                          {d.name} — {d.city}, {d.state}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Cities (comma-sep, or "all")</Label>
+                <Input
+                  className="text-sm"
+                  value={newFeaturedCities}
+                  onChange={e => setNewFeaturedCities(e.target.value)}
+                  placeholder="all"
+                />
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Priority</Label>
+                <div className="flex gap-2">
+                  <Select value={newFeaturedPriority} onValueChange={setNewFeaturedPriority}>
+                    <SelectTrigger className="text-sm flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">1st</SelectItem>
+                      <SelectItem value="2">2nd</SelectItem>
+                      <SelectItem value="3">3rd</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    onClick={addFeaturedDealer}
+                    disabled={!newFeaturedDealerId || saveMutation.isPending}
+                    className="whitespace-nowrap"
+                  >
+                    {saveMutation.isPending ? "Saving…" : "Add"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Algorithm Tweaker ─────────────────────────────────────────────────────────
+// Live editor for all pricing engine parameters. Changes are persisted to
+// the pricing_config Supabase table and picked up on next reprice run.
+
+const DEAL_RATING_DEFAULTS = {
+  great_deal: -0.15,
+  good_deal:  -0.05,
+  fair_price:  0.05,
+  high_price:  0.15,
+};
+
+const BRAND_BASE_DEFAULTS: Record<string, number> = {
+  "Star EV": 26000, "Yamaha": 20500, "Atlas": 16500, "Epic": 16000,
+  "Venom EV": 17000, "E-Z-GO": 14500, "Club Car": 14000, "Sivo": 15000,
+  "Madjax": 14500, "DACH": 14500, "Bintelli": 14000, "ICON": 13400,
+  "Cushman": 12600, "Advanced EV": 11000, "Evolution": 11000,
+  "Teko": 11500, "Denago": 11000, "Verdi": 10000, "Honor": 10000,
+  "GEM": 10000, "Bad Boy": 9500, "__budget__": 7500, "__unknown__": 8000,
+};
+
+const DEPRECIATION_DEFAULTS: Record<string, number> = {
+  "2027": 1.05, "2026": 1.00, "2025": 0.90, "2024": 0.82, "2023": 0.75,
+  "2022": 0.68, "2021": 0.62, "2020": 0.56, "2019": 0.50, "2018": 0.44,
+  "pre_2018": 0.38, "unknown": 0.70,
+};
+
+const FEATURE_DEFAULTS = {
+  lithium_bonus: 1200, electric_bonus: 400, seating_6plus: 1500,
+  seating_2: -500, lifted_bonus: 600, charger_bonus: 200,
+  warranty_bonus: 300, dealer_new_premium: 1.03,
+};
+
+const GEO_DEFAULTS = {
+  tier1_multiplier: 1.28, tier2_multiplier: 1.00, tier3_multiplier: 0.92,
+  tier1_enabled: true, tier2_enabled: true, tier3_enabled: true,
+};
+
+const SCORE_DEFAULTS = {
+  great_deal: 50, good_deal: 40, fair_price: 30,
+  high_price: 15, over_market: 5, unknown: 22,
+};
+
+type ConfigSection = "thresholds" | "brand_bases" | "depreciation" | "feature_adjustments" | "geo_tiers" | "buyer_score_weights";
+
+function AlgorithmTweaker({ adminToken }: { adminToken: string }) {
+  const queryClient = useQueryClient();
+  const [activeSection, setActiveSection] = useState<ConfigSection>("thresholds");
+  const [previewPrice, setPreviewPrice] = useState("14000");
+  const [previewIMV, setPreviewIMV]     = useState("14000");
+  const [reScoreStatus, setReScoreStatus] = useState<string | null>(null);
+  const [reScoreProgress, setReScoreProgress] = useState<{ processed: number; updated: number; total: number } | null>(null);
+  const [saveStatus, setSaveStatus] = useState<Record<ConfigSection, string | null>>({
+    thresholds: null, brand_bases: null, depreciation: null,
+    feature_adjustments: null, geo_tiers: null, buyer_score_weights: null,
+  });
+
+  const { data: configData, isLoading } = useQuery<Record<string, { value: any; updated_at: string }>>({
+    queryKey: ["/api/admin/pricing-config"],
+    queryFn: () => fetch("/api/admin/pricing-config", { headers: { "x-admin-token": adminToken } }).then(r => r.json()),
+  });
+
+  // Local editable state — initialised from server, falls back to defaults
+  const [thresholds, setThresholds] = useState({ ...DEAL_RATING_DEFAULTS });
+  const [brandBases, setBrandBases]  = useState({ ...BRAND_BASE_DEFAULTS });
+  const [depreciation, setDepreciation] = useState({ ...DEPRECIATION_DEFAULTS });
+  const [features, setFeatures]     = useState({ ...FEATURE_DEFAULTS });
+  const [geoTiers, setGeoTiers]     = useState({ ...GEO_DEFAULTS });
+  const [scoreWeights, setScoreWeights] = useState({ ...SCORE_DEFAULTS });
+  const [hydrated, setHydrated]     = useState(false);
+
+  // Hydrate from server once
+  if (configData && !hydrated) {
+    if (configData.thresholds?.value)          setThresholds({ ...DEAL_RATING_DEFAULTS, ...configData.thresholds.value });
+    if (configData.brand_bases?.value)         setBrandBases({ ...BRAND_BASE_DEFAULTS, ...configData.brand_bases.value });
+    if (configData.depreciation?.value)        setDepreciation({ ...DEPRECIATION_DEFAULTS, ...configData.depreciation.value });
+    if (configData.feature_adjustments?.value) setFeatures({ ...FEATURE_DEFAULTS, ...configData.feature_adjustments.value });
+    if (configData.geo_tiers?.value)           setGeoTiers({ ...GEO_DEFAULTS, ...configData.geo_tiers.value });
+    if (configData.buyer_score_weights?.value) setScoreWeights({ ...SCORE_DEFAULTS, ...configData.buyer_score_weights.value });
+    setHydrated(true);
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: any }) =>
+      fetch("/api/admin/pricing-config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-admin-token": adminToken },
+        body: JSON.stringify({ key, value }),
+      }).then(r => r.json()),
+    onSuccess: (_, { key }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/pricing-config"] });
+      setSaveStatus(s => ({ ...s, [key]: "Saved" }));
+      setTimeout(() => setSaveStatus(s => ({ ...s, [key]: null })), 2000);
+    },
+    onError: (_, { key }) => {
+      setSaveStatus(s => ({ ...s, [key]: "Error saving" }));
+    },
+  });
+
+  function saveSection(key: ConfigSection, value: any) {
+    setSaveStatus(s => ({ ...s, [key]: "Saving…" }));
+    saveMutation.mutate({ key, value });
+  }
+
+  // Live preview: compute deal rating from thresholds
+  function previewRating(): { rating: string; delta: number; pct: number } {
+    const price = parseFloat(previewPrice) || 0;
+    const imv   = parseFloat(previewIMV)   || 0;
+    if (!price || !imv) return { rating: "—", delta: 0, pct: 0 };
+    const delta = price - imv;
+    const pct   = delta / imv;
+    let rating = "over_market";
+    if (pct <= thresholds.great_deal) rating = "great_deal";
+    else if (pct <= thresholds.good_deal)  rating = "good_deal";
+    else if (pct <= thresholds.fair_price) rating = "fair_price";
+    else if (pct <= thresholds.high_price) rating = "high_price";
+    return { rating, delta, pct };
+  }
+
+  const preview = previewRating();
+
+  const ratingColor: Record<string, string> = {
+    great_deal:  "bg-emerald-100 text-emerald-800 border-emerald-200",
+    good_deal:   "bg-green-100 text-green-800 border-green-200",
+    fair_price:  "bg-blue-100 text-blue-800 border-blue-200",
+    high_price:  "bg-amber-100 text-amber-800 border-amber-200",
+    over_market: "bg-red-100 text-red-800 border-red-200",
+    "—":         "bg-gray-100 text-gray-500 border-gray-200",
+  };
+
+  async function runReScore() {
+    setReScoreStatus("Running…");
+    setReScoreProgress(null);
+    const CHUNK = 150;
+    let offset = 0;
+    let total = 0;
+    let totalUpdated = 0;
+    let totalProcessed = 0;
+    try {
+      while (true) {
+        const res = await fetch("/api/admin/reprice-all", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-admin-token": adminToken },
+          body: JSON.stringify({ offset, limit: CHUNK }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) { setReScoreStatus(`Error: ${data.error || "unknown"}`); return; }
+        total = data.total || total;
+        totalUpdated   += data.updated   || 0;
+        totalProcessed += data.processed || 0;
+        offset += CHUNK;
+        setReScoreProgress({ processed: totalProcessed, updated: totalUpdated, total });
+        if (!data.hasMore) break;
+      }
+      setReScoreStatus(`Done — ${totalUpdated} of ${total} listings re-scored`);
+    } catch (e: any) {
+      setReScoreStatus(`Error: ${e.message}`);
+    }
+  }
+
+  const SECTIONS: { key: ConfigSection; label: string; description: string }[] = [
+    { key: "thresholds",          label: "Deal Rating Thresholds",  description: "% above/below IMV that triggers each rating badge" },
+    { key: "geo_tiers",           label: "Geographic Tier Multipliers", description: "Price adjustment by market tier (Tier 1 = premium, Tier 3 = rural)" },
+    { key: "feature_adjustments", label: "Feature Adjustments",    description: "Dollar premiums/discounts for battery, seating, warranty, etc." },
+    { key: "depreciation",        label: "Year Depreciation",      description: "Multiplier per model year relative to new (2026 = 1.00)" },
+    { key: "brand_bases",         label: "Brand Base Prices",      description: "Formula fallback baseline price per brand (used when no comps exist)" },
+    { key: "buyer_score_weights", label: "Buyer Score Weights",    description: "Points contributed by each deal rating to the 0–100 Buyer Score" },
+  ];
+
+  if (isLoading) return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground p-8">
+      <Loader2 className="h-4 w-4 animate-spin" /> Loading pricing config…
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between">
+            <div>
+              <CardTitle className="text-base">Pricing Algorithm Tweaker</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                Adjust deal rating thresholds, brand bases, depreciation curves, and geographic multipliers.
+                Save each section individually, then run Re-Score to apply to all live listings.
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-2">
+              <Button
+                size="sm"
+                variant="default"
+                onClick={runReScore}
+                disabled={reScoreStatus === "Running…"}
+                className="whitespace-nowrap"
+              >
+                {reScoreStatus === "Running…"
+                  ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Re-scoring…</>
+                  : <><RefreshCw className="h-3 w-3 mr-1" /> Apply & Re-score All</>
+                }
+              </Button>
+              {reScoreProgress && (
+                <p className="text-xs text-muted-foreground">
+                  {reScoreProgress.processed} / {reScoreProgress.total} processed · {reScoreProgress.updated} updated
+                </p>
+              )}
+              {reScoreStatus && reScoreStatus !== "Running…" && (
+                <p className={`text-xs font-medium ${reScoreStatus.startsWith("Error") ? "text-red-600" : "text-emerald-600"}`}>
+                  {reScoreStatus}
+                </p>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
+      {/* Live Preview */}
+      <Card className="border-dashed">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Live Preview</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <Label className="text-xs">Asking Price ($)</Label>
+              <Input value={previewPrice} onChange={e => setPreviewPrice(e.target.value)}
+                className="w-32 mt-1 h-8 text-sm" placeholder="14000" />
+            </div>
+            <div>
+              <Label className="text-xs">CartIQ IMV ($)</Label>
+              <Input value={previewIMV} onChange={e => setPreviewIMV(e.target.value)}
+                className="w-32 mt-1 h-8 text-sm" placeholder="14000" />
+            </div>
+            <div className="flex items-end gap-2">
+              <div>
+                <Label className="text-xs">Deal Rating</Label>
+                <div className={`mt-1 px-3 py-1.5 rounded-full text-xs font-semibold border ${ratingColor[preview.rating]}`}>
+                  {preview.rating.replace(/_/g, " ")}
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Delta</Label>
+                <div className="mt-1 text-sm font-mono font-medium text-muted-foreground">
+                  {preview.pct !== 0 ? `${(preview.pct * 100).toFixed(1)}%` : "—"}
+                  {preview.delta !== 0 && <span className="ml-1 text-xs">({preview.delta > 0 ? "+" : ""}{formatPrice(preview.delta)})</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Section Nav */}
+      <div className="flex flex-wrap gap-2">
+        {SECTIONS.map(s => (
+          <button
+            key={s.key}
+            onClick={() => setActiveSection(s.key)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              activeSection === s.key
+                ? "bg-foreground text-background border-foreground"
+                : "bg-background text-muted-foreground border-border hover:border-foreground/40"
+            }`}
+          >
+            {s.label}
+            {configData?.[s.key]?.updated_at && (
+              <span className="ml-1.5 opacity-50">
+                {new Date(configData[s.key].updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Section Editors */}
+      {activeSection === "thresholds" && (
+        <TweakerCard
+          title="Deal Rating Thresholds"
+          description="Each threshold is a decimal fraction — e.g. -0.15 means 15% below IMV triggers Great Deal. Boundaries are exclusive upper limits (great_deal < good_deal < fair_price < high_price)."
+          onSave={() => saveSection("thresholds", thresholds)}
+          saveStatus={saveStatus.thresholds}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {(Object.entries(thresholds) as [string, number][]).map(([key, val]) => (
+              <TweakerRow key={key}
+                label={key.replace(/_/g, " ")}
+                sublabel={`≤ ${(val * 100).toFixed(0)}% vs IMV`}
+                accent={key === "great_deal" ? "emerald" : key === "good_deal" ? "green" : key === "fair_price" ? "blue" : "amber"}
+              >
+                <input type="number" step="0.01" min="-0.5" max="0.5"
+                  value={val}
+                  onChange={e => setThresholds(t => ({ ...t, [key]: parseFloat(e.target.value) || 0 }))}
+                  className="w-24 text-right text-sm font-mono border rounded px-2 py-1 bg-background"
+                />
+                <span className="text-xs text-muted-foreground ml-1">{(val * 100).toFixed(0)}%</span>
+              </TweakerRow>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-3 border-t pt-3">
+            Thresholds must be in ascending order: great_deal &lt; good_deal &lt; fair_price &lt; high_price. Anything above high_price = over_market.
+          </p>
+        </TweakerCard>
+      )}
+
+      {activeSection === "geo_tiers" && (
+        <TweakerCard
+          title="Geographic Tier Multipliers"
+          description="Applied to the formula-based IMV when no comps exist. Tier 1 = premium markets (The Villages, Nocatee, Naples), Tier 2 = standard suburban/coastal, Tier 3 = rural/inland. Toggle off to bypass a tier and use 1.00× instead."
+          onSave={() => saveSection("geo_tiers", geoTiers)}
+          saveStatus={saveStatus.geo_tiers}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {([
+              { key: "tier1_multiplier", enabledKey: "tier1_enabled", label: "Tier 1 — Premium", sublabel: "The Villages, Nocatee, Naples, Miami, Tampa", accent: "emerald" },
+              { key: "tier2_multiplier", enabledKey: "tier2_enabled", label: "Tier 2 — Suburban/Coastal", sublabel: "Jacksonville, Orlando, Fort Myers, Daytona", accent: "blue" },
+              { key: "tier3_multiplier", enabledKey: "tier3_enabled", label: "Tier 3 — Rural/Inland", sublabel: "Ocala, Palatka, Arcadia, Panhandle", accent: "amber" },
+            ] as const).map(({ key, enabledKey, label, sublabel, accent }) => {
+              const isEnabled = (geoTiers as any)[enabledKey] !== false;
+              return (
+                <TweakerRow key={key} label={label} sublabel={sublabel} accent={isEnabled ? (accent as any) : "gray"}>
+                  {/* Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setGeoTiers(t => ({ ...t, [enabledKey]: !isEnabled }))}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
+                      isEnabled ? "bg-emerald-500" : "bg-muted-foreground/30"
+                    }`}
+                    aria-label={isEnabled ? "Disable tier" : "Enable tier"}
+                  >
+                    <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                      isEnabled ? "translate-x-4" : "translate-x-0"
+                    }`} />
+                  </button>
+                  {/* Multiplier input */}
+                  <input type="number" step="0.01" min="0.5" max="2.0"
+                    value={(geoTiers as any)[key]}
+                    disabled={!isEnabled}
+                    onChange={e => setGeoTiers(t => ({ ...t, [key]: parseFloat(e.target.value) || 1 }))}
+                    className={`w-20 text-right text-sm font-mono border rounded px-2 py-1 bg-background transition-opacity ${
+                      isEnabled ? "opacity-100" : "opacity-40 cursor-not-allowed"
+                    }`}
+                  />
+                  <span className={`text-xs ml-1 transition-opacity ${isEnabled ? "text-muted-foreground" : "text-muted-foreground/40"}`}>×</span>
+                  {!isEnabled && (
+                    <span className="text-xs text-muted-foreground/60 font-mono">(1.00)</span>
+                  )}
+                </TweakerRow>
+              );
+            })}
+          </div>
+          <div className="mt-4 p-3 bg-muted/30 rounded-lg text-xs text-muted-foreground">
+            <strong>Current live data ratios:</strong> Tier 1 / Tier 2 = 1.28× (model updated to match) · Tier 3 / Tier 2 = 0.92×.
+            Toggle a tier off to flatten it to 1.00× without losing the saved multiplier value.
+          </div>
+        </TweakerCard>
+      )}
+
+      {activeSection === "feature_adjustments" && (
+        <TweakerCard
+          title="Feature Adjustments"
+          description="Dollar adjustments added to the formula base price. Applied after brand × year × condition multiplication. Only used in formula fallback — comps already reflect features."
+          onSave={() => saveSection("feature_adjustments", features)}
+          saveStatus={saveStatus.feature_adjustments}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {[
+              { key: "lithium_bonus",       label: "Lithium battery bonus",      sublabel: "Added when power=electric + battery=lithium", prefix: "$" },
+              { key: "electric_bonus",      label: "Electric (non-lithium)",     sublabel: "Added when electric but no lithium spec", prefix: "$" },
+              { key: "seating_6plus",       label: "6+ seating bonus",           sublabel: "Added for 6-seat and larger models", prefix: "$" },
+              { key: "seating_2",           label: "2-seat discount",            sublabel: "Applied for 2-seat models (negative)", prefix: "$" },
+              { key: "lifted_bonus",        label: "Lifted bonus",               sublabel: "Added when lifted=yes", prefix: "$" },
+              { key: "charger_bonus",       label: "Charger included bonus",     sublabel: "Added when charger_included=yes", prefix: "$" },
+              { key: "warranty_bonus",      label: "Warranty included bonus",    sublabel: "Added when warranty_included=yes", prefix: "$" },
+              { key: "dealer_new_premium",  label: "Dealer new-cart premium",    sublabel: "Multiplier for new carts from dealers (e.g. 1.03 = +3%)", prefix: "×" },
+            ].map(({ key, label, sublabel, prefix }) => (
+              <TweakerRow key={key} label={label} sublabel={sublabel} accent="gray">
+                <span className="text-xs text-muted-foreground mr-1">{prefix}</span>
+                <input type="number"
+                  step={key === "dealer_new_premium" ? "0.01" : "50"}
+                  value={(features as any)[key]}
+                  onChange={e => setFeatures(f => ({ ...f, [key]: parseFloat(e.target.value) || 0 }))}
+                  className="w-24 text-right text-sm font-mono border rounded px-2 py-1 bg-background"
+                />
+              </TweakerRow>
+            ))}
+          </div>
+        </TweakerCard>
+      )}
+
+      {activeSection === "depreciation" && (
+        <TweakerCard
+          title="Year Depreciation Multipliers"
+          description="Applied to brand base price per model year. 2026 = 1.00 (baseline). These only affect formula fallback pricing — comp-based IMV uses actual market prices."
+          onSave={() => saveSection("depreciation", depreciation)}
+          saveStatus={saveStatus.depreciation}
+        >
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {Object.entries(depreciation).sort((a, b) => b[0].localeCompare(a[0])).map(([year, mult]) => (
+              <div key={year} className="flex flex-col gap-1 p-3 border rounded-lg bg-background">
+                <span className="text-xs font-medium text-muted-foreground">{year === "pre_2018" ? "Pre-2018" : year === "unknown" ? "Unknown" : year}</span>
+                <div className="flex items-center gap-1">
+                  <input type="number" step="0.01" min="0.1" max="1.5"
+                    value={mult}
+                    onChange={e => setDepreciation(d => ({ ...d, [year]: parseFloat(e.target.value) || 0.5 }))}
+                    className="w-full text-right text-sm font-mono border rounded px-2 py-1 bg-background"
+                  />
+                  <span className="text-xs text-muted-foreground">×</span>
+                </div>
+                <div className="w-full bg-muted rounded-full h-1 mt-1">
+                  <div className="bg-foreground rounded-full h-1 transition-all" style={{ width: `${Math.min(100, mult * 100)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </TweakerCard>
+      )}
+
+      {activeSection === "brand_bases" && (
+        <TweakerCard
+          title="Brand Base Prices"
+          description="Formula fallback baseline (new cart, 2026, no features). Used only when zero comps exist. __budget__ applies to unrecognized brands; __unknown__ to null brand listings."
+          onSave={() => saveSection("brand_bases", brandBases)}
+          saveStatus={saveStatus.brand_bases}
+        >
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {Object.entries(brandBases).sort((a, b) => b[1] - a[1]).map(([brand, base]) => (
+              <div key={brand} className="flex flex-col gap-1 p-3 border rounded-lg bg-background">
+                <span className="text-xs font-medium truncate" title={brand}>
+                  {brand.startsWith("__") ? <em className="text-muted-foreground">{brand}</em> : brand}
+                </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground">$</span>
+                  <input type="number" step="500" min="1000" max="50000"
+                    value={base}
+                    onChange={e => setBrandBases(b => ({ ...b, [brand]: parseInt(e.target.value) || 0 }))}
+                    className="w-full text-right text-sm font-mono border rounded px-2 py-1 bg-background"
+                  />
+                </div>
+                <div className="w-full bg-muted rounded-full h-1 mt-1">
+                  <div className="bg-foreground rounded-full h-1 transition-all" style={{ width: `${Math.min(100, (base / 28000) * 100)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </TweakerCard>
+      )}
+
+      {activeSection === "buyer_score_weights" && (
+        <TweakerCard
+          title="Buyer Score Weights"
+          description="Points awarded for the deal-rating component of the 0–100 Buyer Score. Battery (20 pts), warranty (15 pts), charger (10 pts), and delivery (5 pts) components are fixed."
+          onSave={() => saveSection("buyer_score_weights", scoreWeights)}
+          saveStatus={saveStatus.buyer_score_weights}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {(Object.entries(scoreWeights) as [string, number][]).map(([rating, pts]) => (
+              <TweakerRow key={rating} label={rating.replace(/_/g, " ")} sublabel={`${pts} pts of max 50`} accent="gray">
+                <input type="number" step="1" min="0" max="50"
+                  value={pts}
+                  onChange={e => setScoreWeights(s => ({ ...s, [rating]: parseInt(e.target.value) || 0 }))}
+                  className="w-20 text-right text-sm font-mono border rounded px-2 py-1 bg-background"
+                />
+                <span className="text-xs text-muted-foreground ml-1">pts</span>
+              </TweakerRow>
+            ))}
+          </div>
+          <div className="text-xs text-muted-foreground mt-3 border-t pt-3">
+            Deal rating contributes up to 50 pts. Remaining 50 pts come from battery (20), warranty (15), charger (10), delivery (5).
+          </div>
+        </TweakerCard>
+      )}
+    </div>
+  );
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function TweakerCard({
+  title, description, children, onSave, saveStatus
+}: {
+  title: string; description: string; children: React.ReactNode;
+  onSave: () => void; saveStatus: string | null;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between">
+          <div>
+            <CardTitle className="text-base">{title}</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1 max-w-xl">{description}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {saveStatus && (
+              <span className={`text-xs font-medium ${saveStatus === "Saved" ? "text-emerald-600" : saveStatus.startsWith("Error") ? "text-red-600" : "text-muted-foreground"}`}>
+                {saveStatus}
+              </span>
+            )}
+            <Button size="sm" onClick={onSave} disabled={saveStatus === "Saving…"}>
+              {saveStatus === "Saving…" ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+              Save Section
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+function TweakerRow({
+  label, sublabel, accent = "gray", children
+}: {
+  label: string; sublabel?: string; accent?: "emerald" | "green" | "blue" | "amber" | "gray";
+  children: React.ReactNode;
+}) {
+  const accentBar: Record<string, string> = {
+    emerald: "bg-emerald-400", green: "bg-green-400",
+    blue: "bg-blue-400", amber: "bg-amber-400", gray: "bg-muted-foreground",
+  };
+  return (
+    <div className="flex items-center justify-between p-3 border rounded-lg bg-background gap-3">
+      <div className="flex items-center gap-2 min-w-0">
+        <div className={`w-1 h-8 rounded-full shrink-0 ${accentBar[accent]}`} />
+        <div className="min-w-0">
+          <p className="text-sm font-medium capitalize">{label}</p>
+          {sublabel && <p className="text-xs text-muted-foreground truncate">{sublabel}</p>}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">{children}</div>
     </div>
   );
 }

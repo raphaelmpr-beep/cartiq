@@ -179,6 +179,11 @@ const CITY_CENTROIDS: Record<string, [number, number]> = {
   "rome":                [34.257, -85.165],
   "statesboro":          [32.449, -81.783],
   "warner robins":       [32.613, -83.600],
+  // Additional city centroids for Popular Markets / Quick Search
+  "wildwood":            [28.858, -82.024],
+  "nocatee":             [30.109, -81.423],
+  "panama city beach":   [30.176, -85.806],
+  "atlanta":             [33.749, -84.388],
 };
 
 // Normalize messy city strings like "Carts In Covington" → "covington"
@@ -207,7 +212,13 @@ function sortListings(listings: Listing[], sort: string): Listing[] {
     case "newest": return copy.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     case "buyer_score": return copy.sort((a, b) => (b.buyerScore ?? 0) - (a.buyerScore ?? 0));
     case "warranty": return copy.sort((a) => a.warrantyIncluded === "yes" ? -1 : 1);
-    default: return copy.sort((a, b) => (b.buyerScore ?? 0) - (a.buyerScore ?? 0));
+    default: return copy.sort((a, b) => {
+      // Primary: buyerScore desc
+      const scoreDiff = (b.buyerScore ?? 0) - (a.buyerScore ?? 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      // Tiebreaker: dealDelta asc (more negative = better deal = ranks higher)
+      return (a.dealDelta ?? 0) - (b.dealDelta ?? 0);
+    });
   }
 }
 
@@ -221,7 +232,6 @@ const FILTER_LABELS: Record<string, (v: string) => string> = {
   batteryAh: (v) => `${v}Ah`,
   minPrice: (v) => `Min $${Number(v).toLocaleString()}`,
   maxPrice: (v) => `Max $${Number(v).toLocaleString()}`,
-  streetLegal: () => "Street Legal",
   lifted: () => "Lifted",
   warrantyIncluded: () => "Warranty",
   zip: (v) => `Near ${v}`,
@@ -231,6 +241,8 @@ const FILTER_LABELS: Record<string, (v: string) => string> = {
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ClientFilters {
   state?: string;
+  city?: string;
+  radius?: string;   // miles — works with zip OR city centroid
   sellerType?: string;
   brands?: string;        // comma-separated brand list
   seating?: string;       // "2" | "4" | "6" | "8plus"
@@ -238,11 +250,9 @@ interface ClientFilters {
   batteryAh?: string;     // "105" | "150" | "160" | "260"
   minPrice?: string;
   maxPrice?: string;
-  streetLegal?: string;
   lifted?: string;
   warrantyIncluded?: string;
   zip?: string;
-  radius?: string;
   q?: string;
 }
 
@@ -283,8 +293,8 @@ export default function Search() {
       const saved = getSavedLocation();
       if (saved?.zip) {
         init.zip = saved.zip;
-        // Leave radius unset (Any) by default — user can narrow from there
-        // if (!init.radius) init.radius = "25";
+        // Default to 25 mi when zip auto-fills from saved location
+        if (!init.radius) init.radius = "25";
         // Pre-populate zipCoords from saved location
         setZipCoords([saved.lat, saved.lng]);
       }
@@ -344,6 +354,8 @@ export default function Search() {
     }
     // State
     if (filters.state && l.state !== filters.state) return false;
+    // City (case-insensitive, partial match)
+    if (filters.city && !(l.city ?? "").toLowerCase().includes(filters.city.toLowerCase())) return false;
     // Seller type
     if (filters.sellerType && l.sellerType !== filters.sellerType) return false;
     // Brands (multi-select)
@@ -372,16 +384,19 @@ export default function Search() {
     const price = l.askingPrice ?? l.salePrice ?? l.regularPrice ?? 0;
     if (filters.minPrice && price < Number(filters.minPrice)) return false;
     if (filters.maxPrice && price > Number(filters.maxPrice)) return false;
-    // Street legal
-    if (filters.streetLegal === "true" && !l.streetLegalClaimed) return false;
     // Lifted
     if (filters.lifted === "true" && !l.lifted) return false;
-    // Warranty
-    if (filters.warrantyIncluded === "yes" && l.warrantyIncluded !== "yes") return false;
-    // Miles from zip (haversine)
-    if (filters.zip && filters.radius) {
-      // Use resolved zipCoords (covers both static table + Nominatim lookups)
-      const userCoords = zipCoords ?? zipToLatLng(filters.zip);
+    // Warranty — accept both "true" (Supabase boolean stringified) and "yes" (legacy)
+    if (filters.warrantyIncluded === "yes" && !(["yes", "true", true].includes(l.warrantyIncluded as any))) return false;
+    // Miles from zip or city centroid (haversine)
+    if (filters.radius) {
+      // Prefer zip coords, fall back to city centroid when only city+state+radius supplied
+      const userCoords: [number, number] | null =
+        filters.zip
+          ? (zipCoords ?? zipToLatLng(filters.zip))
+          : filters.city
+          ? cityToLatLng(filters.city)
+          : null;
       if (userCoords) {
         const listingCoords: [number, number] | null =
           l.lat != null && l.lng != null
@@ -391,8 +406,7 @@ export default function Search() {
           const dist = haversine(userCoords[0], userCoords[1], listingCoords[0], listingCoords[1]);
           if (dist > Number(filters.radius)) return false;
         }
-        // Fail-CLOSED: if we can't resolve the listing's location, exclude it
-        // This prevents out-of-range listings from leaking through
+        // Fail-CLOSED: if we can't resolve listing location, exclude it
         if (!listingCoords) return false;
       }
     }
@@ -689,15 +703,6 @@ export default function Search() {
         <label className="flex items-center gap-2 py-1.5 cursor-pointer">
           <input
             type="checkbox"
-            checked={filters.streetLegal === "true"}
-            onChange={(e) => e.target.checked ? setFilter("streetLegal", "true") : clearFilter("streetLegal")}
-            className="rounded"
-          />
-          <span>Street Legal</span>
-        </label>
-        <label className="flex items-center gap-2 py-1.5 cursor-pointer">
-          <input
-            type="checkbox"
             checked={filters.lifted === "true"}
             onChange={(e) => e.target.checked ? setFilter("lifted", "true") : clearFilter("lifted")}
             className="rounded"
@@ -812,7 +817,9 @@ export default function Search() {
             <p className="text-sm text-muted-foreground">
               {isLoading
                 ? "Loading…"
-                : `${sorted.length.toLocaleString()} listing${sorted.length !== 1 ? "s" : ""} found`}
+                : filters.city && filters.radius && !filters.zip
+                  ? `${sorted.length.toLocaleString()} listing${sorted.length !== 1 ? "s" : ""} within ${filters.radius} mi of ${filters.city}${filters.state ? `, ${filters.state}` : ""}`
+                  : `${sorted.length.toLocaleString()} listing${sorted.length !== 1 ? "s" : ""} found`}
             </p>
           </div>
 
