@@ -282,8 +282,7 @@ export default function Search() {
 
   // Parse URL params on mount, then auto-fill zip from saved location if no zip in URL.
   useEffect(() => {
-    const searchStr = window.location.search
-      || window.location.hash.split("?")[1] || "";
+    const searchStr = window.location.search;
     const params = new URLSearchParams(searchStr);
     const init: ClientFilters = {};
     params.forEach((v, k) => { (init as any)[k] = v; });
