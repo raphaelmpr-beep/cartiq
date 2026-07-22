@@ -53,7 +53,7 @@ async function getBoteroLocationRecords(): Promise<BoteroRecord[]> {
   const allUrls: string[] = [];
   for (const sm of sitemaps) {
     try {
-      const res = await fetch(sm, { headers: { 'User-Agent': 'CartIQ/1.0' }, signal: AbortSignal.timeout(10000) });
+      const res = await fetch(sm, { headers: sitemapHeaders(sm), signal: AbortSignal.timeout(10000) });
       if (!res.ok) continue;
       const xml = await res.text();
       const matches = [...xml.matchAll(/<loc>(https:\/\/boterocarts\.com\/listing\/[^<]+)<\/loc>/g)];
@@ -81,8 +81,9 @@ async function getBoteroSitemapUrls(flGaOnly = true): Promise<string[]> {
 
 async function getJaxSitemapUrls(): Promise<string[]> {
   try {
-    const res = await fetch('https://golfcartsjacksonville.com/auto-listing-sitemap.xml', {
-      headers: { 'User-Agent': 'CartIQ/1.0' }, signal: AbortSignal.timeout(10000)
+    const jaxSitemap = 'https://golfcartsjacksonville.com/auto-listing-sitemap.xml';
+    const res = await fetch(jaxSitemap, {
+      headers: sitemapHeaders(jaxSitemap), signal: AbortSignal.timeout(10000)
     });
     const xml = await res.text();
     const matches = [...xml.matchAll(/<loc>(https:\/\/golfcartsjacksonville\.com\/listing\/[^<]+)<\/loc>/g)];
@@ -385,7 +386,16 @@ const RICH_ADAPTER_OVERRIDES: Record<string, (dealer: DealerSourceRecord) => Pro
 
 
 
-/** Write discovery status back to dealers.last_discovery_* */
+/**
+ * Write discovery status back to dealers.last_discovery_* AND emit a
+ * sync_log row so the Inventory Gap Audit can render lastSyncAt /
+ * lastSyncStatus for discovery runs (not just verify runs).
+ *
+ * Previously discovery paths only updated dealers.last_discovery_* and
+ * dealer_coverage_log / adapter_run_log — sync_log was only written by
+ * the verify path in pipeline.ts. That's why dealers with pending_imports
+ * rows showed lastSyncAt=null in the audit.
+ */
 async function writeDiscoveryStatus(
   supabase: ReturnType<typeof getSupabase>,
   slug: string,
@@ -398,6 +408,54 @@ async function writeDiscoveryStatus(
       last_discovery_message: message,
       last_discovery_at:      new Date().toISOString(),
     }).eq('slug', slug);
+  } catch { /* non-fatal */ }
+  await writeSyncLog(supabase, slug, status, message);
+}
+
+/**
+ * Fetch all rows from a table matching a filter, paginating past the 1000-row
+ * PostgREST cap. Without this, dedup queries silently miss any URL past the
+ * first 1000 rows and every discovery run marks new listings as "already known".
+ */
+async function fetchAllPaginated<T = any>(
+  supabase: ReturnType<typeof getSupabase>,
+  table: string,
+  select: string,
+  build: (q: any) => any = (q) => q,
+  pageSize = 1000,
+  maxRows = 50000,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < maxRows; from += pageSize) {
+    const { data, error } = await build(
+      supabase.from(table).select(select).range(from, from + pageSize - 1)
+    );
+    if (error) throw new Error(`${table}: ${error.message}`);
+    const rows = (data || []) as T[];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
+/**
+ * Write a per-run row to sync_log so the Inventory Gap Audit can render
+ * lastSyncAt / lastSyncStatus for discovery runs (not just verify runs).
+ * Non-fatal: swallows errors so a logging failure never breaks a sync.
+ */
+async function writeSyncLog(
+  supabase: ReturnType<typeof getSupabase>,
+  slug: string,
+  status: string,
+  notes: string,
+) {
+  try {
+    await supabase.from('sync_log').insert({
+      dealer_slug: slug,
+      status,
+      synced_at:   new Date().toISOString(),
+      notes,
+    });
   } catch { /* non-fatal */ }
 }
 
@@ -435,8 +493,9 @@ async function autoDetectSitemapUrls(
   for (const domain of domains) {
     for (const path of SITEMAP_PATHS) {
       try {
-        const res = await fetch(`https://${domain}${path}`, {
-          headers: { 'User-Agent': 'CartIQ-Sync/1.0' },
+        const sitemapUrl = `https://${domain}${path}`;
+        const res = await fetch(sitemapUrl, {
+          headers: sitemapHeaders(sitemapUrl),
           signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
         });
         if (!res.ok) continue;
@@ -451,7 +510,7 @@ async function autoDetectSitemapUrls(
           ).slice(0, 3);
           for (const sub of subSitemaps) {
             try {
-              const sr = await fetch(sub, { headers: { 'User-Agent': 'CartIQ-Sync/1.0' }, signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined });
+              const sr = await fetch(sub, { headers: sitemapHeaders(sub), signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined });
               if (!sr.ok) continue;
               const sxml = await sr.text();
               const subLocs = [...sxml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
@@ -549,8 +608,16 @@ async function runDiscoverSitemap(
   } catch { /* table not yet created — fail-open, continue with sync */ }
 
   // ── Requires browser — route through browser-sync.ts ───────────────────────
-  // Some dealers (e.g. JAX) use SiteGround SG Captcha or similar bot-protection
-  // that blocks plain HTTP fetch. browser-sync.ts uses Playwright to bypass it.
+  // Some dealers use SiteGround SG Captcha, Cloudflare JS challenge, or
+  // otherwise render inventory via JS that plain HTTP fetch can't reach.
+  // browser-sync.ts uses Playwright to bypass these and either
+  //   (a) parse full listing pages (dealers with a per-platform parser), or
+  //   (b) queue URL-only entries with slug-derived metadata (urlOnly:true).
+  //
+  // Note: this path can only run in environments where Playwright is
+  // available (pplx.app weekly cron, not Vercel Lambda). In Lambda, calling
+  // runBrowserSync() will throw — the catch below marks the dealer as
+  // 'needs_browser' so the next Playwright-capable run picks it up.
   if (dealer.browser_required) {
     const browserSyncDealers = ['jax-golf-carts-jacksonville'];
     if (browserSyncDealers.includes(slug)) {
@@ -576,13 +643,29 @@ async function runDiscoverSitemap(
         const msg = `[${slug}] Browser sync error: ${e.message}`;
         result.errors++;
         result.summary.push(msg);
-        await writeDiscoveryStatus(supabase, slug, 'error', msg);
+        await writeDiscoveryStatus(supabase, slug, 'needs_browser', msg);
+        return;
       }
-    } else {
-      // Dealer needs browser but has no browser-sync adapter yet
-      const msg = `[${slug}] Needs browser (${adapterKey || strategy || 'no adapter'}) — add to BROWSER_SYNC_DEALERS in browser-sync.ts`;
+
+      result.new_queued    += bsResult.new_queued;
+      result.already_known += bsResult.already_known;
+      result.processed     += bsResult.discovered;
+      if (bsResult.parse_errors > 0 || bsResult.db_errors > 0) result.errors++;
+      bsResult.summary.forEach(s => result.summary.push(s));
+      await writeDiscoveryStatus(
+        supabase, slug,
+        bsResult.new_queued > 0 ? 'ok' : 'no_new',
+        bsResult.summary[bsResult.summary.length - 1] || 'Browser sync complete'
+      );
+    } catch (e: any) {
+      // Playwright unavailable in Lambda — mark for the next cron run.
+      const isPlaywrightMissing = /playwright|chromium|browserType|Executable doesn/i.test(e?.message || '');
+      const msg = isPlaywrightMissing
+        ? `[${slug}] Playwright not available in this environment — will retry from weekly cron`
+        : `[${slug}] Browser sync error: ${e?.message || e}`;
+      result.errors++;
       result.summary.push(msg);
-      await writeDiscoveryStatus(supabase, slug, 'needs_browser', msg);
+      await writeDiscoveryStatus(supabase, slug, isPlaywrightMissing ? 'needs_browser' : 'error', msg);
     }
     return;
   }
@@ -600,14 +683,24 @@ async function runDiscoverSitemap(
       return;
     }
 
-    // Diff against known URLs
-    const [{ data: existing }, { data: pendingKnown }] = await Promise.all([
-      supabase.from('listings').select('source_listing_url').eq('sync_source', slug).not('source_listing_url', 'is', null),
-      supabase.from('pending_imports').select('source_url').eq('dealer_slug', slug),
+    // Diff against known URLs — paginate past the 1000-row PostgREST cap.
+    const [existing, pendingKnown] = await Promise.all([
+      fetchAllPaginated<{ source_listing_url: string | null }>(
+        supabase,
+        'listings',
+        'source_listing_url',
+        (q) => q.eq('sync_source', slug).not('source_listing_url', 'is', null),
+      ),
+      fetchAllPaginated<{ source_url: string }>(
+        supabase,
+        'pending_imports',
+        'source_url',
+        (q) => q.eq('dealer_slug', slug),
+      ),
     ]);
-    const knownUrls = new Set([
-      ...(existing || []).map((r: any) => r.source_listing_url),
-      ...(pendingKnown || []).map((r: any) => r.source_url),
+    const knownUrls = new Set<string>([
+      ...existing.map((r) => r.source_listing_url).filter((u): u is string => !!u),
+      ...pendingKnown.map((r) => r.source_url).filter((u): u is string => !!u),
     ]);
 
     const newUnits = units.filter(u => !knownUrls.has(u.source_url));
@@ -674,12 +767,26 @@ async function runDiscoverSitemap(
       return;
     }
 
-    // Diff against all known URLs across ALL botero dealers (source_url is globally unique)
-    const { data: pendingKnown } = await supabase.from('pending_imports').select('source_url');
-    const { data: existingListings } = await supabase.from('listings').select('source_listing_url').not('source_listing_url', 'is', null);
-    const knownUrls = new Set([
-      ...(pendingKnown || []).map((r: any) => r.source_url),
-      ...(existingListings || []).map((r: any) => r.source_listing_url),
+    // Diff against all known URLs across ALL botero dealers (source_url is globally unique).
+    // MUST paginate: previous unpaginated PostgREST reads capped at 1000 rows and made
+    // every new URL past the first 1000 look "already known" — the root cause of the
+    // lastInsertedPendingCount=0 bug for Botero and other high-volume dealers.
+    const [pendingKnown, existingListings] = await Promise.all([
+      fetchAllPaginated<{ source_url: string }>(
+        supabase,
+        'pending_imports',
+        'source_url',
+      ),
+      fetchAllPaginated<{ source_listing_url: string | null }>(
+        supabase,
+        'listings',
+        'source_listing_url',
+        (q) => q.not('source_listing_url', 'is', null),
+      ),
+    ]);
+    const knownUrls = new Set<string>([
+      ...pendingKnown.map((r) => r.source_url).filter((u): u is string => !!u),
+      ...existingListings.map((r) => r.source_listing_url).filter((u): u is string => !!u),
     ]);
 
     const newRecords = relevantRecords.filter(r => !knownUrls.has(r.url));
@@ -754,20 +861,27 @@ async function runDiscoverSitemap(
     return;
   }
 
-  // Get known URLs scoped to this dealer only (fast — avoids full-table scan)
-  const [{ data: existing }, { data: pendingKnown }] = await Promise.all([
-    supabase.from('listings')
-      .select('source_listing_url')
-      .eq('sync_source', slug)
-      .not('source_listing_url', 'is', null),
-    supabase.from('pending_imports')
-      .select('source_url')
-      .eq('dealer_slug', slug),
+  // Get known URLs scoped to this dealer only (fast — avoids full-table scan).
+  // Paginate past PostgREST's 1000-row cap so dealers with >1000 known URLs
+  // don't silently treat every new URL as "already known".
+  const [existing, pendingKnown] = await Promise.all([
+    fetchAllPaginated<{ source_listing_url: string | null }>(
+      supabase,
+      'listings',
+      'source_listing_url',
+      (q) => q.eq('sync_source', slug).not('source_listing_url', 'is', null),
+    ),
+    fetchAllPaginated<{ source_url: string }>(
+      supabase,
+      'pending_imports',
+      'source_url',
+      (q) => q.eq('dealer_slug', slug),
+    ),
   ]);
 
-  const knownUrls = new Set([
-    ...(existing || []).map((r: any) => r.source_listing_url),
-    ...(pendingKnown || []).map((r: any) => r.source_url),
+  const knownUrls = new Set<string>([
+    ...existing.map((r) => r.source_listing_url).filter((u): u is string => !!u),
+    ...pendingKnown.map((r) => r.source_url).filter((u): u is string => !!u),
   ]);
 
   const newUrls = sitemapUrls.filter(u => !knownUrls.has(u));

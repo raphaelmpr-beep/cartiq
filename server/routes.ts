@@ -49,7 +49,15 @@ function norm(row: any): any { return toCamel(row); }
 import { getMetaConnectorStatus } from "./connectors/metaMarketplace";
 import { getRetailConnectorStatus } from "./connectors/retailSource";
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "cartiq2024";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_PASSWORD) {
+  // Fail loudly at startup rather than fall back to a hard-coded default.
+  // A leaked default is worse than a boot failure — an unset ADMIN_PASSWORD
+  // must be treated as a misconfiguration, not silently patched.
+  throw new Error(
+    "ADMIN_PASSWORD environment variable is required. Set it in Vercel Project Settings → Environment Variables."
+  );
+}
 const PILOT_STATES = ["FL", "GA"];
 
 function slugify(text: string): string {
@@ -326,6 +334,13 @@ ${pageUrls.join("\n")}
     if (token === ADMIN_PASSWORD) return next();
     return res.status(401).json({ error: "Unauthorized" });
   }
+
+  // GET /api/admin/verify — lightweight endpoint the Admin UI uses to gate
+  // the client login. Replaces the old client-side hash comparison, which
+  // had to ship a fingerprint of the admin password in the public bundle.
+  app.get("/api/admin/verify", requireAdmin, (_req, res) => {
+    res.json({ ok: true });
+  });
 
 
   // ─── Site Settings (in-memory, survives warm instances) ──────────────────────
@@ -886,7 +901,9 @@ ${pageUrls.join("\n")}
       // Sanitize: cap string params to prevent large input abuse
       const safeStr = (v: unknown, max = 100): string =>
         typeof v === "string" ? v.slice(0, max).replace(/[<>'"`;]/g, "") : "";
-      const filters: Record<string, unknown> = {};
+      // Public search: hide listings that would render as broken cards
+      // (missing image or missing price). Admin routes bypass this.
+      const filters: Record<string, unknown> = { renderable: true };
       if (req.query.state) filters.state = safeStr(req.query.state);
       if (req.query.city) filters.city = safeStr(req.query.city);
       if (req.query.brand) filters.brand = safeStr(req.query.brand);
@@ -966,12 +983,21 @@ ${pageUrls.join("\n")}
       const id = parseInt(req.params.id);
       const data = req.body as Record<string, any>;
       const oldListing = await storage.getListingById(id);
-      const oldEffectivePrice = oldListing
-        ? (oldListing.asking_price ?? oldListing.sale_price ?? oldListing.regular_price ?? 0)
-        : null;
+      // Distinguish "row doesn't exist" (404) from "update returned no row"
+      // (503, RLS-blocked or DB error) so admins can actually diagnose failures.
+      if (!oldListing) return res.status(404).json({ error: "Listing not found" });
+      const oldEffectivePrice = oldListing.asking_price ?? oldListing.sale_price ?? oldListing.regular_price ?? 0;
       const enriched = await enrichListingWithComps(data, id);
       const listing = await storage.updateListing(id, enriched as any);
-      if (!listing) return res.status(404).json({ error: "Listing not found" });
+      if (!listing) {
+        // Row exists but update returned nothing — almost always RLS blocking
+        // the SELECT after UPDATE. Surface loudly instead of pretending it's 404.
+        console.error(`[PATCH /api/listings/${id}] update returned no row (likely RLS-blocked). Enriched keys:`, Object.keys(enriched || {}));
+        return res.status(503).json({
+          error: "Update accepted but no row returned. Likely RLS-blocked write. Check server logs.",
+          id,
+        });
+      }
       const newEffectivePrice = listing.asking_price ?? listing.sale_price ?? listing.regular_price ?? 0;
       let alerts: any[] = [];
       if (oldEffectivePrice !== null && newEffectivePrice < oldEffectivePrice) {
@@ -979,6 +1005,7 @@ ${pageUrls.join("\n")}
       }
       res.json({ ...norm(suppressDeliveryIfUnavailable(listing as any)), _alertsFired: alerts.length });
     } catch (e: any) {
+      console.error(`[PATCH /api/listings/${req.params.id}] threw:`, e);
       res.status(400).json({ error: e.message });
     }
   });
@@ -986,10 +1013,20 @@ ${pageUrls.join("\n")}
   app.delete("/api/listings/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      // Check row exists first so we can distinguish 404 from an RLS-blocked delete.
+      const existing = await storage.getListingById(id);
+      if (!existing) return res.status(404).json({ error: "Listing not found" });
       const deleted = await storage.deleteListing(id);
-      if (!deleted) return res.status(404).json({ error: "Listing not found" });
+      if (!deleted) {
+        console.error(`[DELETE /api/listings/${id}] row exists but delete returned 0. Likely RLS-blocked. Callers should archive (status=archived) instead.`);
+        return res.status(503).json({
+          error: "Delete accepted but no row removed. Likely RLS-blocked. Try archiving (PATCH status=archived) instead.",
+          id,
+        });
+      }
       res.json({ success: true });
     } catch (e: any) {
+      console.error(`[DELETE /api/listings/${req.params.id}] threw:`, e);
       res.status(500).json({ error: e.message });
     }
   });
@@ -1303,13 +1340,18 @@ ${pageUrls.join("\n")}
 
             const pricing = enrichListing(listing, comps, brandComps);
 
-            // Only write fields managed by the pricing engine
+            // Only write fields managed by the pricing engine.
+            // NOTE: price_confidence is owned by the sync pipeline (values:
+            // confirmed|estimated|stale|unavailable, enforced by a CHECK
+            // constraint). The pricer's high|medium|low signal is already
+            // captured by valuation_confidence, so we do NOT write
+            // price_confidence here — writing pricer vocab would violate the
+            // CHECK constraint and abort the row.
             const patch: Record<string, any> = {
               cartiq_estimated_value: pricing.cartiq_estimated_value,
               deal_rating:            pricing.deal_rating,
               deal_delta:             pricing.deal_delta,
               buyer_score:            pricing.buyer_score,
-              price_confidence:       pricing.price_confidence,
               valuation_confidence:   pricing.valuation_confidence,
             };
             if (pricing.estimated_delivery_cost !== null) patch.estimated_delivery_cost = pricing.estimated_delivery_cost;
@@ -1566,6 +1608,21 @@ ${pageUrls.join("\n")}
     const baseSlug = slugify(`${imp.make || "cart"}-${imp.model || "listing"}-${imp.location_city || imp.dealer_slug || "fl"}`);
     const slug = `${baseSlug}-${Date.now()}`;
 
+    // Inherit city/state from the dealer profile when the pending row has none.
+    // Without this, FL/GA search silently drops the listing because search filters
+    // by state and adapters frequently leave location_state NULL.
+    let inheritedCity: string | null = null;
+    let inheritedState: string | null = null;
+    if (imp.dealer_slug) {
+      const { data: dealerRow } = await sb
+        .from("dealers")
+        .select("city,state")
+        .eq("slug", imp.dealer_slug)
+        .maybeSingle();
+      inheritedCity = dealerRow?.city ?? null;
+      inheritedState = dealerRow?.state ?? null;
+    }
+
     // Pre-fetch max id to work around broken sequence (avoids duplicate key violations)
     const { data: maxRow } = await sb
       .from("listings")
@@ -1586,8 +1643,8 @@ ${pageUrls.join("\n")}
       asking_price:       imp.price       ?? null,
       image_url:          imp.image_url   ?? null,
       image_urls_json:    imp.image_urls_json ?? "[]",
-      city:               imp.location_city  ?? null,
-      state:              imp.location_state ?? null,
+      city:               imp.location_city  ?? inheritedCity  ?? null,
+      state:              imp.location_state ?? inheritedState ?? null,
       source_listing_url: imp.source_url  ?? null,
       source_type:        "dealer_site",
       sync_source:        imp.dealer_slug ?? null,
@@ -1927,22 +1984,44 @@ ${pageUrls.join("\n")}
       const { createClient } = await import("@supabase/supabase-js");
       const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
 
+      // Paginated fetch — Supabase/PostgREST caps at 1000 rows per request even
+      // when .limit(N) is larger. Explicit .range() pagination is required to
+      // pull every row. Without this, downstream counts silently undercount.
+      async function fetchAll<T = any>(
+        table: string,
+        select: string,
+        opts: { order?: { col: string; asc: boolean }; pageSize?: number; maxRows?: number } = {}
+      ): Promise<T[]> {
+        const pageSize = opts.pageSize ?? 1000;
+        const maxRows = opts.maxRows ?? 50000;
+        const out: T[] = [];
+        for (let from = 0; from < maxRows; from += pageSize) {
+          let q: any = sb.from(table).select(select).range(from, from + pageSize - 1);
+          if (opts.order) q = q.order(opts.order.col, { ascending: opts.order.asc });
+          const { data, error } = await q;
+          if (error) throw new Error(`${table}: ${error.message}`);
+          const rows = (data || []) as T[];
+          out.push(...rows);
+          if (rows.length < pageSize) break;
+        }
+        return out;
+      }
+
       const [
-        { data: allListings },
-        { data: allDealers },
-        { data: allPending },
-        { data: syncLogs },
-        { data: coverageLogs },
-        adapterRunsResult,
+        allListings,
+        allDealers,
+        allPending,
+        syncLogs,
+        coverageLogs,
+        adapterRuns,
       ] = await Promise.all([
-        sb.from("listings").select("id,sync_source,source_type,dealer_id,status,public_listing,price_confidence,state").limit(2000),
-        sb.from("dealers").select("id,slug,name,state,city,website_url,adapter_key,platform_type,discovery_strategy,inventory_source_url,browser_required,last_discovery_status,last_discovery_message").limit(500),
-        sb.from("pending_imports").select("dealer_slug,status").limit(2000),
-        sb.from("sync_log").select("dealer_slug,status,synced_at,notes").order("synced_at", { ascending: false }).limit(500),
-        sb.from("dealer_coverage_log").select("dealer_slug,coverage_status,source_page_type,pagination_detected,pages_visited,load_more_detected,discovered_count,pending_imports_count,duplicate_count,scanned_at,adapter_notes,valuation_review_needed,inventory_url").order("scanned_at", { ascending: false }).limit(500),
-        sb.from("adapter_run_log").select("dealer_slug,status,coverage_status,source_page_type,discovered_count,inserted_pending_count,duplicate_count,skipped_count,started_at,notes,error_message").order("started_at", { ascending: false }).limit(500).then((r: any) => r).catch(() => ({ data: [] as any[] })),
+        fetchAll("listings", "id,sync_source,source_type,dealer_id,status,public_listing,price_confidence,state"),
+        fetchAll("dealers", "id,slug,name,state,city,website_url,adapter_key,platform_type,discovery_strategy,inventory_source_url,browser_required,last_discovery_status,last_discovery_message"),
+        fetchAll("pending_imports", "dealer_slug,status"),
+        fetchAll("sync_log", "dealer_slug,status,synced_at,notes", { order: { col: "synced_at", asc: false } }),
+        fetchAll("dealer_coverage_log", "dealer_slug,coverage_status,source_page_type,pagination_detected,pages_visited,load_more_detected,discovered_count,pending_imports_count,duplicate_count,scanned_at,adapter_notes,valuation_review_needed,inventory_url", { order: { col: "scanned_at", asc: false } }),
+        fetchAll("adapter_run_log", "dealer_slug,status,coverage_status,source_page_type,discovered_count,inserted_pending_count,duplicate_count,skipped_count,started_at,notes,error_message", { order: { col: "started_at", asc: false } }).catch(() => [] as any[]),
       ]);
-      const adapterRuns = (adapterRunsResult as any).data || [];
 
       const L = allListings || [];
       const P = allPending || [];
@@ -2142,6 +2221,93 @@ ${pageUrls.join("\n")}
       };
 
       res.json({ totals, byDealer });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/admin/dealers-integrity — surfaces fragmentation between the
+  // `dealers` master list and slugs referenced by listings/pending_imports/sync_log/adapter_run_log.
+  // Returns three actionable buckets so the Dealers tab can display a health strip:
+  //   • orphanSlugs        — slug appears in sync/listing/pending/adapter tables but has no `dealers` row
+  //   • deadDealerRows     — `dealers` row exists but has zero activity anywhere (no listings, no pending, no sync log, no adapter run)
+  //   • duplicateDealerRows— `dealers` row with is_duplicate_of IS NOT NULL
+  // Read-only. Does not modify any backend process.
+  app.get("/api/admin/dealers-integrity", requireAdmin, async (_req, res) => {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+
+      // Paginated fetch (Supabase/PostgREST caps at 1000 rows even when .limit is larger)
+      async function fetchAll<T = any>(table: string, select: string, pageSize = 1000, maxRows = 50000): Promise<T[]> {
+        const out: T[] = [];
+        for (let from = 0; from < maxRows; from += pageSize) {
+          const { data, error } = await sb.from(table).select(select).range(from, from + pageSize - 1);
+          if (error) throw new Error(`${table}: ${error.message}`);
+          const rows = (data || []) as T[];
+          out.push(...rows);
+          if (rows.length < pageSize) break;
+        }
+        return out;
+      }
+
+      const [dealers, listings, pending, syncLogs, adapterRuns] = await Promise.all([
+        fetchAll<any>("dealers", "id,slug,name,state,city,website_url,is_duplicate_of"),
+        fetchAll<any>("listings", "sync_source"),
+        fetchAll<any>("pending_imports", "dealer_slug"),
+        fetchAll<any>("sync_log", "dealer_slug"),
+        fetchAll<any>("adapter_run_log", "dealer_slug").catch(() => [] as any[]),
+      ]);
+
+      const knownSlugs = new Set<string>(dealers.map(d => d.slug).filter(Boolean));
+
+      // Collect referenced slugs from all activity tables (skip null/empty).
+      const referencedSlugs = new Map<string, { listings: number; pending: number; syncLog: number; adapterRun: number }>();
+      function bump(slug: string | null | undefined, key: "listings" | "pending" | "syncLog" | "adapterRun") {
+        if (!slug) return;
+        const cur = referencedSlugs.get(slug) || { listings: 0, pending: 0, syncLog: 0, adapterRun: 0 };
+        cur[key]++;
+        referencedSlugs.set(slug, cur);
+      }
+      for (const l of listings)    bump(l.sync_source, "listings");
+      for (const p of pending)     bump(p.dealer_slug, "pending");
+      for (const s of syncLogs)    bump(s.dealer_slug, "syncLog");
+      for (const r of adapterRuns) bump(r.dealer_slug, "adapterRun");
+
+      // 1) Orphans — referenced but not in dealers table
+      const orphanSlugs = Array.from(referencedSlugs.entries())
+        .filter(([slug]) => !knownSlugs.has(slug))
+        .map(([slug, counts]) => ({ slug, ...counts }))
+        .sort((a, b) =>
+          (b.listings + b.pending + b.syncLog + b.adapterRun) -
+          (a.listings + a.pending + a.syncLog + a.adapterRun) ||
+          a.slug.localeCompare(b.slug)
+        );
+
+      // 2) Dead dealer rows — in dealers table but referenced nowhere
+      const deadDealerRows = dealers
+        .filter(d => !referencedSlugs.has(d.slug))
+        .map(d => ({ id: d.id, slug: d.slug, name: d.name, state: d.state, city: d.city, websiteUrl: d.website_url }))
+        .sort((a, b) => (a.state || "").localeCompare(b.state || "") || a.slug.localeCompare(b.slug));
+
+      // 3) Duplicate dealer rows — flagged via is_duplicate_of
+      const duplicateDealerRows = dealers
+        .filter(d => d.is_duplicate_of != null)
+        .map(d => ({ id: d.id, slug: d.slug, name: d.name, state: d.state, isDuplicateOf: d.is_duplicate_of }))
+        .sort((a, b) => a.slug.localeCompare(b.slug));
+
+      res.json({
+        totals: {
+          dealerRows: dealers.length,
+          referencedSlugs: referencedSlugs.size,
+          orphanSlugs: orphanSlugs.length,
+          deadDealerRows: deadDealerRows.length,
+          duplicateDealerRows: duplicateDealerRows.length,
+        },
+        orphanSlugs,
+        deadDealerRows,
+        duplicateDealerRows,
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -2717,7 +2883,7 @@ ${pageUrls.join("\n")}
         try {
           const r = await fetch(`${BASE}/api/admin/dealers/${dealer.slug}/google-validate`, {
             method: "POST",
-            headers: { "x-admin-token": process.env.ADMIN_PASSWORD || "cartiq2024" },
+            headers: { "x-admin-token": ADMIN_PASSWORD },
             signal: AbortSignal.timeout(15000),
           });
           const result = await r.json();

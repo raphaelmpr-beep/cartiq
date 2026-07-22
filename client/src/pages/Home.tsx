@@ -15,8 +15,8 @@ export default function Home() {
   // SEO
   useEffect(() => {
     setSEO({
-      title: "GolfCartIQ | Golf Cart Price Intelligence for Florida & Georgia",
-      description: "Compare golf carts for sale, local dealers, prices, deal ratings, battery types, warranties, and delivery options across Florida and Georgia.",
+      title: "Golf Cart Values, Prices & Deals 2026 — Florida & Georgia | GolfCartIQ",
+      description: "Know what any golf cart is worth before you buy or sell. Compare live dealer prices, get a free value estimate, and see local deals across Florida and Georgia.",
       canonical: "https://golfcartiq.com/",
     });
   }, []);
@@ -82,32 +82,46 @@ export default function Home() {
       <section className="bg-gradient-to-br from-gray-50 to-white border-b border-border">
         {/* Top bar: headline + search */}
         <div className="max-w-7xl mx-auto px-4 pt-5 pb-4 md:pt-7 md:pb-5">
-          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div className="flex flex-col gap-5">
             <div className="space-y-2 md:space-y-3">
               <div className="inline-flex items-center gap-2 bg-green-50 text-green-700 border border-green-200 px-3 py-1 rounded-full text-xs font-semibold">
                 Know before you buy.
               </div>
               <h1 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-tight text-foreground">
-                Find the right golf cart{" "}
-                <span className="text-green-600">at the right price.</span>
+                Golf Cart Values, Prices &amp; Deals{" "}
+                <span className="text-green-600">— Florida &amp; Georgia</span>
               </h1>
+              <p className="text-base md:text-lg text-muted-foreground max-w-2xl">
+                Know what any cart is worth before you buy or sell. Compare live dealer prices with GolfCartIQ.
+              </p>
             </div>
-            {/* Search bar — right-aligned on desktop, full-width on mobile */}
-            <form onSubmit={handleHeroSearch} className="flex gap-2 w-full md:max-w-sm shrink-0">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  className="pl-9"
-                  placeholder="Brand, model, city, zip…"
-                  value={heroSearch}
-                  onChange={(e) => setHeroSearch(e.target.value)}
-                  data-testid="hero-search-input"
-                />
-              </div>
-              <Button type="submit" className="gap-2 shrink-0" data-testid="hero-search-btn">
-                <Search className="h-4 w-4" /> Search Golf Carts
-              </Button>
-            </form>
+            {/* Dual CTA row — Search + Value My Cart */}
+            <div className="flex flex-col sm:flex-row gap-3 w-full">
+              <form onSubmit={handleHeroSearch} className="flex gap-2 flex-1 min-w-0">
+                <div className="relative flex-1 min-w-0">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Brand, model, city, zip…"
+                    value={heroSearch}
+                    onChange={(e) => setHeroSearch(e.target.value)}
+                    data-testid="hero-search-input"
+                  />
+                </div>
+                <Button type="submit" className="gap-2 shrink-0" data-testid="hero-search-btn">
+                  <Search className="h-4 w-4" /> Search Carts
+                </Button>
+              </form>
+              <Link href="/golf-cart-value-estimator">
+                <Button
+                  variant="outline"
+                  className="gap-2 border-green-600 text-green-700 hover:bg-green-50 w-full sm:w-auto"
+                  data-testid="hero-value-btn"
+                >
+                  <ClipboardCheck className="h-4 w-4" /> Value My Cart
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
 
@@ -252,6 +266,72 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* ─── Golf Cart Values by Brand (internal linking module) ─────────────── */}
+      <section className="bg-white border-b border-border">
+        <div className="max-w-7xl mx-auto px-4 py-10">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-bold">Golf Cart Values &amp; Pricing</h2>
+              <p className="text-sm text-muted-foreground mt-1">Free guides, calculators, and 2026 price data — no signup required.</p>
+            </div>
+            <Link href="/golf-cart-values" className="text-sm text-green-700 hover:underline flex items-center gap-1">
+              All value guides <ChevronRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Link
+              href="/golf-cart-value-estimator"
+              className="group border border-border rounded-xl p-5 bg-gradient-to-br from-green-50 to-white hover:border-green-300 hover:shadow-sm transition-all"
+            >
+              <div className="text-xs font-semibold uppercase tracking-wide text-green-700 mb-2">Instant Estimate</div>
+              <h3 className="font-bold text-base mb-1 group-hover:text-green-700">Golf Cart Value Estimator</h3>
+              <p className="text-sm text-muted-foreground">Get a private-sale &amp; trade-in price in 30 seconds. Enter brand, model, year, condition.</p>
+            </Link>
+
+            <Link
+              href="/used-golf-cart-value"
+              className="group border border-border rounded-xl p-5 bg-white hover:border-green-300 hover:shadow-sm transition-all"
+            >
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Pricing Guide</div>
+              <h3 className="font-bold text-base mb-1 group-hover:text-green-700">Used Golf Cart Value Guide</h3>
+              <p className="text-sm text-muted-foreground">What's a used golf cart worth in 2026? Age &amp; battery-adjusted ranges by brand.</p>
+            </Link>
+
+            <Link
+              href="/golf-cart-values"
+              className="group border border-border rounded-xl p-5 bg-white hover:border-green-300 hover:shadow-sm transition-all"
+            >
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Full Guide</div>
+              <h3 className="font-bold text-base mb-1 group-hover:text-green-700">Golf Cart Values by Brand</h3>
+              <p className="text-sm text-muted-foreground">Club Car, Yamaha, E-Z-GO, ICON, Evolution &amp; more — 5-year retention data.</p>
+            </Link>
+          </div>
+
+          <div className="mt-5 pt-5 border-t border-border">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Popular value searches</div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { label: "Club Car value",     href: "/golf-cart-values#club-car" },
+                { label: "Yamaha value",       href: "/golf-cart-values#yamaha" },
+                { label: "E-Z-GO value",       href: "/golf-cart-values#e-z-go" },
+                { label: "ICON EV value",      href: "/golf-cart-values#icon" },
+                { label: "Evolution value",    href: "/golf-cart-values#evolution" },
+                { label: "Star EV value",      href: "/golf-cart-values#star-ev" },
+                { label: "Teko EV value",      href: "/brands/teko-ev" },
+                { label: "Lithium vs lead-acid", href: "/golf-cart-values#battery" },
+              ].map(({ label, href }) => (
+                <Link key={href} href={href}
+                  className="inline-flex items-center px-3 py-1.5 rounded-full border border-border text-xs hover:bg-secondary hover:border-green-200 transition-colors">
+                  {label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ─── Buyer Guide Cards ────────────────────────────────────────────────── */}
       {/* min-h reserves space for 3-card grid while /api/buyer-guide resolves (~1.7s).
           Prevents the late-arriving cards from shifting all content below them (CLS). */}

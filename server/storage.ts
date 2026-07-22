@@ -110,6 +110,11 @@ class SupabaseStorage implements IStorage {
     // Paginate internally with PAGE_SIZE=1000 to fetch all rows up to hardLimit.
     const PAGE_SIZE = 1000;
 
+    // renderable=true drops listings that would render as broken cards on the
+    // public search/sitemap (missing image or missing price). Admin routes leave
+    // this false so they still see every row for triage.
+    const renderable = filters.renderable === true;
+
     function buildQuery(from: number, to: number) {
       let q = db()
         .from("listings")
@@ -118,6 +123,12 @@ class SupabaseStorage implements IStorage {
         .eq("public_listing", true)
         .order("created_at", { ascending: false })
         .range(from, to);
+      if (renderable) {
+        q = q
+          .not("image_url", "is", null)
+          .neq("image_url", "")
+          .not("asking_price", "is", null);
+      }
       if (filters.state)       q = q.eq("state", filters.state);
       if (filters.brand)       q = q.ilike("brand", filters.brand as string);
       if (filters.sellerType)  q = q.eq("seller_type", filters.sellerType);
@@ -206,18 +217,35 @@ class SupabaseStorage implements IStorage {
   }
 
   async updateListing(id: number, data: Partial<InsertListing>): Promise<Listing | undefined> {
-    const { data: result } = await db()
+    // Use maybeSingle so 0-row updates don't throw PGRST116; check error so
+    // RLS-blocked writes stop silently returning undefined and confusing callers.
+    const { data: result, error } = await db()
       .from("listings")
       .update({ ...data, updated_at: new Date().toISOString() })
       .eq("id", id)
       .select()
-      .single();
+      .maybeSingle();
+    if (error) {
+      console.error(`[updateListing id=${id}] Supabase error:`, error);
+      throw new Error(`updateListing failed for id=${id}: ${error.message}`);
+    }
     return (result as Listing) ?? undefined;
   }
 
   async deleteListing(id: number): Promise<boolean> {
-    const { error } = await db().from("listings").delete().eq("id", id);
-    return !error;
+    // Request the affected rows back so we can distinguish a real delete from
+    // an RLS-blocked no-op. Anon key currently can't DELETE on `listings`;
+    // callers relying on this should archive (status=archived) instead.
+    const { data, error } = await db()
+      .from("listings")
+      .delete()
+      .eq("id", id)
+      .select("id");
+    if (error) {
+      console.error(`[deleteListing id=${id}] Supabase error:`, error);
+      throw new Error(`deleteListing failed for id=${id}: ${error.message}`);
+    }
+    return Array.isArray(data) && data.length > 0;
   }
 
   async createManyListings(data: InsertListing[]): Promise<Listing[]> {

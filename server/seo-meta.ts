@@ -15,7 +15,7 @@ const BASE_URL = "https://golfcartiq.com";
 const SITE_NAME = "GolfCartIQ";
 const DEFAULT_TITLE = `${SITE_NAME} | Golf Cart Prices & Deals — FL & GA`;
 const DEFAULT_DESC =
-  "Compare golf carts for sale, local dealers, prices, deal ratings, battery types, warranties, and delivery options across Florida and Georgia.";
+  "Know what any golf cart is worth before you buy or sell. Compare live dealer prices, get a free value estimate, and see local deals across Florida and Georgia.";
 const DEFAULT_IMAGE = `${BASE_URL}/og-image.png`;
 
 export interface RouteMeta {
@@ -248,6 +248,21 @@ const STATIC_ROUTES: Record<string, { title: string; description: string }> = {
     title: `Does a Used Golf Cart Come With a Charger? | ${SITE_NAME}`,
     description:
       "Does a golf cart come with a charger? What to look for, lithium vs lead-acid charger compatibility, and what to budget if one isn't included.",
+  },
+  "/golf-cart-values": {
+    title: `Golf Cart Values 2026: What Every Brand Is Really Worth | ${SITE_NAME}`,
+    description:
+      "See real golf cart values for 2026 by brand, age, and condition. Compare depreciation curves for Club Car, E-Z-GO, Yamaha, Evolution, ICON and more — with live dealer pricing.",
+  },
+  "/used-golf-cart-value": {
+    title: `Used Golf Cart Value Guide: How to Price a Used Cart in 2026 | ${SITE_NAME}`,
+    description:
+      "How to figure out what a used golf cart is worth: brand-by-brand depreciation, battery age adjustments, condition grading, and a fair-price checklist for buyers and sellers.",
+  },
+  "/golf-cart-value-estimator": {
+    title: `Free Golf Cart Value Estimator — What Is My Cart Worth? | ${SITE_NAME}`,
+    description:
+      "Get a free instant golf cart value estimate. Enter your brand, year, battery type, and condition to see a private-party value range, dealer trade-in range, and a GolfCartIQ score.",
   },
   // ─── Other pages ─────────────────────────────────────────────────────────────
   "/how-it-works": {

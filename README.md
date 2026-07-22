@@ -247,10 +247,10 @@ cp .env.example .env
 |---|---|---|
 | `PORT` | `5000` | Server port |
 | `NODE_ENV` | `development` | Set to `production` for built app |
-| `ADMIN_TOKEN` | `cartiq2024` | Admin API token (sent as `x-admin-token` header) |
+| `ADMIN_PASSWORD` | *(required)* | Admin API token (sent as `x-admin-token` header). Server refuses to start if unset. |
 | `DATABASE_URL` | `./data.db` | SQLite path (or Postgres URL for migration) |
 
-> **Security note:** The `ADMIN_TOKEN` default is for development only. Change it before any public deployment.
+> **Security note:** `ADMIN_PASSWORD` is required in every environment — there is no source-code default. Generate a strong random value and set it in the hosting provider's environment (Vercel → Project Settings → Environment Variables).
 
 ---
 
@@ -310,7 +310,7 @@ All endpoints are prefixed with `/api`.
 | `GET` | `/api/admin/listings` | Admin | List all listings (including non-public) |
 | `GET/POST` | `/api/inventory-sources` | Admin | Manage data sources |
 
-**Admin auth:** Send `x-admin-token: <ADMIN_TOKEN>` header.
+**Admin auth:** Send `x-admin-token: <ADMIN_PASSWORD>` header.
 
 ---
 
@@ -331,7 +331,11 @@ The connector placeholders are intentionally disabled and gated — no automated
 
 ## Admin Portal
 
-Access at `/#/admin`. Default password: `cartiq2024` (change via `ADMIN_TOKEN` env var).
+Access at `/admin`. The password is whatever value is set in the `ADMIN_PASSWORD` environment variable (there is no source-code default). Generate a strong random value:
+
+```bash
+python3 -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters+string.digits+'-_') for _ in range(48)))"
+```
 
 **Capabilities:**
 - Create, edit, delete listings

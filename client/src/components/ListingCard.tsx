@@ -19,14 +19,11 @@ function weservUrl(url: string) {
   return `https://images.weserv.nl/?url=${encodeURIComponent(url)}&w=400&h=300&output=webp&fit=inside`;
 }
 
-function triggerCacheImage(id: number, imageUrl: string) {
-  // Fire-and-forget: cache image to Supabase Storage
-  fetch("/api/admin/cache-image", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-admin-token": "cartiq2024" },
-    body: JSON.stringify({ id, imageUrl }),
-  }).catch(() => {/* silent */});
-}
+// Note: Image caching to Supabase Storage is handled server-side during
+// listing ingestion (see server/sitemaps.ts handleListingLifecycle and the
+// POST /api/admin/cache-image endpoint invoked by admin CLIs/jobs).
+// The client no longer triggers admin endpoints — that leaked a shared secret
+// into the public bundle.
 
 export function ListingCard({ listing, compact, priority = false }: ListingCardProps) {
   const effectivePrice = listing.salePrice ?? listing.askingPrice ?? listing.regularPrice;
@@ -47,12 +44,7 @@ export function ListingCard({ listing, compact, priority = false }: ListingCardP
     }
   }, [imgStage, listing.imageUrl]);
 
-  const handleImgLoad = useCallback(() => {
-    if (imgStage === "weserv" && listing.imageUrl) {
-      // weserv succeeded — cache to Supabase Storage in background
-      triggerCacheImage(listing.id, listing.imageUrl);
-    }
-  }, [imgStage, listing.id, listing.imageUrl]);
+
 
   return (
     <Card className="overflow-hidden hover:shadow-md transition-shadow bg-card" data-testid={`card-listing-${listing.id}`}>
@@ -69,7 +61,6 @@ export function ListingCard({ listing, compact, priority = false }: ListingCardP
             width={400}
             height={225}
             onError={handleImgError}
-            onLoad={handleImgLoad}
           />
         ) : null}
         {imgStage === "failed" && (
