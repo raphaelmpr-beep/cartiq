@@ -290,7 +290,13 @@ ${sitemapTags.join("\n")}
     }
   });
 
-  // ─── SEO: Paginated child sitemaps ───────────────────────────────────────────
+  // ─── SEO: Child sitemaps (pages, cities, dealers, listings) ────────────────
+  // registerSitemapRoutes must come BEFORE /sitemap-:page.xml — Express uses
+  // first-match routing, so named routes like /sitemap-pages.xml must be
+  // registered before the wildcard /sitemap-:page.xml pattern.
+  registerSitemapRoutes(app);
+
+  // ─── SEO: Paginated listing sitemaps (sitemap-1.xml … sitemap-N.xml) ────────
   app.get("/sitemap-:page.xml", async (req, res) => {
     try {
       const page = parseInt(req.params.page, 10);
@@ -328,11 +334,6 @@ ${pageUrls.join("\n")}
       res.status(500).send("<!-- sitemap page error -->");
     }
   });
-
-  // ─── Supplemental sitemap routes (sitemap-pages, city-pages, dealers, listings) ──
-  // /sitemap.xml and /sitemap-:page.xml are handled inline above.
-  // registerSitemapRoutes adds the child sitemaps that routes.ts doesn't cover.
-  registerSitemapRoutes(app);
 
   // ─── Auth middleware ─────────────────────────────────────────────────────────
   function requireAdmin(req: any, res: any, next: any) {
@@ -3144,7 +3145,7 @@ ${pageUrls.join("\n")}
       // Inject server-rendered body content after <div id="root">
       if (meta.bodyContent) {
         html = html.replace(/<div id="__seo_ssr__"[\s\S]*?<\/div>/, "");
-        html = html.replace(/(<div id="root"[^>]*>)/, `$1${meta.bodyContent}`);
+        html = html.replace(/(<div id="root"[^>]*>)/, (match) => match + meta.bodyContent!);
       }
 
       res

@@ -169,7 +169,7 @@ export function serveStatic(app: Express) {
       html = html.replace(/<div id="__seo_ssr__"[\s\S]*?<\/div>/, "");
       html = html.replace(
         /(<div id="root"[^>]*>)/,
-        `$1${meta.bodyContent}`
+        (match) => match + meta.bodyContent!
       );
     }
 
