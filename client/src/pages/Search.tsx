@@ -44,7 +44,7 @@ const SELLER_TYPES = [
 ];
 const SORT_OPTIONS = [
   { label: "Best Match", value: "best_match" },
-  { label: "Lowest Price", value: "lowest_cost" },
+  { label: "Lowest Total Cost", value: "lowest_cost" },
   { label: "Best Deal", value: "best_deal" },
   { label: "Newest", value: "newest" },
   { label: "Highest IQ Score", value: "buyer_score" },
