@@ -32,7 +32,8 @@ export const STATIC_PAGE_ENTRIES: StaticPageEntry[] = [
   { path: "/search",        priority: "0.9", changefreq: "daily"  },
   { path: "/deal-checker",  priority: "0.8", changefreq: "weekly" },
   { path: "/buyer-guide",   priority: "0.8", changefreq: "weekly" },
-  { path: "/sell",          priority: "0.5", changefreq: "monthly" },
+  // /sell is intentionally omitted while it's a placeholder page ("coming soon").
+  // Re-add here + in server/routes.ts + server/seo-meta.ts when it ships.
   { path: "/how-it-works",  priority: "0.7", changefreq: "monthly" },
   { path: "/disclosure",    priority: "0.3", changefreq: "yearly"  },
 

@@ -283,6 +283,15 @@ const STATIC_ROUTES: Record<string, { title: string; description: string }> = {
     description:
       "List your golf cart for sale on GolfCartIQ. Reach buyers across Florida and Georgia.",
   },
+  // NOTE: /sell is intentionally omitted from STATIC_ROUTES while it is a placeholder
+  // ("seller-authorized import coming soon"). It is also excluded from the sitemap in
+  // server/routes.ts and server/sitemap-config.ts so we don't advertise a thin page to Google.
+  // When the real /sell page ships, add a static entry here and re-add it to the sitemaps.
+  "/brands": {
+    title: `Golf Cart Brands | Compare Club Car, ICON, E-Z-GO & More | ${SITE_NAME}`,
+    description:
+      "Compare all golf cart brands tracked on GolfCartIQ — Club Car, E-Z-GO, Yamaha, ICON, Evolution, Bintelli, Venom EV, Teko EV, and more. Specs, warranties, and verified listings in FL & GA.",
+  },
   "/disclosure": {
     title: `Disclosure & Affiliate Policy | ${SITE_NAME}`,
     description:
