@@ -32,8 +32,14 @@ export const STATIC_PAGE_ENTRIES: StaticPageEntry[] = [
   { path: "/search",        priority: "0.9", changefreq: "daily"  },
   { path: "/deal-checker",  priority: "0.8", changefreq: "weekly" },
   { path: "/buyer-guide",   priority: "0.8", changefreq: "weekly" },
+  { path: "/sell",          priority: "0.5", changefreq: "monthly" },
   { path: "/how-it-works",  priority: "0.7", changefreq: "monthly" },
   { path: "/disclosure",    priority: "0.3", changefreq: "yearly"  },
+
+  // Valuation pillar pages (added 2026-07-27 CGI: GSC shows 25+ valuation queries)
+  { path: "/golf-cart-values",           priority: "0.9", changefreq: "weekly" },
+  { path: "/used-golf-cart-value",       priority: "0.8", changefreq: "weekly" },
+  { path: "/golf-cart-value-estimator",  priority: "0.9", changefreq: "weekly" },
 
   // Brand hub + brand detail pages
   { path: "/brands",             priority: "0.8", changefreq: "monthly" },
@@ -46,6 +52,10 @@ export const STATIC_PAGE_ENTRIES: StaticPageEntry[] = [
   { path: "/brands/bintelli",    priority: "0.6", changefreq: "weekly"  },
   { path: "/brands/epic",        priority: "0.6", changefreq: "weekly"  },
   { path: "/brands/denago",      priority: "0.6", changefreq: "weekly"  },
+  { path: "/brands/dach-vehicles", priority: "0.6", changefreq: "weekly" },
+  { path: "/brands/sivo",        priority: "0.6", changefreq: "weekly"  },
+  { path: "/brands/teko-ev",     priority: "0.6", changefreq: "weekly"  },
+  { path: "/brands/verdi",       priority: "0.6", changefreq: "weekly"  },
 
   // Battery guide pages
   { path: "/golf-cart-batteries",                      priority: "0.8", changefreq: "monthly" },

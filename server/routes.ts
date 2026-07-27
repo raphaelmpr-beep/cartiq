@@ -221,7 +221,7 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       { path: "/search",       priority: "0.9", changefreq: "daily"   },
       { path: "/deal-checker", priority: "0.8", changefreq: "weekly"  },
       { path: "/buyer-guide",  priority: "0.8", changefreq: "weekly"  },
-      { path: "/sell-my-cart", priority: "0.5", changefreq: "monthly" },
+      { path: "/sell",         priority: "0.5", changefreq: "monthly" },
       { path: "/how-it-works", priority: "0.7", changefreq: "monthly" },
       { path: "/disclosure",   priority: "0.3", changefreq: "yearly"  },
       // City landing pages
@@ -237,6 +237,7 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       { path: "/golf-carts-for-sale/peachtree-city-ga",    priority: "0.8", changefreq: "daily" },
       { path: "/golf-carts-for-sale/atlanta-ga",           priority: "0.8", changefreq: "daily" },
       // Brand pages
+      { path: "/brands",           priority: "0.8", changefreq: "monthly" },
       { path: "/brands/ezgo",      priority: "0.8", changefreq: "weekly" },
       { path: "/brands/club-car",  priority: "0.8", changefreq: "weekly" },
       { path: "/brands/yamaha",    priority: "0.7", changefreq: "weekly" },
@@ -246,6 +247,14 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       { path: "/brands/bintelli",  priority: "0.6", changefreq: "weekly" },
       { path: "/brands/epic",      priority: "0.6", changefreq: "weekly" },
       { path: "/brands/denago",    priority: "0.6", changefreq: "weekly" },
+      { path: "/brands/dach-vehicles", priority: "0.6", changefreq: "weekly" },
+      { path: "/brands/sivo",      priority: "0.6", changefreq: "weekly" },
+      { path: "/brands/teko-ev",   priority: "0.6", changefreq: "weekly" },
+      { path: "/brands/verdi",     priority: "0.6", changefreq: "weekly" },
+      // Valuation pillar pages (added 2026-07-27 CGI: GSC shows 25+ valuation queries)
+      { path: "/golf-cart-values",           priority: "0.9", changefreq: "weekly" },
+      { path: "/used-golf-cart-value",       priority: "0.8", changefreq: "weekly" },
+      { path: "/golf-cart-value-estimator",  priority: "0.9", changefreq: "weekly" },
       // Battery guide pages
       { path: "/golf-cart-batteries",                      priority: "0.8", changefreq: "monthly" },
       { path: "/golf-cart-batteries/lithium-vs-lead-acid", priority: "0.8", changefreq: "monthly" },
