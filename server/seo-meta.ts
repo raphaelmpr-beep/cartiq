@@ -39,7 +39,10 @@ export interface RouteMeta {
 
 // ─── Static route map ─────────────────────────────────────────────────────────
 
-const STATIC_ROUTES: Record<string, { title: string; description: string }> = {
+const STATIC_ROUTES: Record<
+  string,
+  { title: string; description: string; noindex?: boolean }
+> = {
   "/": {
     title: DEFAULT_TITLE,
     description: DEFAULT_DESC,
@@ -297,6 +300,15 @@ const STATIC_ROUTES: Record<string, { title: string; description: string }> = {
     description:
       "GolfCartIQ pricing and affiliate disclosure. Understand how we earn and how it affects our recommendations.",
   },
+  // Personal saved-items / alerts page. Not for search engines — users only.
+  // GSC showed it ranking pos 70–98 for valuation queries because it fell back to
+  // homepage meta. Noindex to keep it out of the SERPs entirely.
+  "/garage": {
+    title: `My Garage | ${SITE_NAME}`,
+    description:
+      "Your saved golf cart listings, price-drop alerts, and personal watchlist on GolfCartIQ.",
+    noindex: true,
+  },
 };
 
 // ─── Schema.org JSON-LD builders ──────────────────────────────────────────────
@@ -362,7 +374,11 @@ export function getRouteMeta(pathname: string): RouteMeta {
   if (staticMatch) {
     const canonical = `${BASE_URL}${normalized}`;
     const jsonLd = buildJsonLd(normalized, staticMatch.title, staticMatch.description, canonical);
-    return buildMeta(staticMatch.title, staticMatch.description, canonical, jsonLd);
+    const meta = buildMeta(staticMatch.title, staticMatch.description, canonical, jsonLd);
+    if (staticMatch.noindex) {
+      meta.noindex = true;
+    }
+    return meta;
   }
 
   // 2. Dynamic: /listing/:slug
