@@ -23,6 +23,49 @@ import {
   type ListingData,
 } from './adapters.js';
 import { stealthFetchSitemapUrls } from './stealth-fetcher.js';
+import { sitemapHeaders } from './http-headers.js';
+
+/**
+ * Plain HTTP sitemap fetch — works in Lambda (no Playwright required).
+ * Uses rotating browser UAs via sitemapHeaders(). Falls back to sub-sitemaps
+ * if the root returns a sitemap index.
+ */
+async function httpFetchSitemapUrls(
+  sitemapUrl: string,
+  pattern: RegExp
+): Promise<{ success: boolean; urls: string[]; error?: string }> {
+  try {
+    const res = await fetch(sitemapUrl, {
+      headers: sitemapHeaders(sitemapUrl),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) return { success: false, urls: [], error: `HTTP ${res.status} ${res.statusText}` };
+    const xml = await res.text();
+    const allLocs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
+    if (!allLocs.length) return { success: false, urls: [], error: 'No <loc> entries found' };
+
+    // If this is a sitemap index, follow listing-related sub-sitemaps
+    if (xml.includes('<sitemap>') || xml.toLowerCase().includes('sitemap-index')) {
+      const subSitemaps = allLocs.filter(u => /listing|inventory|product|golf/i.test(u)).slice(0, 5);
+      const subUrls: string[] = [];
+      for (const sub of subSitemaps) {
+        try {
+          const sr = await fetch(sub, { headers: sitemapHeaders(sub), signal: AbortSignal.timeout(8000) });
+          if (!sr.ok) continue;
+          const sxml = await sr.text();
+          const subLocs = [...sxml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
+          subUrls.push(...subLocs.filter(u => pattern.test(u)));
+        } catch { continue; }
+      }
+      return { success: subUrls.length > 0, urls: subUrls, error: subUrls.length === 0 ? 'No listing URLs in sub-sitemaps' : undefined };
+    }
+
+    const listingUrls = allLocs.filter(u => pattern.test(u));
+    return { success: listingUrls.length > 0, urls: listingUrls, error: listingUrls.length === 0 ? 'No listing URLs matched pattern' : undefined };
+  } catch (err: any) {
+    return { success: false, urls: [], error: err?.message || String(err) };
+  }
+}
 
 const MAX_CONCURRENCY = 4;
 
@@ -317,14 +360,14 @@ export async function runBrowserSync(
   // is a plain HTTP fetch so it works in Lambda without Playwright installed.
   if (useUrlOnly) {
     try {
-      log(`[BrowserSync] urlOnly — stealth fetch: ${dealerCfg.sitemapUrl}`);
-      const stealthResult = await stealthFetchSitemapUrls(
+      log(`[BrowserSync] urlOnly — HTTP fetch: ${dealerCfg.sitemapUrl}`);
+      const httpResult = await httpFetchSitemapUrls(
         dealerCfg.sitemapUrl,
         dealerCfg.listingUrlPattern
       );
 
-      if (!stealthResult.success || stealthResult.urls.length === 0) {
-        const msg = `[${dealerSlug}] Stealth fetch returned 0 URLs: ${stealthResult.error ?? 'empty sitemap'}`;
+      if (!httpResult.success || httpResult.urls.length === 0) {
+        const msg = `[${dealerSlug}] HTTP fetch returned 0 URLs: ${httpResult.error ?? 'empty sitemap'}`;
         result.summary.push(msg);
         await supabase.from('dealers').update({
           last_discovery_status: 'no_new',
@@ -335,7 +378,7 @@ export async function runBrowserSync(
         return result;
       }
 
-      const rawUrls = limit > 0 ? stealthResult.urls.slice(0, limit) : stealthResult.urls;
+      const rawUrls = limit > 0 ? httpResult.urls.slice(0, limit) : httpResult.urls;
       log(`[BrowserSync] urlOnly stealth found ${rawUrls.length} listing URL(s)`);
 
       // Diff against known URLs
