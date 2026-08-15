@@ -380,8 +380,35 @@ const ADAPTER_OVERRIDES: Record<string, () => Promise<string[]>> = {
 const BOTERO_MULTI_ADAPTER = getBoteroLocationRecords;
 
 // Rich adapters return pre-parsed Dx1Unit[] rows (full metadata, no slug-parsing needed)
+/**
+ * Check if a base64-encoded DX1 Algolia restricted key has expired.
+ * Returns an ISO date string if expired, or null if still valid.
+ */
+function getDx1KeyExpiry(apiKeyBase64: string): Date | null {
+  try {
+    const decoded = Buffer.from(apiKeyBase64, 'base64').toString('utf-8');
+    const m = decoded.match(/validUntil=(\d+)/);
+    if (!m) return null;
+    const expiry = new Date(parseInt(m[1]) * 1000);
+    return expiry < new Date() ? expiry : null;
+  } catch {
+    return null;
+  }
+}
+
 const RICH_ADAPTER_OVERRIDES: Record<string, (dealer: DealerSourceRecord) => Promise<Dx1Unit[]>> = {
-  golf_rider: () => fetchDx1AlgoliaInventory(GOLF_RIDER_DX1),
+  golf_rider: () => {
+    const expiry = getDx1KeyExpiry(GOLF_RIDER_DX1.apiKey);
+    if (expiry) {
+      const dateStr = expiry.toISOString().slice(0, 10);
+      throw new Error(
+        `DX1 Algolia key expired on ${dateStr} — renewal required. ` +
+        `Visit golfrider.com in browser DevTools, find a request to ${GOLF_RIDER_DX1.appId}-dsn.algolia.net, ` +
+        `and copy the X-Algolia-API-Key header value into GOLF_RIDER_DX1.apiKey in pipeline-lambda.ts.`
+      );
+    }
+    return fetchDx1AlgoliaInventory(GOLF_RIDER_DX1);
+  },
 };
 
 
@@ -619,39 +646,43 @@ async function runDiscoverSitemap(
   // runBrowserSync() will throw — the catch below marks the dealer as
   // 'needs_browser' so the next Playwright-capable run picks it up.
   if (dealer.browser_required) {
-    const browserSyncDealers = ['jax-golf-carts-jacksonville'];
-    if (browserSyncDealers.includes(slug)) {
-      try {
-        const { runBrowserSync } = await import('./browser-sync.js');
-        const bsResult = await runBrowserSync({
-          dealer: slug,
-          limit,
-          dry_run,
-          verbose: true,
-        });
-        result.new_queued    += bsResult.new_queued;
-        result.already_known += bsResult.already_known;
-        result.processed     += bsResult.discovered;
-        if (bsResult.parse_errors > 0 || bsResult.db_errors > 0) result.errors++;
-        bsResult.summary.forEach(s => result.summary.push(s));
-        await writeDiscoveryStatus(
-          supabase, slug,
-          bsResult.new_queued > 0 ? 'ok' : 'no_new',
-          bsResult.summary[bsResult.summary.length - 1] || 'Browser sync complete'
-        );
-      } catch (e: any) {
-        // Playwright unavailable in Lambda — mark for next Playwright-capable run.
-        const isPlaywrightMissing = /playwright|chromium|browserType|Executable doesn/i.test(e?.message || '');
-        const msg = isPlaywrightMissing
-          ? `[${slug}] Playwright not available in this environment — will retry from weekly cron`
-          : `[${slug}] Browser sync error: ${e?.message || e}`;
-        result.errors++;
-        result.summary.push(msg);
-        await writeDiscoveryStatus(supabase, slug, isPlaywrightMissing ? 'needs_browser' : 'error', msg);
-      }
-      return;
-      }
+    // Route ALL browser_required dealers through browser-sync.ts.
+    // The urlOnly:true dealers use stealthFetchSitemapUrls (HTTP, no Playwright) so they
+    // run safely in Lambda. Full-parser dealers (e.g. JAX) use Playwright and are caught
+    // below if Playwright is unavailable. browser-sync.ts handles "not in registry" gracefully.
+    try {
+      const { runBrowserSync } = await import('./browser-sync.js');
+      const bsResult = await runBrowserSync({
+        dealer: slug,
+        limit,
+        dry_run,
+        verbose: true,
+      });
+      result.new_queued    += bsResult.new_queued;
+      result.already_known += bsResult.already_known;
+      result.processed     += bsResult.discovered;
+      if (bsResult.parse_errors > 0 || bsResult.db_errors > 0) result.errors++;
+      bsResult.summary.forEach(s => result.summary.push(s));
+      // If browser-sync reported "not found in registry" treat as not_configured
+      const notInRegistry = bsResult.summary.some(s => s.includes('Not found in BROWSER_SYNC_DEALERS'));
+      const status = notInRegistry ? 'not_configured' : (bsResult.new_queued > 0 ? 'ok' : 'no_new');
+      await writeDiscoveryStatus(
+        supabase, slug,
+        status,
+        bsResult.summary[bsResult.summary.length - 1] || 'Browser sync complete'
+      );
+    } catch (e: any) {
+      // Playwright unavailable in Lambda — mark for next Playwright-capable run.
+      const isPlaywrightMissing = /playwright|chromium|browserType|Executable doesn/i.test(e?.message || '');
+      const msg = isPlaywrightMissing
+        ? `[${slug}] Playwright not available in this environment — will retry from weekly cron`
+        : `[${slug}] Browser sync error: ${e?.message || e}`;
+      result.errors++;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, isPlaywrightMissing ? 'needs_browser' : 'error', msg);
     }
+    return;
+  }
 
   // ── Resolve listing URLs ──────────────────────────────────────────────────
   let sitemapUrls: string[] = [];
@@ -739,15 +770,36 @@ async function runDiscoverSitemap(
     // Only process the target location (filter by dealer_slug) when called for a specific dealer
     const targetSlug = dealer.slug; // e.g. 'botero-carts-jacksonville'
     const isGenericBotero = targetSlug === 'botero'; // if somehow called with adapter slug directly
-    const relevantRecords = isGenericBotero
+    let relevantRecords: BoteroRecord[] = isGenericBotero
       ? allRecords                                             // all locations
       : allRecords.filter(r => r.dealer_slug === targetSlug); // just this location
 
     if (!relevantRecords.length) {
-      const msg = `[${targetSlug}] No location-tagged URLs found for this dealer (${allRecords.length} total across all Botero locations)`;
-      result.summary.push(msg);
-      await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
-      return;
+      // Fallback: Botero sitemap URLs often have no city keyword in the slug, so the
+      // location matcher returns 0 for non-primary locations (Clearwater, Cumming, Melbourne).
+      // Look up city/state from the DB, then claim untagged URLs (not owned by another location).
+      const { data: dealerRow } = await supabase
+        .from('dealers')
+        .select('city,state')
+        .eq('slug', targetSlug)
+        .single();
+      const city  = dealerRow?.city  || 'Unknown';
+      const state = dealerRow?.state || 'FL';
+      // URLs already tagged to a DIFFERENT Botero location — don't reassign them
+      const taggedToOther = new Set(
+        allRecords
+          .filter(r => r.dealer_slug !== targetSlug && r.dealer_slug !== 'botero')
+          .map(r => r.url)
+      );
+      const untaggedUrls = allRecords.map(r => r.url).filter(u => !taggedToOther.has(u));
+      if (!untaggedUrls.length) {
+        const msg = `[${targetSlug}] No location-tagged or untagged URLs available (${allRecords.length} total, all tagged to other locations)`;
+        result.summary.push(msg);
+        await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
+        return;
+      }
+      relevantRecords = untaggedUrls.map(u => ({ url: u, dealer_slug: targetSlug, city, state }));
+      result.summary.push(`[${targetSlug}] 0 location-tagged URLs — using untagged pool (${relevantRecords.length} URLs) assigned to ${city}, ${state}`);
     }
 
     // Diff against all known URLs across ALL botero dealers (source_url is globally unique).
