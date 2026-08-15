@@ -44,7 +44,18 @@ const BOTERO_LOCATION_MAP: Array<{ keywords: string[]; dealer_slug: string; city
 interface BoteroRecord { url: string; dealer_slug: string; city: string; state: string; }
 
 /** Fetch all Botero sitemaps and return structured records with dealer_slug/city/state per URL */
+interface BoteroFetchResult {
+  records: BoteroRecord[];   // location-tagged records
+  rawUrlCount: number;        // total URLs fetched (including untagged)
+  untaggedUrls: string[];     // URLs with no city keyword match
+}
+
 async function getBoteroLocationRecords(): Promise<BoteroRecord[]> {
+  const { records } = await getBoteroFetchResult();
+  return records;
+}
+
+async function getBoteroFetchResult(): Promise<BoteroFetchResult> {
   const sitemaps = [
     'https://boterocarts.com/glc_listing-sitemap.xml',
     'https://boterocarts.com/glc_listing-sitemap2.xml',
@@ -62,15 +73,17 @@ async function getBoteroLocationRecords(): Promise<BoteroRecord[]> {
   }
 
   const records: BoteroRecord[] = [];
+  const untaggedUrls: string[] = [];
   for (const url of allUrls) {
     const lower = url.toLowerCase();
     const loc = BOTERO_LOCATION_MAP.find(l => l.keywords.some(kw => lower.includes(kw)));
     if (loc) {
       records.push({ url, dealer_slug: loc.dealer_slug, city: loc.city, state: loc.state });
+    } else {
+      untaggedUrls.push(url);
     }
-    // Skip URLs with no recognizable location (older slugs without city keyword)
   }
-  return records;
+  return { records, rawUrlCount: allUrls.length, untaggedUrls };
 }
 
 // Legacy flat-URL helper (kept for back-compat, not used in main path)
@@ -759,9 +772,12 @@ async function runDiscoverSitemap(
   } else if (adapterKey === 'botero') {
     // ── Botero multi-location adapter ───────────────────────────────────────
     // Each URL carries its own dealer_slug/city/state — queue per-location correctly.
-    const allRecords = await BOTERO_MULTI_ADAPTER();
-    if (!allRecords.length) {
-      const msg = `[botero] Sitemap returned 0 location-tagged URLs`;
+    // NOTE: Botero sitemap URLs use generic slugs (no city keyword), so location-tagged
+    // records are often 0 even when the sitemap has 1000+ URLs. getBoteroFetchResult()
+    // returns both tagged records AND the raw untagged pool so we can fall through.
+    const { records: allRecords, rawUrlCount, untaggedUrls: allUntaggedUrls } = await getBoteroFetchResult();
+    if (rawUrlCount === 0) {
+      const msg = `[botero] Sitemap fetch returned 0 URLs (fetch may have failed or been blocked)`;
       result.summary.push(msg);
       await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
       return;
@@ -776,8 +792,8 @@ async function runDiscoverSitemap(
 
     if (!relevantRecords.length) {
       // Fallback: Botero sitemap URLs often have no city keyword in the slug, so the
-      // location matcher returns 0 for non-primary locations (Clearwater, Cumming, Melbourne).
-      // Look up city/state from the DB, then claim untagged URLs (not owned by another location).
+      // location matcher returns 0 for all locations. Look up city/state from the DB,
+      // then claim untagged URLs (not owned by another location).
       const { data: dealerRow } = await supabase
         .from('dealers')
         .select('city,state')
@@ -791,15 +807,16 @@ async function runDiscoverSitemap(
           .filter(r => r.dealer_slug !== targetSlug && r.dealer_slug !== 'botero')
           .map(r => r.url)
       );
-      const untaggedUrls = allRecords.map(r => r.url).filter(u => !taggedToOther.has(u));
-      if (!untaggedUrls.length) {
-        const msg = `[${targetSlug}] No location-tagged or untagged URLs available (${allRecords.length} total, all tagged to other locations)`;
+      // Use the untagged pool (URLs with no city keyword match at all)
+      const candidateUrls = allUntaggedUrls.filter(u => !taggedToOther.has(u));
+      if (!candidateUrls.length) {
+        const msg = `[${targetSlug}] No location-tagged or untagged URLs available (${rawUrlCount} total fetched, all tagged to other locations)`;
         result.summary.push(msg);
         await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
         return;
       }
-      relevantRecords = untaggedUrls.map(u => ({ url: u, dealer_slug: targetSlug, city, state }));
-      result.summary.push(`[${targetSlug}] 0 location-tagged URLs — using untagged pool (${relevantRecords.length} URLs) assigned to ${city}, ${state}`);
+      relevantRecords = candidateUrls.map(u => ({ url: u, dealer_slug: targetSlug, city, state }));
+      result.summary.push(`[${targetSlug}] 0 location-tagged URLs — using untagged pool (${relevantRecords.length}/${rawUrlCount} URLs) assigned to ${city}, ${state}`);
     }
 
     // Diff against all known URLs across ALL botero dealers (source_url is globally unique).
