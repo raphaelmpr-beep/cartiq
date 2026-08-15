@@ -16,7 +16,10 @@
  * MAX_PARALLEL_BROWSER_TASKS = 4 (enforced via concurrency limiter)
  */
 
-import { chromium, type BrowserContext } from 'playwright';
+// playwright is loaded lazily only when the full-browser path is needed.
+// DO NOT add a static import for playwright here — it causes the entire module
+// to require('playwright') at init time, which crashes Vercel Lambda (not installed).
+import type { BrowserContext } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 import {
   parseJaxListing,
@@ -437,6 +440,9 @@ export async function runBrowserSync(
   }
 
   // ── Full Playwright path (page parser required — e.g. JAX) ─────────────────
+  // Dynamic import keeps playwright out of the module's top-level require() calls
+  // so urlOnly dealers can run in Lambda without Playwright installed.
+  const { chromium } = await import('playwright');
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     userAgent:
@@ -535,7 +541,8 @@ export async function runBrowserSync(
     log(`[BrowserSync] Parsing ${urlsToProcess.length} listing pages (max ${MAX_CONCURRENCY} parallel)...`);
 
     // Relaunch browser for parsing (stealth-fetcher closed its own instance)
-    const parseBrowser = await chromium.launch({ headless: true });
+    const { chromium: chromiumParser } = await import('playwright');
+    const parseBrowser = await chromiumParser.launch({ headless: true });
     const parseContext = await parseBrowser.newContext({
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
