@@ -312,7 +312,88 @@ export async function runBrowserSync(
 
   log(`[BrowserSync] Starting ${dealerCfg.name}${limit ? ` (limit: ${limit})` : ''}`);
 
-  // ── Launch browser ──────────────────────────────────────────────────────────
+  // ── urlOnly path: HTTP stealth fetch only, no Playwright needed ─────────────
+  // These dealers just need URL discovery (no page parsing). stealthFetchSitemapUrls
+  // is a plain HTTP fetch so it works in Lambda without Playwright installed.
+  if (useUrlOnly) {
+    try {
+      log(`[BrowserSync] urlOnly — stealth fetch: ${dealerCfg.sitemapUrl}`);
+      const stealthResult = await stealthFetchSitemapUrls(
+        dealerCfg.sitemapUrl,
+        dealerCfg.listingUrlPattern
+      );
+
+      if (!stealthResult.success || stealthResult.urls.length === 0) {
+        const msg = `[${dealerSlug}] Stealth fetch returned 0 URLs: ${stealthResult.error ?? 'empty sitemap'}`;
+        result.summary.push(msg);
+        await supabase.from('dealers').update({
+          last_discovery_status: 'no_new',
+          last_discovery_message: msg,
+          last_discovery_at: new Date().toISOString(),
+        }).eq('slug', dealerSlug);
+        result.duration_ms = Date.now() - start;
+        return result;
+      }
+
+      const rawUrls = limit > 0 ? stealthResult.urls.slice(0, limit) : stealthResult.urls;
+      log(`[BrowserSync] urlOnly stealth found ${rawUrls.length} listing URL(s)`);
+
+      // Diff against known URLs
+      const [existingRaw, pendingRaw] = await Promise.all([
+        supabase.from('listings').select('source_listing_url').eq('sync_source', dealerSlug).not('source_listing_url', 'is', null),
+        supabase.from('pending_imports').select('source_url').eq('dealer_slug', dealerSlug),
+      ]);
+      const knownUrls = new Set<string>([
+        ...(existingRaw.data || []).map((r: any) => r.source_listing_url).filter(Boolean),
+        ...(pendingRaw.data  || []).map((r: any) => r.source_url).filter(Boolean),
+      ]);
+
+      const newUrls = rawUrls.filter(u => !knownUrls.has(u));
+      result.already_known = rawUrls.length - newUrls.length;
+      result.discovered    = rawUrls.length;
+      result.summary.push(`[${dealerSlug}] ${rawUrls.length} in sitemap | ${result.already_known} known | ${newUrls.length} new`);
+
+      if (!dry_run && newUrls.length > 0) {
+        const rows = newUrls.map(u => {
+          const meta = parseSlugForUrl(u);
+          const rawTitle = [meta.year, meta.make, meta.model].filter(Boolean).join(' ') || u.split('/').pop() || u;
+          return {
+            dealer_slug:    dealerSlug,
+            source_url:     u,
+            raw_title:      rawTitle,
+            year:           meta.year,
+            make:           meta.make,
+            model:          meta.model,
+            condition:      meta.condition,
+            location_city:  dealerCfg.locationCity,
+            location_state: dealerCfg.locationState,
+            status: 'pending' as const,
+          };
+        });
+        const { error: dbErr } = await supabase.from('pending_imports').upsert(rows, { onConflict: 'source_url', ignoreDuplicates: true });
+        if (dbErr) {
+          result.db_errors++;
+          result.summary.push(`[${dealerSlug}] DB error: ${dbErr.message}`);
+        } else {
+          result.new_queued = newUrls.length;
+          result.summary.push(`[${dealerSlug}] Queued ${newUrls.length} new listings`);
+        }
+      } else if (dry_run) {
+        result.new_queued = newUrls.length;
+        result.summary.push(`[${dealerSlug}] [DRY RUN] Would queue ${newUrls.length} listings`);
+      }
+
+      result.duration_ms = Date.now() - start;
+      return result;
+    } catch (err: any) {
+      result.parse_errors++;
+      result.summary.push(`[${dealerSlug}] urlOnly sync error: ${err?.message || err}`);
+      result.duration_ms = Date.now() - start;
+      return result;
+    }
+  }
+
+  // ── Full Playwright path (page parser required — e.g. JAX) ─────────────────
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     userAgent:
