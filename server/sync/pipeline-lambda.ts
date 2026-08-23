@@ -263,13 +263,39 @@ async function fetchDx1AlgoliaInventory(cfg: Dx1AlgoliaConfig): Promise<Dx1Unit[
   return units;
 }
 
-// Golf Rider DX1 config — extracted from their inventory page HTML
-const GOLF_RIDER_DX1: Dx1AlgoliaConfig = {
+// Golf Rider DX1 config — appId, indexName, and baseUrl are stable.
+// apiKey is a short-lived signed Algolia restricted key (~1h TTL) embedded in
+// the inventory page HTML. fetchDx1LiveApiKey() scrapes it fresh at sync time.
+const GOLF_RIDER_DX1: Omit<Dx1AlgoliaConfig, 'apiKey'> & { apiKey: string } = {
   appId:     'RBG3H22Y5V',
-  apiKey:    'MTE0ODVhZDAzNjQ2Y2I0Mzg5MGUzMzQ4Yjg3NmQ5MTI2ZmQ0Y2YwNjVkNDEzYmRkMDhjZjdjZTE3YzdlZWUwZGF0dHJpYnV0ZXNUb1JldHJpZXZlPSomYXR0cmlidXRlc1RvSGlnaGxpZ2h0PU1hbnVmYWN0dXJlcixQcm9kdWN0TmFtZSxQcm9kdWN0VHlwZSZmYWNldEZpbHRlcnM9JTVCJTVCJTIyT3JnYW5pemF0aW9uSWQlM0E2MGU4MzUyYi01MWU5LTRhNzQtYmE0Yi0xYzc3ZjFkY2MzZDIlMjIlNUQlMkMlNUIlMjJTaXRlR3VpZExpc3RzJTNBMTk3ZGI4ZjUtMGVhMy00OGQxLTgxZGEtMTA4N2I4ZGUzNTY3JTIyJTVEJTVEJmFuYWx5dGljcz10cnVlJmFuYWx5dGljc1RhZ3M9R29sZitSaWRlciUyQytJbmMuJm51bWVyaWNGaWx0ZXJzPSU1QiU1QiUyMkhhc0RhdGVTb2xkJTNEMCUyMiUyQyUyMlNvbGRVbml0c0V4cGlyZURhdGUlM0UlM0QxNzgyMzQ1NjAwJTIyJTVEJTVEJnJlc3RyaWN0SW5kaWNlcz1wcm9kX1dlYlNlbGxhYmxlLHByb2RfV2ViU2VsbGFibGVfUHJpY2VfQXNjLHByb2RfV2ViU2VsbGFibGVfUHJpY2VfRGVzYyxwcm9kX1dlYlNlbGxhYmxlX1llYXJfQXNjLHByb2RfV2ViU2VsbGFibGVfWWVhcl9EZXNjLHByb2RfV2ViU2VsbGFibGVfQWdlX0FzYyxwcm9kX1dlYlNlbGxhYmxlX0FnZV9EZXNjJnZhbGlkVW50aWw9MTc4MjM5MjAzMA==',
+  apiKey:    '', // populated at runtime by fetchDx1LiveApiKey()
   indexName: 'prod_WebSellable',
   baseUrl:   'https://www.golfrider.com',
 };
+
+/**
+ * Fetch a live Algolia restricted key from Golf Rider's inventory page.
+ * DX1 Showroom embeds the signed key directly in the HTML as JSON.
+ * The key has a ~1h validUntil so we always fetch fresh instead of hardcoding.
+ */
+async function fetchDx1LiveApiKey(baseUrl: string): Promise<string> {
+  const inventoryUrl = `${baseUrl}/Inventory/All-Inventory-In-Stock`;
+  const res = await fetch(inventoryUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) throw new Error(`fetchDx1LiveApiKey: HTTP ${res.status} from ${inventoryUrl}`);
+  const html = await res.text();
+  // DX1 Showroom embeds: "apiKey":"<base64-encoded-restricted-key>"
+  const m = html.match(/"apiKey":"([A-Za-z0-9+/=]{80,})"/);
+  if (!m) throw new Error('fetchDx1LiveApiKey: apiKey not found in Golf Rider inventory page HTML');
+  return m[1];
+}
 
 // ─── Main sync entry point (Lambda-safe) ─────────────────────────────────────
 
@@ -410,17 +436,15 @@ function getDx1KeyExpiry(apiKeyBase64: string): Date | null {
 }
 
 const RICH_ADAPTER_OVERRIDES: Record<string, (dealer: DealerSourceRecord) => Promise<Dx1Unit[]>> = {
-  golf_rider: () => {
-    const expiry = getDx1KeyExpiry(GOLF_RIDER_DX1.apiKey);
-    if (expiry) {
-      const dateStr = expiry.toISOString().slice(0, 10);
-      throw new Error(
-        `DX1 Algolia key expired on ${dateStr} — renewal required. ` +
-        `Visit golfrider.com in browser DevTools, find a request to ${GOLF_RIDER_DX1.appId}-dsn.algolia.net, ` +
-        `and copy the X-Algolia-API-Key header value into GOLF_RIDER_DX1.apiKey in pipeline-lambda.ts.`
-      );
-    }
-    return fetchDx1AlgoliaInventory(GOLF_RIDER_DX1);
+  golf_rider: async () => {
+    // Always fetch a fresh key — the signed key has a ~1h TTL and is embedded
+    // in the inventory page HTML, so we scrape it at sync time instead of
+    // hardcoding it and dealing with periodic manual renewals.
+    console.log('[golf_rider] Fetching live DX1 Algolia key from Golf Rider inventory page...');
+    const liveKey = await fetchDx1LiveApiKey(GOLF_RIDER_DX1.baseUrl);
+    const cfg: Dx1AlgoliaConfig = { ...GOLF_RIDER_DX1, apiKey: liveKey };
+    console.log(`[golf_rider] Got live key (validUntil embedded), querying Algolia index ${cfg.indexName}`);
+    return fetchDx1AlgoliaInventory(cfg);
   },
 };
 
