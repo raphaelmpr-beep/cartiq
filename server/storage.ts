@@ -38,6 +38,7 @@ export interface IStorage {
   getListings(filters?: Record<string, unknown>): Promise<Listing[]>;
   getHotDeals(limit?: number): Promise<Listing[]>;
   getListingById(id: number): Promise<Listing | undefined>;
+  getListingsByIds(ids: number[]): Promise<Listing[]>;
   getListingBySlug(slug: string): Promise<Listing | undefined>;
   createListing(data: InsertListing): Promise<Listing>;
   updateListing(id: number, data: Partial<InsertListing>): Promise<Listing | undefined>;
@@ -204,6 +205,12 @@ class SupabaseStorage implements IStorage {
   async getListingById(id: number): Promise<Listing | undefined> {
     const { data } = await db().from("listings").select("*").eq("id", id).maybeSingle();
     return (data as Listing) ?? undefined;
+  }
+
+  async getListingsByIds(ids: number[]): Promise<Listing[]> {
+    if (ids.length === 0) return [];
+    const { data } = await db().from("listings").select("*").in("id", ids);
+    return (data ?? []) as Listing[];
   }
 
   async getListingBySlug(slug: string): Promise<Listing | undefined> {

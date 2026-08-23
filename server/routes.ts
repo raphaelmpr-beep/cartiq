@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { timingSafeEqual } from "node:crypto";
 import { storage } from "./storage";
 import { calculateGolfCartWiseValue, enrichListing } from "./pricing";
 import { parseCsv, csvRowToListing } from "./csvParser";
@@ -348,7 +349,13 @@ ${pageUrls.join("\n")}
   // ─── Auth middleware ─────────────────────────────────────────────────────────
   function requireAdmin(req: any, res: any, next: any) {
     const token = req.headers["x-admin-token"];
-    if (token === ADMIN_PASSWORD) return next();
+    const pw = ADMIN_PASSWORD!; // guarded by boot-time check above
+    if (
+      token &&
+      typeof token === "string" &&
+      token.length === pw.length &&
+      timingSafeEqual(Buffer.from(token), Buffer.from(pw))
+    ) return next();
     return res.status(401).json({ error: "Unauthorized" });
   }
 
@@ -678,12 +685,17 @@ ${pageUrls.join("\n")}
     try {
       const { eventType, listingId, dealerId, city, state, brand, isFeatured = false, position, sessionId } = req.body as Record<string, any>;
       if (!["impression", "click"].includes(eventType) || !listingId) return;
+      // Truncate free-form strings to bounded lengths before writing to DB
+      const safeCity      = typeof city      === "string" ? city.slice(0, 50)      : null;
+      const safeState     = typeof state     === "string" ? state.slice(0, 2)      : null;
+      const safeBrand     = typeof brand     === "string" ? brand.slice(0, 80)     : null;
+      const safeSessionId = typeof sessionId === "string" ? sessionId.slice(0, 128): null;
       const { createClient } = await import("@supabase/supabase-js");
       const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
       await sb.from("homepage_events").insert({
         event_type: eventType, listing_id: listingId, dealer_id: dealerId ?? null,
-        city: city ?? null, state: state ?? null, brand: brand ?? null,
-        is_featured: Boolean(isFeatured), position: position ?? null, session_id: sessionId ?? null,
+        city: safeCity, state: safeState, brand: safeBrand,
+        is_featured: Boolean(isFeatured), position: position ?? null, session_id: safeSessionId,
       });
     } catch (_) { /* silent — telemetry never crashes the app */ }
   });
@@ -1188,12 +1200,16 @@ ${pageUrls.join("\n")}
       const { email } = req.query as { email: string };
       if (!email) return res.status(400).json({ error: "email is required" });
       const watches = await storage.getWatchesByEmail(email);
-      const enriched = await Promise.all(watches.map(async (w) => {
-        const listing = await storage.getListingById(w.listing_id);
+      // Batch-fetch all listings in one query instead of N individual getListingById calls
+      const listingIds = watches.map(w => w.listing_id).filter((id): id is number => id != null);
+      const listingsArr = await storage.getListingsByIds(listingIds);
+      const listingMap = new Map(listingsArr.map(l => [l.id, l]));
+      const enriched = watches.map((w) => {
+        const listing = listingMap.get(w.listing_id);
         const normalized = norm(w as any);
         normalized.listing = listing ? norm(suppressDeliveryIfUnavailable(listing as any)) : null;
         return normalized;
-      }));
+      });
       res.json(enriched);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1217,6 +1233,11 @@ ${pageUrls.join("\n")}
   app.post("/api/watches/:id/dismiss", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      const email = (req.query.email as string | undefined) || (req.body?.email as string | undefined);
+      if (!email) return res.status(400).json({ error: "email is required" });
+      const watch = await storage.getWatchById(id);
+      if (!watch) return res.status(404).json({ error: "Watch not found" });
+      if (watch.email !== email.toLowerCase().trim()) return res.status(403).json({ error: "Unauthorized" });
       await storage.dismissWatch(id);
       res.json({ success: true });
     } catch (e: any) {
@@ -1265,12 +1286,16 @@ ${pageUrls.join("\n")}
       const { email } = req.query as { email: string };
       if (!email) return res.status(400).json({ error: "email is required" });
       const saves = await storage.getSavedByEmail(email);
-      const enriched = await Promise.all(saves.map(async (s) => {
-        const listing = await storage.getListingById(s.listing_id);
+      // Batch-fetch all listings in one query instead of N individual getListingById calls
+      const listingIds = saves.map(s => s.listing_id).filter((id): id is number => id != null);
+      const listingsArr = await storage.getListingsByIds(listingIds);
+      const listingMap = new Map(listingsArr.map(l => [l.id, l]));
+      const enriched = saves.map((s) => {
+        const listing = listingMap.get(s.listing_id);
         const normalized = norm(s as any);
         normalized.listing = listing ? norm(suppressDeliveryIfUnavailable(listing as any)) : null;
         return normalized;
-      }));
+      });
       res.json(enriched);
     } catch (e: any) {
       res.status(500).json({ error: e.message });

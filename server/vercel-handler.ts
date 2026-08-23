@@ -32,6 +32,27 @@ const dealCheckLimiter = rateLimit({
 });
 app.use("/api/deal-checks", dealCheckLimiter);
 
+// Rate limiting — homepage event tracking: 60 events per 15 min per IP
+const trackLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many tracking requests." },
+});
+app.use("/api/track", trackLimiter);
+
+// Rate limiting — saves/watches reads: 30 requests per 15 min per IP
+const userDataLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests. Please try again shortly." },
+});
+app.use("/api/saves", userDataLimiter);
+app.use("/api/watches", userDataLimiter);
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;

@@ -701,8 +701,20 @@ async function runDiscoverSitemap(
   let sitemapUrls: string[] = [];
 
   if (adapterKey && RICH_ADAPTER_OVERRIDES[adapterKey]) {
-    // Rich adapter — returns fully structured rows (no slug-parsing needed)
-    const units = await RICH_ADAPTER_OVERRIDES[adapterKey](dealer);
+    // Rich adapter — returns fully structured rows (no slug-parsing needed).
+    // Wrap in try/catch so a single dealer failure (e.g. expired API key)
+    // does NOT abort the whole dealer=all loop and cause a 500 response.
+    let units: Dx1Unit[];
+    try {
+      units = await RICH_ADAPTER_OVERRIDES[adapterKey](dealer);
+    } catch (e: any) {
+      const msg = `[${slug}] Rich adapter error: ${e?.message || e}`;
+      result.errors++;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, 'error', msg);
+      return;
+    }
+
     if (!units.length) {
       const msg = `[${slug}] Rich adapter returned 0 units`;
       result.summary.push(msg);
