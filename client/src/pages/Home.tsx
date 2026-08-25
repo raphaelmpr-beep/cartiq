@@ -162,6 +162,7 @@ export default function Home() {
                   className="w-full sm:w-auto"
                 >
                   <Button
+                    variant="ghost"
                     className="gap-2 w-full sm:w-auto bg-[#01696F] hover:bg-[#0C4E54] text-white border-0 shadow-sm"
                     data-testid="hero-value-btn"
                     onClick={() => {
