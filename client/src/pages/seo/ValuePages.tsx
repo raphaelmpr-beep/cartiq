@@ -1011,7 +1011,7 @@ export function GolfCartValueEstimatorPage() {
             <Button
               type="button"
               size="lg"
-              onClick={() => hashNav(`/search?brand=${encodeURIComponent(brand)}`)}
+              onClick={() => hashNav(`/search?brands=${encodeURIComponent(brand)}`)}
               className="gap-2"
             >
               See similar carts near me <ArrowRight className="h-4 w-4" />
