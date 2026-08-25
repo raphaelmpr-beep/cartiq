@@ -154,19 +154,24 @@ export default function Home() {
                   <Search className="h-4 w-4" /> Search Carts
                 </Button>
               </form>
-              <Link
-                href="/golf-cart-value-estimator"
-                title="What's my golf cart worth? Free value estimator"
-                aria-label="What's my golf cart worth? Free value estimator"
-              >
-                <Button
-                  variant="outline"
-                  className="gap-2 border-green-600 text-green-700 hover:bg-green-50 w-full sm:w-auto"
-                  data-testid="hero-value-btn"
+              <div className="flex flex-col items-start sm:items-center gap-0.5">
+                <Link
+                  href="/golf-cart-value-estimator"
+                  title="What's my golf cart worth? Free smart estimator using live listings"
+                  aria-label="What's my golf cart worth? Free smart estimator using live listings"
+                  className="w-full sm:w-auto"
                 >
-                  <ClipboardCheck className="h-4 w-4" /> What's my cart worth?
-                </Button>
-              </Link>
+                  <Button
+                    className="gap-2 w-full sm:w-auto bg-[#01696F] hover:bg-[#0C4E54] text-white border-0 shadow-sm"
+                    data-testid="hero-value-btn"
+                  >
+                    <ClipboardCheck className="h-4 w-4" /> What's my cart worth?
+                  </Button>
+                </Link>
+                <p className="text-[10px] text-muted-foreground pl-0.5">
+                  Smart estimator · gauged from live dealer listings
+                </p>
+              </div>
             </div>
           </div>
         </div>
