@@ -91,12 +91,14 @@ async function enrichListingWithComps(data: Record<string, any>, excludeId?: num
   const condition = data.condition ?? "new";
   let comps: any[] = [];
   let brandComps: any[] = [];
+  const seating   = data.seating   ?? null;
+  const powerType = data.power_type ?? null;
   if (brand && model) {
-    comps = await storage.getCompsForListing(brand, model, year, condition, excludeId);
+    comps = await storage.getCompsForListing(brand, model, year, condition, excludeId, seating, powerType);
   }
   // Brand-only fallback when exact model returns no comps
   if (comps.length === 0 && brand) {
-    brandComps = await storage.getBrandCompsForListing(brand, year, condition, excludeId);
+    brandComps = await storage.getBrandCompsForListing(brand, year, condition, excludeId, seating, powerType);
   }
   const pricing = enrichListing(data, comps, brandComps);
   return { ...data, ...pricing };
@@ -1357,11 +1359,17 @@ ${pageUrls.join("\n")}
             const model     = listing.model || "";
             const year      = listing.year  || new Date().getFullYear();
             const condition = listing.condition || "new";
-            const key: CompKey = `${brand}||${model}||${year}||${condition}`;
+            const seating   = listing.seating   ?? null;
+            const powerType = listing.power_type ?? null;
+            // Cache key must include seating bucket + power type to avoid mixing
+            // 2-seat and 4-seat comps, or gas and electric comps
+            const seatBucket = seating == null ? "any" : seating <= 2 ? "2" : seating <= 4 ? "4" : "6+";
+            const powerKey   = (powerType && powerType !== "unknown") ? powerType : "any";
+            const key: CompKey = `${brand}||${model}||${year}||${condition}||${seatBucket}||${powerKey}`;
 
             if (!compCache.has(key)) {
               const comps = brand && model
-                ? await storage.getCompsForListing(brand, model, year, condition, listing.id)
+                ? await storage.getCompsForListing(brand, model, year, condition, listing.id, seating, powerType)
                 : [];
               compCache.set(key, comps);
             }
@@ -1371,9 +1379,9 @@ ${pageUrls.join("\n")}
             // Brand-only fallback: when exact model has 0 comps, try brand-level
             let brandComps: any[] = [];
             if (comps.length === 0 && brand) {
-              const brandKey = `${brand}||${year}||${condition}`;
+              const brandKey = `${brand}||${year}||${condition}||${seatBucket}||${powerKey}`;
               if (!brandCompCache.has(brandKey)) {
-                brandComps = await storage.getBrandCompsForListing(brand, year, condition, listing.id);
+                brandComps = await storage.getBrandCompsForListing(brand, year, condition, listing.id, seating, powerType);
                 brandCompCache.set(brandKey, brandComps);
               } else {
                 brandComps = brandCompCache.get(brandKey)!;
