@@ -19,6 +19,16 @@ import type { Listing } from "@/lib/types";
 const SUPA = "https://aagwrcdvhuuzwrglamrt.supabase.co";
 const KEY  = "sb_publishable_AMYcEYmVFC7zSGT_c1GTaw_IlWrtbyU";
 
+// Supabase returns snake_case; ListingCard expects camelCase.
+function normalizeListing(r: any): Listing {
+  const out: any = {};
+  for (const key of Object.keys(r)) {
+    const camel = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    out[camel] = r[key];
+  }
+  return out as Listing;
+}
+
 async function fetchBrandListings(dbBrand: string): Promise<Listing[]> {
   const params = new URLSearchParams({
     brand:          `eq.${dbBrand}`,
@@ -32,7 +42,8 @@ async function fetchBrandListings(dbBrand: string): Promise<Listing[]> {
     headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
   });
   if (!res.ok) return [];
-  return res.json();
+  const rows = await res.json();
+  return rows.map(normalizeListing);
 }
 
 // Badge color map
