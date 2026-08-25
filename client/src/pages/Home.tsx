@@ -164,6 +164,15 @@ export default function Home() {
                   <Button
                     className="gap-2 w-full sm:w-auto bg-[#01696F] hover:bg-[#0C4E54] text-white border-0 shadow-sm"
                     data-testid="hero-value-btn"
+                    onClick={() => {
+                      if (typeof window !== 'undefined' && typeof (window as any).gtag === 'function') {
+                        (window as any).gtag('event', 'cta_click', {
+                          event_category: 'engagement',
+                          event_label: 'hero_valuation_cta',
+                          page_location: window.location.href,
+                        });
+                      }
+                    }}
                   >
                     <ClipboardCheck className="h-4 w-4" /> What's my cart worth?
                   </Button>
