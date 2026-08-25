@@ -107,7 +107,7 @@ const BRAND_TIERS: Record<string, { base: number; tier: string }> = {
   "icon":       { base: 13400, tier: "standard" },
   "cushman":    { base: 12600, tier: "standard" },
   "advanced ev":{ base: 11000, tier: "standard" },
-  "evolution":  { base: 11000, tier: "standard" },
+  "evolution":  { base: 16500, tier: "standard" },
   "sierra":     { base: 12000, tier: "standard" }, // LSV/street-legal focus
   "lion":       { base: 11000, tier: "standard" },
   // Value — newer or emerging brands
@@ -118,7 +118,7 @@ const BRAND_TIERS: Record<string, { base: number; tier: string }> = {
   "verdi":      { base: 10000, tier: "value" },
   "amped":      { base: 10000, tier: "value" },
   "honor":      { base: 10000, tier: "value" },
-  "gem":        { base: 10000, tier: "value" },
+  "gem":        { base: 14500, tier: "value" },
   "royal ev":   { base: 9500,  tier: "value" },
   "blue cell":  { base: 9500,  tier: "value" },
   "tara":       { base: 9500,  tier: "value" },
@@ -187,7 +187,7 @@ function featureAdjustments(input: PricingInput): number {
   // gas: no adjustment
 
   const seating = input.seating || 4;
-  if (seating >= 6) adj += 1500;
+  if (seating >= 6) adj += 3500;
   else if (seating <= 2) adj -= 500;
 
   if (input.lifted === true || input.lifted === "yes") adj += 600;
@@ -221,11 +221,13 @@ export function computeIMV(input: PricingInput, comps: CompListing[], brandComps
   }
 
   // ── Tier 2: 1–2 comps — use comp average + formula blend ─────────────────
+  // IMPORTANT: formula blend here uses a condition-neutral formula so we don't
+  // double-penalise used carts (comps already reflect used pricing).
   if (validComps.length >= 1) {
     const compAvg = validComps.reduce((s, c) => s + c.asking_price, 0) / validComps.length;
-    const formulaIMV = computeFormulaIMV(input);
-    // 60% comp / 40% formula when few comps
-    const imv = Math.round(compAvg * 0.60 + formulaIMV * 0.40);
+    const formulaIMV = computeFormulaIMV(input, /* ignoreCondition */ true);
+    // 70% comp / 30% formula when 1–2 comps (increased comp weight vs before)
+    const imv = Math.round(compAvg * 0.70 + formulaIMV * 0.30);
     return { imv, priceConfidence: "medium", compCount: validComps.length, compTier: 2 };
   }
 
@@ -248,8 +250,8 @@ export function computeIMV(input: PricingInput, comps: CompListing[], brandComps
 
   if (validBrandComps.length >= 1) {
     const compAvg = validBrandComps.reduce((s, c) => s + c.asking_price, 0) / validBrandComps.length;
-    const formulaIMV = computeFormulaIMV(input);
-    const imv = Math.round(compAvg * 0.50 + formulaIMV * 0.50);
+    const formulaIMV = computeFormulaIMV(input, /* ignoreCondition */ true);
+    const imv = Math.round(compAvg * 0.60 + formulaIMV * 0.40);
     return { imv, priceConfidence: "medium", compCount: validBrandComps.length, compTier: 2 };
   }
 
@@ -258,10 +260,11 @@ export function computeIMV(input: PricingInput, comps: CompListing[], brandComps
   return { imv, priceConfidence: "low", compCount: 0, compTier: imv > 0 ? 3 : 4 };
 }
 
-function computeFormulaIMV(input: PricingInput): number {
+function computeFormulaIMV(input: PricingInput, ignoreCondition = false): number {
   const base      = getBrandBase(input.brand);
   const yearMult  = getYearMult(input.year);
-  const condMult  = getConditionMult(input.condition);
+  // ignoreCondition=true when blending with comps that already reflect condition
+  const condMult  = ignoreCondition ? 1.0 : getConditionMult(input.condition);
   const adj       = featureAdjustments(input);
 
   // Dealer new-cart premium: dealers price ~3% above open-market
