@@ -286,6 +286,11 @@ export default function Search() {
     const params = new URLSearchParams(searchStr);
     const init: ClientFilters = {};
     params.forEach((v, k) => { (init as any)[k] = v; });
+    // Normalize legacy ?brand= (singular) to brands (plural)
+    if ((init as any).brand && !init.brands) {
+      init.brands = (init as any).brand;
+      delete (init as any).brand;
+    }
 
     // Auto-fill zip from saved user location if URL doesn't already specify one
     if (!init.zip) {

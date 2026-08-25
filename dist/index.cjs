@@ -136,7 +136,7 @@ return fn.apply(this, arguments)
             y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
         })(window, document, "clarity", "script", "xp6wqg9cpg");
     </script>
-    <script type="module" crossorigin src="/assets/index-BSH0NzZG.js"></script>
+    <script type="module" crossorigin src="/assets/index-CMI6XkYb.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-D31NzVSW.css">
   </head>
   <body>

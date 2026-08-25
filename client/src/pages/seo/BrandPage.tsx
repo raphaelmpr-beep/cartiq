@@ -120,7 +120,8 @@ export default function BrandPage() {
     );
   }
 
-  const searchHref = `/search?brand=${encodeURIComponent(brand.dbBrand)}`;
+  // Use 'brands' (plural) — matches the Search page's ClientFilters key
+  const searchHref = `/search?brands=${encodeURIComponent(brand.dbBrand)}`;
 
   return (
     <div className="min-h-screen bg-background">
