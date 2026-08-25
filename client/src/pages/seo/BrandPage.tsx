@@ -106,10 +106,74 @@ export default function BrandPage() {
 
   useEffect(() => {
     if (!brand) return;
+    const brandUrl = `https://www.golfcartiq.com/brands/${brand.slug}`;
+
+    // Build FAQPage schema from buyer checklist + confidence notes
+    const faqEntries = [
+      ...brand.buyerConfidenceNotes.map((note, i) => ({
+        "@type": "Question",
+        "name": i === 0
+          ? `Is ${brand.name} a reputable golf cart brand?`
+          : i === 1
+          ? `What should I verify before buying a ${brand.name} golf cart?`
+          : i === 2
+          ? `Where are ${brand.name} golf carts made?`
+          : `What are the pros and cons of ${brand.name} golf carts?`,
+        "acceptedAnswer": { "@type": "Answer", "text": note },
+      })),
+      {
+        "@type": "Question",
+        "name": `What is the price range for ${brand.name} golf carts?`,
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": `${brand.name} golf carts typically range from ${brand.snapshot.priceRange ?? "$8,000–$20,000"} new. Prices vary by model, passenger count, battery type, and dealer. Use GolfCartIQ to compare live dealer prices in Florida and Georgia.`,
+        },
+      },
+      {
+        "@type": "Question",
+        "name": `Where is ${brand.name} headquartered?`,
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": brand.snapshot.headquarters
+            ? `${brand.name} is headquartered in ${brand.snapshot.headquarters}.`
+            : `${brand.name}'s headquarters location is not publicly confirmed.`,
+        },
+      },
+    ];
+
     setSEO({
       title:       `${brand.name} Golf Carts | Brand Wiki | GolfCartIQ`,
       description: brand.summary.slice(0, 160),
-      canonical:   `https://www.golfcartiq.com/brands/${brand.slug}`,
+      canonical:   brandUrl,
+      jsonLd: [
+        // BreadcrumbList
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "GolfCartIQ", "item": "https://www.golfcartiq.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Golf Cart Brands", "item": "https://www.golfcartiq.com/brands" },
+            { "@type": "ListItem", "position": 3, "name": `${brand.name} Golf Carts`, "item": brandUrl },
+          ],
+        },
+        // AboutPage / Article — signals authoritative review content to AI crawlers
+        {
+          "@type": "Article",
+          "headline": `${brand.name} Golf Carts — Brand Review & Buyer's Guide`,
+          "description": brand.summary,
+          "url": brandUrl,
+          "image": "https://www.golfcartiq.com/og-image.png",
+          "author": { "@type": "Organization", "name": "GolfCartIQ", "url": "https://www.golfcartiq.com" },
+          "publisher": { "@type": "Organization", "name": "GolfCartIQ", "url": "https://www.golfcartiq.com", "logo": { "@type": "ImageObject", "url": "https://www.golfcartiq.com/favicon.png" } },
+          "dateModified": brand.lastVerified ? new Date().toISOString().split("T")[0] : undefined,
+          "about": { "@type": "Brand", "name": brand.name },
+          "speakable": {
+            "@type": "SpeakableSpecification",
+            "cssSelector": ["h1", ".brand-summary", ".brand-tagline"],
+          },
+        },
+        // FAQPage — key for AI overview cards
+        { "@type": "FAQPage", "mainEntity": faqEntries },
+      ],
     });
     setLoading(true);
     fetchBrandListings(brand.dbBrand).then(data => {
@@ -152,7 +216,7 @@ export default function BrandPage() {
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
             {brand.name} Golf Carts — Brand Wiki
           </h1>
-          <p className="text-base text-muted-foreground leading-relaxed">{brand.tagline}</p>
+          <p className="brand-tagline text-base text-muted-foreground leading-relaxed">{brand.tagline}</p>
           {/* Badges */}
           <div className="flex flex-wrap gap-2 pt-1">
             {brand.badges.map(b => (
@@ -172,7 +236,7 @@ export default function BrandPage() {
             {/* Section 1 — Quick Summary */}
             <section>
               <h2 className="text-lg font-bold mb-3">Quick Summary</h2>
-              <p className="text-sm text-muted-foreground leading-relaxed">{brand.summary}</p>
+              <p className="brand-summary text-sm text-muted-foreground leading-relaxed">{brand.summary}</p>
             </section>
 
             {/* Section 2 — Common Models */}

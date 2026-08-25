@@ -105,8 +105,9 @@ export const BRAND_WIKI: BrandWiki[] = [
     sources: [
       { label: 'Club Car Official Site', url: 'https://www.clubcar.com' },
       { label: 'Platinum Equity Acquisition (2021)', url: 'https://www.platinumequity.com/news/platinum-equity-completes-acquisition-of-club-car-from-ingersoll-rand' },
+      { label: 'Club Car Onward — Current Models & Pricing', url: 'https://www.clubcar.com/en-us/vehicles/personal-use' },
     ],
-    lastVerified: 'June 2026',
+    lastVerified: 'August 2026',
   },
 
   // ─── 2. E-Z-GO ────────────────────────────────────────────────────────────
@@ -154,10 +155,10 @@ export const BRAND_WIKI: BrandWiki[] = [
     buyerChecklist: STANDARD_CHECKLIST,
     similarBrands: ['club-car', 'yamaha', 'icon'],
     sources: [
-      { label: 'E-Z-GO Official Site', url: 'https://www.ezgo.com' },
+      { label: 'E-Z-GO Official Site', url: 'https://ezgo.txtsv.com' },
       { label: 'Textron Inc. (NYSE: TXT)', url: 'https://www.textron.com' },
     ],
-    lastVerified: 'June 2026',
+    lastVerified: 'August 2026',
   },
 
   // ─── 3. Yamaha ────────────────────────────────────────────────────────────
@@ -208,7 +209,7 @@ export const BRAND_WIKI: BrandWiki[] = [
       { label: 'Yamaha Golf Car Official Site', url: 'https://www.yamahacarriers.com' },
       { label: 'Yamaha Motor Co. Ltd.', url: 'https://www.yamaha-motor.com' },
     ],
-    lastVerified: 'June 2026',
+    lastVerified: 'August 2026',
   },
 
   // ─── 4. Evolution ─────────────────────────────────────────────────────────
@@ -223,9 +224,10 @@ export const BRAND_WIKI: BrandWiki[] = [
     snapshot: {
       headquarters: 'Pompano Beach, FL',
       parentCompany: 'Evolution Electric Vehicles (independent)',
-      assemblyLocation: 'Not publicly disclosed (dealer-dependent verification)',
+      assemblyLocation: 'Not publicly disclosed — chassis sourced externally; dealer-dependent verification',
+      productLines: 'D-Max (XT4/GT4/XT6/GT6), D5 Plus, Starter Line, Commercial (Turfman)',
       primaryMarket: 'Personal use, neighborhood/community, outdoor utility',
-      priceRange: '$8,000–$16,000 new',
+      priceRange: '$9,699–$19,000+ new',
       powerTypes: ['Electric (Lithium standard)'],
       warrantyHighlight: 'Warranty terms vary by dealer — confirm in writing before purchase',
     },
@@ -256,8 +258,9 @@ export const BRAND_WIKI: BrandWiki[] = [
     similarBrands: ['icon', 'bintelli', 'club-car'],
     sources: [
       { label: 'Evolution Electric Vehicles', url: 'https://evolutionelectricvehicle.com' },
+      { label: 'Evolution D5 Plus Models & Pricing', url: 'https://evolutionelectricvehicle.com/d5-plus/' },
     ],
-    lastVerified: 'June 2026',
+    lastVerified: 'August 2026',
   },
 
   // ─── 5. ICON ──────────────────────────────────────────────────────────────
@@ -270,10 +273,11 @@ export const BRAND_WIKI: BrandWiki[] = [
     summary:
       'ICON EV is headquartered and assembles its carts in Jacksonville, FL — making it one of the few modern EV brands with verified U.S. assembly. The brand has captured significant market share by including lithium batteries as standard across most models, with pricing that competes directly with Club Car and E-Z-GO at similar spec levels.',
     snapshot: {
-      founded: '2016',
+      founded: '2017',
       headquarters: 'Jacksonville, FL',
-      parentCompany: 'ICON EV (independent)',
+      parentCompany: 'ICON EV (independent) — also owns EPIC Carts brand',
       assemblyLocation: 'Jacksonville, FL (verified)',
+      dealerNetwork: 'United States, Canada, Mexico, Bahamas',
       primaryMarket: 'Personal use, neighborhood/LSV, community',
       priceRange: '$9,500–$18,000 new',
       powerTypes: ['Electric (Lithium standard)'],
@@ -306,8 +310,9 @@ export const BRAND_WIKI: BrandWiki[] = [
     similarBrands: ['evolution', 'bintelli', 'club-car'],
     sources: [
       { label: 'ICON EV Official Site', url: 'https://iconev.com' },
+      { label: 'EPIC Carts (ICON Family Brand)', url: 'https://epiccarts.com' },
     ],
-    lastVerified: 'June 2026',
+    lastVerified: 'August 2026',
   },
 
   // ─── 6. Bintelli ──────────────────────────────────────────────────────────
@@ -320,9 +325,10 @@ export const BRAND_WIKI: BrandWiki[] = [
     summary:
       'Bintelli is a Charleston, SC-based golf cart brand that has differentiated itself through an 8-year EcoBattery warranty — one of the longest battery warranties in the segment. The Beyond series is the flagship platform, covering 2-, 4-, and 6-passenger configurations with lithium standard.',
     snapshot: {
-      headquarters: 'Charleston, SC',
-      parentCompany: 'Bintelli (independent)',
-      assemblyLocation: 'Not publicly disclosed',
+      founded: '2000',
+      headquarters: 'Ladson, SC (6900 Weber Blvd, 29456)',
+      parentCompany: 'Bintelli (independent — founded by Justin Jackrel)',
+      assemblyLocation: 'Ladson, SC — 175,000 sq ft facility opened 2023',
       primaryMarket: 'Personal use, neighborhood/LSV, coastal communities',
       priceRange: '$7,500–$14,000 new',
       powerTypes: ['Electric (Lithium / EcoBattery)'],
@@ -353,8 +359,9 @@ export const BRAND_WIKI: BrandWiki[] = [
     similarBrands: ['icon', 'evolution', 'sivo'],
     sources: [
       { label: 'Bintelli Official Site', url: 'https://bintelli.com' },
+      { label: 'Bintelli About — Company History', url: 'https://www.bintelli.com/about/' },
     ],
-    lastVerified: 'June 2026',
+    lastVerified: 'August 2026',
   },
 
   // ─── 7. Denago EV ─────────────────────────────────────────────────────────
@@ -362,14 +369,15 @@ export const BRAND_WIKI: BrandWiki[] = [
     slug: 'denago-ev',
     dbBrand: 'Denago EV',
     name: 'Denago EV',
-    tagline: 'Emerging lithium brand with value-driven pricing.',
-    badges: ['Emerging Brand', 'Dealer-Dependent Support', 'Manufacturing Not Clearly Verified'],
+    tagline: 'U.S.-invested manufacturer with 100,000+ riders globally and value-driven lithium pricing.',
+    badges: ['U.S. Manufacturing', 'Growing Dealer Network', 'Value-Oriented'],
     summary:
-      'Denago EV is an emerging electric golf cart brand offering lithium-equipped models at value-oriented price points. Third-party sources note a connection to TAO Motors, though Denago EV operates under its own branding. Manufacturing location and corporate structure are not clearly disclosed publicly.',
+      'Denago EV is a Texas-based electric golf cart brand that has invested $180M+ in U.S. manufacturing facilities and created 400+ Texas jobs between 2024 and 2025. With over 100,000 active daily riders globally, Denago has expanded rapidly with models like the Rover XL, Nomad XL, and Rover XL6. Their carts are designed for personal use and neighborhood/LSV markets at value-oriented price points.',
     snapshot: {
-      headquarters: 'United States (exact location not publicly confirmed)',
-      parentCompany: 'Not publicly disclosed; TAO Motors connection noted by 3rd-party sources',
-      assemblyLocation: 'Not verified',
+      headquarters: 'Texas, USA',
+      parentCompany: 'Denago EV (independent)',
+      assemblyLocation: 'Texas — $180M+ invested in U.S. factories; 400+ Texas jobs created (2024–2025)',
+      globalRiders: '100,000+ active daily riders worldwide',
       primaryMarket: 'Personal use, neighborhood, value-oriented buyers',
       priceRange: '$8,000–$15,000 new',
       powerTypes: ['Electric (Lithium)'],
@@ -377,29 +385,31 @@ export const BRAND_WIKI: BrandWiki[] = [
     },
     manufacturerVerification: {
       level: 'limited_public',
-      notes: 'Denago EV\'s manufacturing origin and corporate structure are not clearly disclosed in public materials. A TAO Motors connection has been noted by third-party reviewers. Warranty terms vary by dealer — request full documentation before purchase.',
+      notes: 'Denago EV has confirmed U.S. manufacturing investment in Texas ($180M+) and 400+ Texas jobs created between 2024–2025. Manufacturing details and corporate structure are not fully disclosed publicly. Warranty terms can vary by dealer — request full documentation before purchase.',
     },
     commonModels: [
-      { name: 'Com-Pac 4', type: 'Personal / LSV (4-passenger)', topSpeed: '25 mph', range: '35–50 mi', msrp: '$9,000–$13,000' },
-      { name: 'Com-Pac 6', type: 'Personal / LSV (6-passenger)', topSpeed: '25 mph', range: '30–45 mi', msrp: '$12,000–$15,000' },
+      { name: 'Rover XL', type: 'Personal / LSV (4-passenger)', topSpeed: '25 mph', range: '40–60 mi', msrp: '$10,000–$14,000', notes: 'Best-selling model' },
+      { name: 'Nomad XL', type: 'Personal / LSV (2+2)', topSpeed: '25 mph', range: '35–55 mi', msrp: '$9,000–$13,000', notes: 'Versatile 2+2 layout' },
+      { name: 'Rover XL6', type: 'Personal / LSV (4+2)', topSpeed: '25 mph', range: '35–50 mi', msrp: '$12,000–$16,000', notes: '6-passenger spacious layout' },
     ],
     whatMakesDifferent: [
-      'Value pricing on lithium-equipped models — targets buyers priced out of ICON and Club Car.',
-      'Growing dealer network in FL and GA.',
-      'Modern styling with LSV-ready configurations.',
+      'U.S.-based company with $180M+ invested in Texas manufacturing — meaningful domestic commitment vs. import-only brands.',
+      '100,000+ active daily riders globally — scale that supports parts availability and long-term support.',
+      'Value-priced lithium models that undercut ICON and Club Car at similar spec levels.',
+      'Growing dealer network in FL and GA with modern LSV-ready configurations.',
     ],
     buyerConfidenceNotes: [
-      'Manufacturing origin is not clearly verified — ask the dealer directly about the factory of origin.',
-      'Warranty coverage varies significantly by dealer — get all terms in writing.',
-      'Parts availability is not yet well-documented — confirm service capability at your local dealer before committing.',
-      'As an emerging brand, resale value is less established than ICON or legacy brands.',
+      'Denago EV is a U.S.-based company with confirmed Texas manufacturing investment ($180M+) — more transparency than many emerging brands.',
+      'Warranty coverage can vary by dealer — get all terms, including labor and battery coverage, in writing before purchase.',
+      'Parts availability is growing but may be limited outside major dealer markets — confirm local service capability.',
+      'As a newer brand in the U.S. market, resale value is less established than ICON or legacy brands like Club Car and E-Z-GO.',
     ],
     buyerChecklist: STANDARD_CHECKLIST,
     similarBrands: ['evolution', 'icon', 'venom-ev'],
     sources: [
-      { label: 'Denago EV Official Site', url: 'https://denagobikes.com/golf-carts' },
+      { label: 'Denago EV Official Site', url: 'https://www.denagoev.com' },
     ],
-    lastVerified: 'June 2026',
+    lastVerified: 'August 2026',
   },
 
   // ─── 8. DACH Vehicles ─────────────────────────────────────────────────────
@@ -441,9 +451,10 @@ export const BRAND_WIKI: BrandWiki[] = [
     buyerChecklist: STANDARD_CHECKLIST,
     similarBrands: ['evolution', 'icon', 'bintelli'],
     sources: [
+      { label: 'DACH Vehicles Official Site', url: 'https://dachvehicles.com' },
       { label: 'Jeffrey Allen Inc.', url: 'https://jeffreyalleninc.com' },
     ],
-    lastVerified: 'June 2026',
+    lastVerified: 'August 2026',
   },
 
   // ─── 9. Sivo ──────────────────────────────────────────────────────────────
@@ -457,9 +468,9 @@ export const BRAND_WIKI: BrandWiki[] = [
       'Sivo is a sub-brand of Bintelli, launched in January 2026. It shares the EcoBattery 8-year warranty heritage of its parent brand and is positioned as a slightly differentiated product line targeting buyers who want Bintelli engineering with distinct styling. As of mid-2026, Sivo is very new — dealer network and resale data are still limited.',
     snapshot: {
       founded: 'January 2026',
-      headquarters: 'Charleston, SC (via Bintelli parent)',
-      parentCompany: 'Bintelli',
-      assemblyLocation: 'Not publicly disclosed (same supply chain as Bintelli)',
+      headquarters: 'Ladson, SC (via Bintelli parent — 6900 Weber Blvd)',
+      parentCompany: 'Bintelli (founded 2000; 175,000 sq ft facility)',
+      assemblyLocation: 'Ladson, SC — same Bintelli facility as parent brand',
       primaryMarket: 'Personal use, neighborhood/LSV, coastal communities',
       priceRange: '$8,000–$14,000 new',
       powerTypes: ['Electric (Lithium / EcoBattery)'],
@@ -487,9 +498,10 @@ export const BRAND_WIKI: BrandWiki[] = [
     buyerChecklist: STANDARD_CHECKLIST,
     similarBrands: ['bintelli', 'icon', 'evolution'],
     sources: [
+      { label: 'Sivo Official Site', url: 'https://www.sivogolfcarts.com' },
       { label: 'Bintelli (Parent Brand)', url: 'https://bintelli.com' },
     ],
-    lastVerified: 'June 2026',
+    lastVerified: 'August 2026',
   },
 
   // ─── 10. Teko EV ──────────────────────────────────────────────────────────
@@ -638,10 +650,10 @@ export const BRAND_WIKI: BrandWiki[] = [
     buyerChecklist: STANDARD_CHECKLIST,
     similarBrands: ['teko-ev', 'bintelli', 'evolution'],
     sources: [
-      { label: 'Venom EV Official Site', url: 'https://venomdirtbike.com/golf-carts' },
+      { label: 'Venom EV Official Site', url: 'https://venom-ev.com' },
       { label: 'Let\'s Go Carting (Clearwater, FL)', url: 'https://letsgocarting.com' },
     ],
-    lastVerified: 'June 2026',
+    lastVerified: 'August 2026',
   },
 ];
 

@@ -74,7 +74,43 @@ export default function CityPage() {
 
   useEffect(() => {
     if (!cfg) return;
-    setSEO({ title: cfg.title, description: cfg.metaDescription, canonical: `https://golfcartiq.com/golf-carts-for-sale/${cfg.slug}` });
+    const cityUrl = `https://golfcartiq.com/golf-carts-for-sale/${cfg.slug}`;
+    setSEO({
+      title: cfg.title,
+      description: cfg.metaDescription,
+      canonical: cityUrl,
+      jsonLd: [
+        // BreadcrumbList
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            { "@type": "ListItem", "position": 1, "name": "GolfCartIQ", "item": "https://golfcartiq.com/" },
+            { "@type": "ListItem", "position": 2, "name": "Golf Carts For Sale", "item": "https://golfcartiq.com/search" },
+            { "@type": "ListItem", "position": 3, "name": `${cfg.city}, ${cfg.state}`, "item": cityUrl },
+          ],
+        },
+        // WebPage with speakable for AI reading
+        {
+          "@type": "WebPage",
+          "name": cfg.title,
+          "description": cfg.metaDescription,
+          "url": cityUrl,
+          "speakable": {
+            "@type": "SpeakableSpecification",
+            "cssSelector": ["h1", ".city-short-answer"],
+          },
+        },
+        // FAQPage from the city's FAQ content
+        ...(cfg.faqs && cfg.faqs.length > 0 ? [{
+          "@type": "FAQPage",
+          "mainEntity": cfg.faqs.map((f: { q: string; a: string }) => ({
+            "@type": "Question",
+            "name": f.q,
+            "acceptedAnswer": { "@type": "Answer", "text": f.a },
+          })),
+        }] : []),
+      ],
+    });
     setLoading(true);
     fetchCityListings(cfg).then(data => {
       setListings(data);
@@ -116,7 +152,7 @@ export default function CityPage() {
             <span>{cfg.city}, {cfg.state} · {cfg.radiusMiles}-mile radius · {cfg.marketType}</span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight">{cfg.h1}</h1>
-          <p className="text-sm text-muted-foreground leading-relaxed">{cfg.shortAnswer}</p>
+          <p className="city-short-answer text-sm text-muted-foreground leading-relaxed">{cfg.shortAnswer}</p>
         </div>
 
         {/* Quick filters */}
