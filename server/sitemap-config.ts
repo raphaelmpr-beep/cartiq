@@ -24,6 +24,18 @@ export const CITY_PAGE_ENTRIES: StaticPageEntry[] = [
   { path: "/golf-carts-for-sale/panama-city-beach-fl", priority: "0.7", changefreq: "weekly" },
   { path: "/golf-carts-for-sale/peachtree-city-ga",    priority: "0.8", changefreq: "weekly" },
   { path: "/golf-carts-for-sale/atlanta-ga",           priority: "0.8", changefreq: "weekly" },
+  // Tier 1 expansion — added 2026-08-25
+  { path: "/golf-carts-for-sale/woodstock-ga",          priority: "0.8", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/lakeland-fl",           priority: "0.8", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/ocala-fl",              priority: "0.8", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/cumming-ga",            priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/tifton-ga",             priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/pensacola-fl",          priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/delray-beach-fl",       priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/melbourne-fl",          priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/ponte-vedra-beach-fl",  priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/fort-lauderdale-fl",    priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/jacksonville-beach-fl", priority: "0.7", changefreq: "weekly" },
 ];
 
 export const STATIC_PAGE_ENTRIES: StaticPageEntry[] = [
