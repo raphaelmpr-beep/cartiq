@@ -17,6 +17,7 @@ import {
   isNavPage,
   cleanHtmlWhitespace,
 } from './adapters.js';
+import { sitemapHeaders } from './http-headers.js';
 // browser-sync is loaded lazily (dynamic import) to avoid pulling in playwright
 // at module load time, which crashes Vercel Lambda environments without playwright installed.
 // import { runBrowserSync } from './browser-sync.js'; // DO NOT re-add as static import
@@ -156,6 +157,121 @@ function parseSlug(url: string, dealer: string): { year: number | null; make: st
   return { year, make, model: modelSlug || null, condition };
 }
 
+
+// ─── Advantage Golf Cars (Dealer Spike platform) ──────────────────────────────
+// Multi-location dealer group. Listing URLs carry the city before the trailing
+// numeric ID: /New-Inventory-2026-E-Z-GO-Golf-Cart-...-Orlando-19111541
+// Sitemap index at /sitemap.xml links two sub-sitemaps (new + pre-owned).
+
+const ADVANTAGE_LOCATION_MAP: Array<{ keyword: string; dealer_slug: string; city: string; state: string }> = [
+  { keyword: 'orlando',     dealer_slug: 'advantage-golf-cars-orlando',         city: 'Orlando',         state: 'FL' },
+  { keyword: 'gainesville', dealer_slug: 'advantage-golf-cars-gainesville',     city: 'Gainesville',     state: 'FL' },
+  { keyword: 'daytona',     dealer_slug: 'advantage-golf-cars-daytona',         city: 'Ormond Beach',    state: 'FL' },
+  { keyword: 'miami-showroom', dealer_slug: 'advantage-golf-cars-miami',        city: 'Miami',           state: 'FL' },
+  { keyword: 'miami',       dealer_slug: 'advantage-golf-cars-miami',           city: 'Miami',           state: 'FL' },
+  { keyword: 'palm-beach',  dealer_slug: 'advantage-golf-cars-west-palm-beach', city: 'West Palm Beach', state: 'FL' },
+];
+
+const ADVANTAGE_SITEMAPS = [
+  'https://www.advantagegolfcars.com/default.asp?page=xsitemap&s=NewInventory',
+  'https://www.advantagegolfcars.com/default.asp?page=xsitemap&s=PreOwnedInventory',
+];
+
+interface AdvantageRecord { url: string; dealer_slug: string; city: string; state: string; }
+
+/** City keyword must appear immediately before the trailing numeric listing ID. */
+function tagAdvantageUrl(url: string): { dealer_slug: string; city: string; state: string } | null {
+  const m = url.toLowerCase().match(/-(orlando|gainesville|daytona|miami-showroom|miami|palm-beach)-\d{6,}/);
+  if (!m) return null;
+  const loc = ADVANTAGE_LOCATION_MAP.find(l => l.keyword === m[1]);
+  return loc ? { dealer_slug: loc.dealer_slug, city: loc.city, state: loc.state } : null;
+}
+
+async function getAdvantageFetchResult(): Promise<{ records: AdvantageRecord[]; rawUrlCount: number; untaggedUrls: string[]; fetchErrors: string[] }> {
+  const allUrls: string[] = [];
+  const fetchErrors: string[] = [];
+  for (const sitemapUrl of ADVANTAGE_SITEMAPS) {
+    // Dealer Spike's WAF intermittently 403s under load — one retry with backoff.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 2500));
+        const res = await fetch(sitemapUrl, {
+          headers: sitemapHeaders(sitemapUrl),
+          signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+        });
+        if (res.status === 403 && attempt === 0) continue; // retry once on 403
+        if (!res.ok) { fetchErrors.push(`${sitemapUrl} → HTTP ${res.status}`); break; }
+        const xml = await res.text();
+        const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)]
+          .map(m => m[1].trim().replace(/&amp;/g, '&'))
+          .filter(u => u.startsWith('http') && /Inventory-\d{4}-/i.test(u));
+        allUrls.push(...locs);
+        break;
+      } catch (e: any) {
+        if (attempt === 1) fetchErrors.push(`${sitemapUrl} → ${e?.message || e}`);
+      }
+    }
+  }
+  const records: AdvantageRecord[] = [];
+  const untaggedUrls: string[] = [];
+  for (const url of allUrls) {
+    const tag = tagAdvantageUrl(url);
+    if (tag) records.push({ url, ...tag });
+    else untaggedUrls.push(url);
+  }
+  return { records, rawUrlCount: allUrls.length, untaggedUrls, fetchErrors };
+}
+
+/** Parse Advantage Dealer Spike URL slug: /{Condition}-Inventory-{Year}-{Make}-Golf-Cart-{Model}-(Golf-Car-){City}-{Id} */
+function parseAdvantageSlug(url: string): { year: number | null; make: string | null; model: string | null; condition: string | null } {
+  const path = (url.split('/').pop() || '').split('?')[0];
+  const condition = /^pre-owned-inventory/i.test(path) ? 'used'
+    : /^new-inventory/i.test(path) ? 'new' : null;
+  const yearM = path.match(/inventory-(19\d{2}|20\d{2})-/i);
+  const year = yearM ? parseInt(yearM[1]) : null;
+
+  const afterYear = yearM ? path.slice((yearM.index ?? 0) + yearM[0].length) : path;
+  const mk = afterYear.match(/^(.+?)-Golf-C(?:art|ar)-/i);
+  let make: string | null = null;
+  let model: string | null = null;
+  if (mk) {
+    const makeMap: Record<string, string> = {
+      'e-z-go': 'E-Z-GO', 'ezgo': 'E-Z-GO', 'club-car': 'Club Car', 'yamaha': 'Yamaha',
+      'sierra': 'Sierra', 'icon': 'ICON', 'evolution': 'Evolution', 'star-ev': 'Star EV',
+      'bintelli': 'Bintelli', 'denago': 'Denago', 'denago-ev': 'Denago EV', 'teko': 'Teko',
+      'cushman': 'Cushman', 'madjax': 'MadJax', 'atlas': 'Atlas', 'epic': 'Epic',
+    };
+    const raw = mk[1].toLowerCase();
+    make = makeMap[raw] || mk[1].split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+    let rest = afterYear.slice(mk[0].length);
+    rest = rest.replace(/-\d{6,}$/, '');                       // strip trailing listing ID
+    const cityM = rest.toLowerCase().match(/-(orlando|gainesville|daytona|miami-showroom|miami|palm-beach)$/i);
+    if (cityM) rest = rest.slice(0, rest.length - cityM[0].length); // strip trailing city
+    rest = rest.replace(/-?Golf-Car-?$/i, '');                 // strip trailing marker
+    model = rest.split('-').filter(Boolean).join(' ').trim() || null;
+  }
+  return { year, make, model, condition };
+}
+
+/** Fetch og:image + og:title from a Dealer Spike listing page. Never throws. */
+async function fetchDealerSpikeOg(url: string): Promise<{ title: string | null; image_url: string | null }> {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'CartIQ/1.0' },
+      signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+    });
+    if (!res.ok) return { title: null, image_url: null };
+    const html = await res.text();
+    const img = html.match(/<meta property="og:image" content="([^"]+)"/i)?.[1] || null;
+    const rawTitle = html.match(/<meta property="og:title" content="([^"]+)"/i)?.[1] || null;
+    // "2026 E-Z-GO RXV 2 Freedom ELiTE 2.2 Lithium Golf Car | Advantage Golf Cars" → strip site suffix
+    const title = rawTitle ? rawTitle.replace(/\s*\|\s*Advantage Golf Cars.*$/i, '').trim() : null;
+    return { title, image_url: img };
+  } catch {
+    return { title: null, image_url: null };
+  }
+}
 
 // ─── DX1/Algolia inventory fetcher ────────────────────────────────────────────
 // Golf Rider (and future DX1-platform dealers) use an Algolia-powered inventory
@@ -915,6 +1031,97 @@ async function runDiscoverSitemap(
       result.new_queued = rows.length;
       result.summary.push(`[${targetSlug}] [DRY RUN] Would queue ${rows.length} listings`);
       rows.slice(0, 5).forEach(r => result.summary.push(`  → ${r.raw_title || r.source_url} (${r.location_city}, ${r.location_state})`));
+    }
+    return;
+
+  } else if (adapterKey === 'advantage') {
+    // ── Advantage Golf Cars multi-location adapter (Dealer Spike) ─────────────
+    // Each URL carries its own dealer_slug/city/state — queue per-location.
+    // Pages are server-rendered; we enrich each queued row with og:image/title
+    // (no prices are published server-side — price stays NULL).
+    const { records: allRecords, rawUrlCount, untaggedUrls, fetchErrors } = await getAdvantageFetchResult();
+    fetchErrors.forEach(e => result.summary.push(`[advantage] Sitemap fetch issue: ${e}`));
+    if (!allRecords.length) {
+      const msg = `[${slug}] Advantage sitemaps returned 0 tagged records (raw: ${rawUrlCount})`;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, 'error', msg);
+      return;
+    }
+
+    const targetSlug = dealer.slug;
+    // Queue ALL locations in one run: dealer=all dedupes by adapter_key, so a
+    // per-location filter here would starve the other 4 locations of inventory.
+    const byLoc: Record<string, number> = {};
+    allRecords.forEach(r => { byLoc[r.dealer_slug] = (byLoc[r.dealer_slug] || 0) + 1; });
+    result.summary.push(`[advantage] Tagged ${allRecords.length}/${rawUrlCount} URLs: ${Object.entries(byLoc).map(([k, v]) => `${k.replace('advantage-golf-cars-', '')}=${v}`).join(' ')}`);
+    let relevantRecords = allRecords;
+
+    // Fallback: if NO location has tagged URLs, assign untagged URLs to the
+    // requesting dealer's city/state (mirrors the botero fallback).
+    if (!relevantRecords.length && untaggedUrls.length > 0) {
+      const { data: dealerRow } = await supabase
+        .from('dealers')
+        .select('city,state')
+        .eq('slug', targetSlug)
+        .single();
+      relevantRecords = untaggedUrls.map(url => ({
+        url,
+        dealer_slug: targetSlug,
+        city: dealerRow?.city || 'Unknown',
+        state: dealerRow?.state || 'FL',
+      }));
+      console.log(`[advantage] No tagged URLs for ${targetSlug}; falling back to ${untaggedUrls.length} untagged URLs`);
+    }
+
+    // Global diff: a listing URL is unique to one unit across all locations.
+    const [pendingKnown, existingListings] = await Promise.all([
+      fetchAllPaginated<{ source_url: string }>(supabase, 'pending_imports', 'source_url', (q) => q.not('source_url', 'is', null)),
+      fetchAllPaginated<{ source_listing_url: string }>(supabase, 'listings', 'source_listing_url', (q) => q.not('source_listing_url', 'is', null)),
+    ]);
+    const knownUrls = new Set<string>([
+      ...pendingKnown.map(r => r.source_url).filter(Boolean),
+      ...existingListings.map(r => r.source_listing_url).filter(Boolean),
+    ]);
+    const newRecords = relevantRecords.filter(r => !knownUrls.has(r.url));
+    result.already_known = relevantRecords.length - newRecords.length;
+    result.summary.push(`[${targetSlug}] ${relevantRecords.length} in sitemap for this location | ${result.already_known} known | ${newRecords.length} new`);
+
+    const toProcess = newRecords.slice(0, limit);
+    const rows: any[] = [];
+    for (const rec of toProcess) {
+      const meta = parseAdvantageSlug(rec.url);
+      const og = await fetchDealerSpikeOg(rec.url);
+      rows.push({
+        dealer_slug:    rec.dealer_slug,
+        source_url:     rec.url,
+        raw_title:      og.title || [meta.year, meta.make, meta.model].filter(Boolean).join(' ') || rec.url,
+        year:           meta.year,
+        make:           meta.make,
+        model:          meta.model,
+        condition:      meta.condition,
+        image_url:      og.image_url,
+        location_city:  rec.city,
+        location_state: rec.state,
+        status:         'pending',
+      });
+    }
+    result.processed = toProcess.length;
+
+    if (!dry_run && rows.length > 0) {
+      const { error } = await supabase.from('pending_imports').upsert(rows, { onConflict: 'source_url', ignoreDuplicates: true });
+      if (error) {
+        result.errors++;
+        result.summary.push(`[${targetSlug}] DB insert error: ${error.message}`);
+        await writeDiscoveryStatus(supabase, slug, 'error', error.message);
+      } else {
+        result.new_queued = rows.length;
+        await writeDiscoveryStatus(supabase, slug, 'ok', `Queued ${rows.length} new Advantage listings across all locations (${relevantRecords.length} in sitemap, ${result.already_known} already known)`);
+        result.summary.push(`[${targetSlug}] Queued ${rows.length} new listings across all Advantage locations`);
+      }
+    } else if (dry_run) {
+      result.new_queued = rows.length;
+      result.summary.push(`[${targetSlug}] [DRY RUN] Would queue ${rows.length} listings (all Advantage locations)`);
+      rows.slice(0, 5).forEach(r => result.summary.push(`  → ${r.raw_title} | img: ${r.image_url ? 'yes' : 'NO'} (${r.location_city}, ${r.location_state})`));
     }
     return;
 
