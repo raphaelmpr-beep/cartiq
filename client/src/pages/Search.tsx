@@ -1,4 +1,5 @@
 import { setSEO } from "@/lib/seo";
+import { normalizeWarranty } from "@shared/warranty";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getSavedLocation, zipToCoords } from "@/lib/geo";
@@ -211,7 +212,7 @@ function sortListings(listings: Listing[], sort: string): Listing[] {
     case "best_deal": return copy.sort((a, b) => (a.dealDelta ?? 0) - (b.dealDelta ?? 0));
     case "newest": return copy.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     case "buyer_score": return copy.sort((a, b) => (b.buyerScore ?? 0) - (a.buyerScore ?? 0));
-    case "warranty": return copy.sort((a) => a.warrantyIncluded === "yes" ? -1 : 1);
+    case "warranty": return copy.sort((a, b) => Number(normalizeWarranty(b.warrantyIncluded) === "yes") - Number(normalizeWarranty(a.warrantyIncluded) === "yes"));
     default: return copy.sort((a, b) => {
       // Primary: buyerScore desc
       const scoreDiff = (b.buyerScore ?? 0) - (a.buyerScore ?? 0);
@@ -391,7 +392,7 @@ export default function Search() {
     // Lifted
     if (filters.lifted === "true" && !l.lifted) return false;
     // Warranty — accept both "true" (Supabase boolean stringified) and "yes" (legacy)
-    if (filters.warrantyIncluded === "yes" && !(["yes", "true", true].includes(l.warrantyIncluded as any))) return false;
+    if (filters.warrantyIncluded === "yes" && normalizeWarranty(l.warrantyIncluded) !== "yes") return false;
     // Miles from zip or city centroid (haversine)
     if (filters.radius) {
       // Prefer zip coords, fall back to city centroid when only city+state+radius supplied

@@ -1347,37 +1347,9 @@ export async function enrichFromJsonLd(listingPageUrl: string): Promise<Partial<
 
 // ─── Warranty parser ─────────────────────────────────────────────────────────
 function parseWarrantyFromHtml(html: string): Partial<ListingEnrichment> {
-  // Lifetime warranty
-  if (/lifetime\s+(?:lithium\s+)?(?:battery\s+)?warranty/i.test(html)) {
-    return {
-      warranty_included: true,
-      warranty_notes: 'Lifetime Lithium battery warranty',
-    };
-  }
-  // N-Year warranty
-  const yearMatch = html.match(/(\d+)\s*[-\s]?[Yy]ear\s+(?:Eco\s+Battery\s+)?(?:Manufacturer\s+)?Warranty/i);
-  if (yearMatch) {
-    const years = parseInt(yearMatch[1], 10);
-    return {
-      warranty_included: true,
-      warranty_months: years * 12,
-      warranty_notes: `${years}-Year manufacturer warranty`,
-    };
-  }
-  // Factory / Manufacturer warranty
-  if (/(?:factory|manufacturer)\s+warranty/i.test(html)) {
-    return {
-      warranty_included: true,
-      warranty_notes: 'Manufacturer warranty included',
-    };
-  }
-  // Generic warranty mention
-  if (/\bwarranty\b/i.test(html)) {
-    return {
-      warranty_included: true,
-      warranty_notes: 'Warranty available',
-    };
-  }
+  // Full-page text includes navigation, other units and paid service contracts.
+  // Do not infer inclusion, provider, battery scope or lifetime coverage from it.
+  // Reviewed unit-level fields remain intact; scoped extraction is a separate task.
   return {};
 }
 

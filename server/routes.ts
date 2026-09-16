@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { calculateGolfCartWiseValue, enrichListing } from "./pricing";
 import { parseCsv, csvRowToListing } from "./csvParser";
 import { registerSitemapRoutes } from "./sitemaps";
+import { normalizeWarrantyFields } from "../shared/warranty";
 
 // ─── snake_case → camelCase normalizer ───────────────────────────────────────
 // Supabase returns column names as snake_case. The frontend expects camelCase.
@@ -16,7 +17,7 @@ function toCamel(obj: Record<string, any>): Record<string, any> {
     const camel = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
     out[camel] = obj[key];
   }
-  return out;
+  return normalizeWarrantyFields(out);
 }
 function normList(rows: any[]): any[] { return rows.map(r => norm(r)); }
 

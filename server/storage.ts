@@ -3,6 +3,7 @@
  * All methods are async. Routes call await storage.method().
  */
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { normalizeWarranty, normalizeWarrantyFields, WARRANTY_YES_PATTERN } from "../shared/warranty";
 import type {
   Listing, InsertListing,
   Dealer, InsertDealer,
@@ -135,7 +136,7 @@ class SupabaseStorage implements IStorage {
       if (filters.sellerType)  q = q.eq("seller_type", filters.sellerType);
       if (filters.batteryType) q = q.eq("battery_type", filters.batteryType);
       if (filters.dealRating)  q = q.eq("deal_rating", filters.dealRating);
-      if (filters.warrantyIncluded) q = q.in("warranty_included", ["yes", "true"]);
+      if (normalizeWarranty(filters.warrantyIncluded) === "yes") q = q.filter("warranty_included", "imatch", WARRANTY_YES_PATTERN);
       if (filters.minPrice)    q = q.gte("asking_price", filters.minPrice);
       if (filters.maxPrice)    q = q.lte("asking_price", filters.maxPrice);
       if (filters.streetLegal === true) q = q.eq("street_legal_claimed", true);
@@ -219,7 +220,7 @@ class SupabaseStorage implements IStorage {
   }
 
   async createListing(data: InsertListing): Promise<Listing> {
-    const result = check(await db().from("listings").insert(data).select().single());
+    const result = check(await db().from("listings").insert(normalizeWarrantyFields(data)).select().single());
     return result as Listing;
   }
 
@@ -228,7 +229,7 @@ class SupabaseStorage implements IStorage {
     // RLS-blocked writes stop silently returning undefined and confusing callers.
     const { data: result, error } = await db()
       .from("listings")
-      .update({ ...data, updated_at: new Date().toISOString() })
+      .update({ ...normalizeWarrantyFields(data), updated_at: new Date().toISOString() })
       .eq("id", id)
       .select()
       .maybeSingle();

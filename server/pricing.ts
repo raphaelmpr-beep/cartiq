@@ -6,6 +6,8 @@
 //   3. Deal ratings are anchored to market comps, not asking price
 // =============================================================================
 
+import { normalizeWarranty, normalizeWarrantyMonths } from "../shared/warranty";
+
 export interface PricingInput {
   askingPrice?: number | null;
   regularPrice?: number | null;
@@ -192,7 +194,7 @@ function featureAdjustments(input: PricingInput): number {
 
   if (input.lifted === true || input.lifted === "yes") adj += 600;
   if (toBool(input.chargerIncluded)) adj += 200;
-  if (toBool(input.warrantyIncluded)) adj += 300;
+  // Warranty affects buyer confidence only, never estimated value/deal rating.
 
   return adj;
 }
@@ -336,8 +338,9 @@ export function computeWiseScore(input: PricingInput, dealRating: string): numbe
   }
 
   // ── Warranty component (15 pts) ───────────────────────────────────────────
-  const warrantyIncluded = toBool(input.warrantyIncluded);
-  const warrantyMonths   = input.warrantyMonths;
+  const warrantyState = normalizeWarranty(input.warrantyIncluded);
+  const warrantyIncluded = warrantyState === "unknown" ? null : warrantyState === "yes";
+  const warrantyMonths   = normalizeWarrantyMonths(input.warrantyMonths);
   if (warrantyIncluded === true) {
     score += (warrantyMonths != null && warrantyMonths >= 36) ? 15 : 10;
   } else if (warrantyIncluded === false) {
@@ -495,7 +498,7 @@ export function calculateGolfCartWiseValue(input: PricingInput): PricingResult {
   }
 
   // Warranty
-  const warrantyIncluded = toBoolStr(input.warrantyIncluded);
+  const warrantyIncluded = normalizeWarranty(input.warrantyIncluded);
   let warrantySignal: string | null = null;
   if (warrantyIncluded === "yes") {
     warrantySignal = "warranty_included";
@@ -511,7 +514,7 @@ export function calculateGolfCartWiseValue(input: PricingInput): PricingResult {
     questionsToAsk.push("Is any dealer, manufacturer, battery, or third-party warranty included?");
   }
 
-  if (batteryType === "lithium" && (input.batteryWarrantyIncluded === "unknown" || input.batteryWarrantyIncluded == null)) {
+  if (batteryType === "lithium" && normalizeWarranty(input.batteryWarrantyIncluded) === "unknown") {
     questionsToAsk.push("Is there a separate lithium battery warranty, and is it transferable?");
   }
 

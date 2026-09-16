@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DealBadge, SourceBadge, WiseScoreBadge, WarrantyBadge, BatteryRiskBadge, StreetLegalBadge, DeliveryCostBadge, RetailSourceBadge } from "@/components/Badges";
 import { MarketCompareCard } from "@/components/MarketCompareCard";
+import { WarrantyDetails } from "@/components/WarrantyDetails";
+import { normalizeWarranty } from "@shared/warranty";
 import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText } from "@/lib/utils";
 import type { Listing, Dealer } from "@/lib/types";
 import { apiRequest } from "@/lib/queryClient";
@@ -155,8 +157,8 @@ export default function ListingDetail() {
   const redFlags: string[] = [];
 
   if (listing.chargerIncluded === "unknown") questions.push("Is the correct charger included and matched to the battery type and voltage?");
-  if (listing.warrantyIncluded === "unknown") questions.push("Is any dealer, manufacturer, battery, retailer, or third-party warranty included?");
-  if (listing.batteryType === "lithium" && listing.batteryWarrantyIncluded === "unknown") questions.push("Is there a separate lithium battery warranty, and is it transferable?");
+  if (normalizeWarranty(listing.warrantyIncluded) === "unknown") questions.push("Is any dealer, manufacturer, battery, retailer, or third-party warranty included?");
+  if (listing.batteryType === "lithium" && normalizeWarranty(listing.batteryWarrantyIncluded) === "unknown") questions.push("Is there a separate lithium battery warranty, and is it transferable?");
   if (listing.streetLegalClaimed) {
     questions.push("Is there a title and VIN for this cart?");
     questions.push("Is it registered as an LSV (Low-Speed Vehicle)?");
@@ -167,7 +169,7 @@ export default function ListingDetail() {
     redFlags.push("Lead-acid battery age is unknown or over 4 years. Factor in replacement cost ($800–$1,500).");
   }
   if (listing.chargerIncluded === "no") redFlags.push("Charger not included. Confirm compatible charger cost before buying.");
-  if (listing.warrantyIncluded === "no" && (listing.sellerType === "dealer" || listing.sellerType === "retail")) {
+  if (normalizeWarranty(listing.warrantyIncluded) === "no" && (listing.sellerType === "dealer" || listing.sellerType === "retail")) {
     redFlags.push("No warranty listed for a dealer or retail cart. Treat as as-is unless confirmed otherwise in writing.");
   }
   if (listing.batteryAh && listing.batteryAh <= 105 && (listing.seating && listing.seating >= 6 || listing.lifted)) {
@@ -300,26 +302,7 @@ export default function ListingDetail() {
             <Card>
               <CardHeader><CardTitle className="text-base">Warranty</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm">
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    ["Warranty Included", yesNoUnknownLabel(listing.warrantyIncluded)],
-                    ["Warranty Provider", warrantyProviderLabel(listing.warrantyProvider)],
-                    ["Warranty Length", listing.warrantyMonths ? `${listing.warrantyMonths} months` : "Unknown"],
-                    ["Battery Warranty", yesNoUnknownLabel(listing.batteryWarrantyIncluded)],
-                  ].map(([label, value]) => (
-                    <div key={label}>
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className="font-medium">{value}</p>
-                    </div>
-                  ))}
-                </div>
-                {listing.warrantyNotes && <p className="text-xs text-muted-foreground pt-2">{listing.warrantyNotes}</p>}
-                {listing.warrantyIncluded === "unknown" && (
-                  <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-xs text-amber-800 flex gap-2 mt-2">
-                    <HelpCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                    Ask seller: Is any dealer, manufacturer, battery, retailer, or third-party warranty included?
-                  </div>
-                )}
+                <WarrantyDetails {...listing} />
               </CardContent>
             </Card>
 
@@ -360,7 +343,7 @@ export default function ListingDetail() {
                       <ShieldCheck className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">Warranty</span>
                     </div>
-                    {dealer.defaultWarrantyIncluded ? (
+                    {normalizeWarranty(dealer.defaultWarrantyIncluded) === "yes" ? (
                       <div className="space-y-1">
                         <span className="inline-flex items-center gap-1 text-xs font-medium bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200">
                           <CheckCircle className="h-3 w-3" /> Warranty Available
@@ -368,13 +351,12 @@ export default function ListingDetail() {
                         {dealer.defaultWarrantyMonths != null && dealer.defaultWarrantyMonths > 0 && (
                           <p className="text-muted-foreground">{dealer.defaultWarrantyMonths}-month warranty</p>
                         )}
-                        {dealer.defaultWarrantyNotes && (
-                          <p className="text-muted-foreground text-xs">{dealer.defaultWarrantyNotes.slice(0, 120)}</p>
-                        )}
                       </div>
                     ) : (
-                      <p className="text-muted-foreground">No dealer warranty</p>
+                      <p className="text-muted-foreground">Dealer-wide coverage not confirmed. Check the unit-specific terms above.</p>
                     )}
+                    {dealer.defaultWarrantyNotes && <p className="text-muted-foreground text-xs break-words mt-2">{dealer.defaultWarrantyNotes}</p>}
+                    <p className="text-xs text-muted-foreground mt-2">Dealer policy does not automatically apply to every cart.</p>
                   </div>
                 </CardContent>
               </Card>
