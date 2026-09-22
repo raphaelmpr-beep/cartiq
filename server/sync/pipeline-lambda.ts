@@ -18,6 +18,9 @@ import {
   cleanHtmlWhitespace,
 } from './adapters.js';
 import { sitemapHeaders } from './http-headers.js';
+import {
+  ECO_SLUG, ECO_ADAPTER, discoverEcoInventory, ecoPendingRows,
+} from './eco-golf-carts.js';
 // browser-sync is loaded lazily (dynamic import) to avoid pulling in playwright
 // at module load time, which crashes Vercel Lambda environments without playwright installed.
 // import { runBrowserSync } from './browser-sync.js'; // DO NOT re-add as static import
@@ -760,6 +763,58 @@ async function runDiscoverSitemap(
   const slug     = dealer.slug;
   const adapterKey = dealer.adapter_key;
   const strategy   = dealer.discovery_strategy;
+
+  // Eco's sitemap contains sold history. Never fall through to URL-only discovery.
+  if (slug === ECO_SLUG || adapterKey === ECO_ADAPTER) {
+    try {
+      if (slug !== ECO_SLUG || adapterKey !== ECO_ADAPTER ||
+          dealer.canonical_domain !== 'ecogolfcarts.com') {
+        throw new Error('Eco dealer/adapter/domain configuration mismatch');
+      }
+      if (!dealer.sync_enabled && !dry_run) throw new Error('Eco sync is disabled');
+      const { data: block, error: blockError } = await supabase.from('dealer_block_log')
+        .select('block_reason').eq('dealer_slug', slug).eq('resolved', false).maybeSingle();
+      // Production may predate this optional table. Only an explicit missing-table
+      // error may fall back to discoverEcoInventory's mandatory live robots check.
+      if (blockError && !['42P01', 'PGRST205'].includes(blockError.code)) {
+        throw new Error(`Cannot verify Eco crawl permission: ${blockError.message}`);
+      }
+      if (block) throw new Error(`Eco source blocked: ${block.block_reason}`);
+      const discovery = await discoverEcoInventory();
+      const existing = await fetchAllPaginated<{ source_listing_url: string }>(
+        supabase, 'listings', 'source_listing_url',
+        q => q.like('source_listing_url', 'https://ecogolfcarts.com/listing/%'),
+      );
+      const pending = await fetchAllPaginated<{ source_url: string }>(
+        supabase, 'pending_imports', 'source_url',
+        q => q.like('source_url', 'https://ecogolfcarts.com/listing/%'),
+      );
+      const known = existing.map(r => r.source_listing_url).concat(pending.map(r => r.source_url));
+      const allNew = ecoPendingRows(discovery.units, known, 100);
+      const rows = ecoPendingRows(discovery.units, known, limit);
+      result.processed += discovery.units.length;
+      result.already_known += discovery.units.length - allNew.length;
+      if (!dry_run && rows.length) {
+        const { data: inserted, error } = await supabase.from('pending_imports')
+          .upsert(rows, { onConflict: 'source_url', ignoreDuplicates: true }).select('source_url');
+        if (error) throw new Error(`Eco pending queue write failed: ${error.message}`);
+        result.new_queued += inserted?.length || 0;
+      } else if (dry_run) {
+        result.new_queued += rows.length;
+      }
+      const message = `[${slug}] ${dry_run ? '[DRY RUN] ' : ''}${discovery.units.length} verified available; ` +
+        `${discovery.pendingSkipped} card-status exclusions; ${discovery.detailUnavailableSkipped} detail-status exclusions; ` +
+        `${discovery.sitemapUrls} sitemap detail URLs (includes history); ${rows.length} eligible new pending rows`;
+      result.summary.push(message);
+      if (!dry_run) await writeDiscoveryStatus(supabase, slug, 'ok', message);
+    } catch (e: any) {
+      result.errors++;
+      const message = `[${slug}] Eco adapter stopped safely: ${e?.message || e}`;
+      result.summary.push(message);
+      if (!dry_run) await writeDiscoveryStatus(supabase, slug, 'error', message);
+    }
+    return;
+  }
 
   // ── Known-blocked sources: skip fetch entirely, write block log ────────────
   // Dealers in dealer_block_log with resolved=false are flagged as blocked_public_crawl.
