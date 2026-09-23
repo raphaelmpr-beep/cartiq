@@ -8,8 +8,12 @@
 const https = require('https');
 const http = require('http');
 
-const SUPABASE_URL = 'https://aagwrcdvhuuzwrglamrt.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_AMYcEYmVFC7zSGT_c1GTaw_IlWrtbyU';
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
+const SUPABASE_KEY = (process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || '').trim();
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('Missing SUPABASE_URL and SUPABASE_ANON_KEY (or SUPABASE_KEY)');
+  process.exit(1);
+}
 
 // fetch_url_first dealers with their candidate inventory URLs
 const PROBE_TARGETS = [
@@ -150,7 +154,7 @@ async function updateDealerProbe(slug, probeResult, inventoryUrl, probeNotes) {
   return new Promise((resolve) => {
     const payload = JSON.stringify(patchBody);
     const req = https.request({
-      hostname: 'aagwrcdvhuuzwrglamrt.supabase.co',
+      hostname: new URL(SUPABASE_URL).hostname,
       path: `/rest/v1/dealers?slug=eq.${encodeURIComponent(slug)}`,
       method: 'PATCH',
       headers: {

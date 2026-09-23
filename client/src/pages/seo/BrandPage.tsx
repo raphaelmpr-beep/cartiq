@@ -16,34 +16,14 @@ import {
 } from "lucide-react";
 import type { Listing } from "@/lib/types";
 
-const SUPA = "https://aagwrcdvhuuzwrglamrt.supabase.co";
-const KEY  = "sb_publishable_AMYcEYmVFC7zSGT_c1GTaw_IlWrtbyU";
-
-// Supabase returns snake_case; ListingCard expects camelCase.
-function normalizeListing(r: any): Listing {
-  const out: any = {};
-  for (const key of Object.keys(r)) {
-    const camel = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-    out[camel] = r[key];
-  }
-  return out as Listing;
-}
-
+// Prefer same-origin API — no client Supabase credentials.
 async function fetchBrandListings(dbBrand: string): Promise<Listing[]> {
-  const params = new URLSearchParams({
-    brand:          `eq.${dbBrand}`,
-    status:         `eq.active`,
-    public_listing: `eq.true`,
-    select:         "id,title,slug,brand,model,year,condition,asking_price,deal_rating,buyer_score,image_url,city,state,battery_type,seating,source_listing_url",
-    order:          "buyer_score.desc.nullslast",
-    limit:          "12",
-  });
-  const res = await fetch(`${SUPA}/rest/v1/listings?${params}`, {
-    headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
-  });
+  const params = new URLSearchParams({ brand: dbBrand, limit: "12" });
+  const res = await fetch(`/api/listings?${params}`);
   if (!res.ok) return [];
-  const rows = await res.json();
-  return rows.map(normalizeListing);
+  const rows: Listing[] = await res.json();
+  // API already returns camelCase Listing objects from storage.norm()
+  return rows;
 }
 
 // Badge color map
