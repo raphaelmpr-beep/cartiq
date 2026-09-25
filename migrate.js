@@ -5,8 +5,12 @@
  */
 const https = require('https');
 
-const PROJECT_ID = 'aagwrcdvhuuzwrglamrt';
-const DB_PASSWORD = '4mmeXsTzVUIWIVuM';
+const PROJECT_ID = (process.env.SUPABASE_PROJECT_REF || '').trim();
+const DB_PASSWORD = (process.env.SUPABASE_DB_PASSWORD || '').trim();
+if (!PROJECT_ID || !DB_PASSWORD) {
+  console.error('Missing SUPABASE_PROJECT_REF and SUPABASE_DB_PASSWORD (or prefer DATABASE_URL-based scripts)');
+  process.exit(1);
+}
 
 // We'll use the Supabase SQL editor endpoint via Management API
 // But since we don't have a management token, use pg over REST
