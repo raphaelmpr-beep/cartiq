@@ -19,8 +19,13 @@
 import { createClient } from "@supabase/supabase-js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const SUPABASE_URL = "https://aagwrcdvhuuzwrglamrt.supabase.co";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_ANON_KEY ?? "sb_publishable_AMYcEYmVFC7zSGT_c1GTaw_IlWrtbyU";
+const SUPABASE_URL = process.env.SUPABASE_URL?.trim();
+const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_ANON_KEY)?.trim();
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  throw new Error(
+    "Missing SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_ANON_KEY) — refuse to run with hardcoded credentials",
+  );
+}
 const DRIFT_THRESHOLD = 0.15; // 15% — flag for human review
 const MIN_LISTINGS    = 5;    // minimum sample size to trust a bucket
 

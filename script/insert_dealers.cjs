@@ -3,8 +3,12 @@
 
 const https = require('https');
 
-const SUPABASE_URL = 'https://aagwrcdvhuuzwrglamrt.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_AMYcEYmVFC7zSGT_c1GTaw_IlWrtbyU';
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
+const SUPABASE_KEY = (process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || '').trim();
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('Missing SUPABASE_URL and SUPABASE_ANON_KEY (or SUPABASE_KEY)');
+  process.exit(1);
+}
 
 async function supabaseRequest(method, path, body) {
   return new Promise((resolve, reject) => {
