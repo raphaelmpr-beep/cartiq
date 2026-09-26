@@ -1,13 +1,12 @@
 // run_migration.js — applies dealer registry migration to Supabase via direct Postgres connection
 const { Pool } = require('pg');
 
-const connectionString = (process.env.DATABASE_URL || '').trim();
-if (!connectionString) {
-  console.error('Missing DATABASE_URL (Postgres URI). Do not hardcode DB passwords.');
-  process.exit(1);
-}
 const pool = new Pool({
-  connectionString,
+  host: 'aws-0-us-east-1.pooler.supabase.com',
+  port: 6543,
+  database: 'postgres',
+  user: 'postgres.aagwrcdvhuuzwrglamrt',
+  password: '4mmeXsTzVUIWIVuM',
   ssl: { rejectUnauthorized: false },
   max: 3,
   idleTimeoutMillis: 10000,
