@@ -1691,7 +1691,7 @@ export default function Admin() {
                         <td className="p-2 border border-border text-xs">{l.city}, {l.state}</td>
                         <td className="p-2 border border-border text-xs">{formatPrice(l.askingPrice ?? l.salePrice)}</td>
                         <td className="p-2 border border-border text-xs">{formatPrice(l.cartiqEstimatedValue)}</td>
-                        <td className="p-2 border border-border"><DealBadge rating={l.dealRating} /></td>
+                        <td className="p-2 border border-border"><DealBadge rating={l.dealRating} internal /></td>
                         <td className="p-2 border border-border text-xs capitalize">{l.batteryType}</td>
                         <td className="p-2 border border-border text-xs capitalize">{l.sellerType}</td>
                         <td className="p-2 border border-border">

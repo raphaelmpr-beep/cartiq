@@ -263,7 +263,7 @@ const STATIC_ROUTES: Record<
   "/golf-cart-values": {
     title: `Golf Cart Values 2026: What Every Brand Is Really Worth | ${SITE_NAME}`,
     description:
-      "See real golf cart values for 2026 by brand, age, and condition. Compare depreciation curves for Club Car, E-Z-GO, Yamaha, Evolution, ICON and more — with live dealer pricing.",
+      "See real golf cart values for 2026 by brand, age, and condition. Compare depreciation curves for Club Car, E-Z-GO, Yamaha, Evolution, ICON and more, based on typical depreciation from MSRP.",
   },
   "/used-golf-cart-value": {
     title: `Used Golf Cart Value Guide: How to Price a Used Cart in 2026 | ${SITE_NAME}`,

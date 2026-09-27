@@ -1,9 +1,10 @@
-import { cn, dealRatingLabel, dealRatingClass, batteryTypeLabel, batteryRiskClass, sourceBadgeClass, sellerTypeLabel, scoreColorClass, yesNoUnknownLabel, dealDeltaText, dealDeltaColor } from "@/lib/utils";
+import { cn, isHiddenSavingsRating, dealRatingLabel, dealRatingClass, batteryTypeLabel, batteryRiskClass, sourceBadgeClass, sellerTypeLabel, scoreColorClass, yesNoUnknownLabel, dealDeltaText, dealDeltaColor } from "@/lib/utils";
 import { Shield, Zap, Truck, Star, AlertTriangle, CheckCircle, XCircle, HelpCircle } from "lucide-react";
 
 // ── DealBadge ─────────────────────────────────────────────────────────────────
-export function DealBadge({ rating, className }: { rating?: string | null; className?: string }) {
+export function DealBadge({ rating, className, internal = false }: { rating?: string | null; className?: string; internal?: boolean }) {
   if (!rating || rating === "unknown") return null;
+  if (!internal && isHiddenSavingsRating(rating)) return null;
   return (
     <span className={cn("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold", dealRatingClass(rating), className)}>
       {dealRatingLabel(rating)}
@@ -13,7 +14,7 @@ export function DealBadge({ rating, className }: { rating?: string | null; class
 
 // ── DealDeltaBadge ────────────────────────────────────────────────────────────
 export function DealDeltaBadge({ delta, className }: { delta?: number | null; className?: string }) {
-  if (delta == null) return null;
+  if (delta == null || !dealDeltaText(delta)) return null;
   return (
     <span className={cn("text-sm font-semibold", dealDeltaColor(delta), className)}>
       {dealDeltaText(delta)}
