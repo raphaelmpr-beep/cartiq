@@ -261,7 +261,7 @@ const STATIC_ROUTES: Record<
       "Does a golf cart come with a charger? What to look for, lithium vs lead-acid charger compatibility, and what to budget if one isn't included.",
   },
   "/golf-cart-values": {
-    title: `Golf Cart Values 2026: What Every Brand Is Really Worth | ${SITE_NAME}`,
+    title: `Golf Cart Values 2026 — Free Price Guide by Brand, Year & Condition | ${SITE_NAME}`,
     description:
       "See real golf cart values for 2026 by brand, age, and condition. Compare depreciation curves for Club Car, E-Z-GO, Yamaha, Evolution, ICON and more — with live dealer pricing.",
   },
