@@ -1,0 +1,44 @@
+name: Dealer sync scheduler (DRAFT — disabled)
+
+# DRAFT. Code-only. Do not enable until ALL of these clear (see script/dealer-sync/README.md):
+#   G1  fresh DB dump + Raphael OK            G2  service-role key / ADMIN_PASSWORD / DB password rotated
+#   DE  dealer_sync_runs + dealer_sync_run_urls applied (with Raphael OK)
+#   G3  SRE SEO check (this workflow never archives / marks sold)   G4 no stealth   G5 no badge changes
+#
+# Triggers: manual only. `schedule:` stays commented out until enablement is approved.
+# GitHub only runs schedule/workflow_dispatch from the default branch, so nothing runs from this PR branch.
+on:
+  workflow_dispatch: {}
+  # schedule:
+  #   - cron: "0 9 * * *"   # 05:00 ET (EDT). TODO: enable only after G1/G2/DE tables + CoS/Raphael go.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dealer-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Second switch: repo variable must be exactly 'true' or the job is skipped entirely.
+    if: vars.SYNC_SCHEDULER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: "npm"
+      - run: npm ci
+      - name: Unit tests (no network, no DB)
+        run: npx tsx --test tests/dealer-sync.test.ts
+      - name: Run scheduler
+        env:
+          SYNC_SCHEDULER_ENABLED: ${{ vars.SYNC_SCHEDULER_ENABLED }}
+          GCQ_G2_ROTATION_CONFIRMED: ${{ vars.GCQ_G2_ROTATION_CONFIRMED }}
+          # Env secrets only. New secret names on purpose: set them ONLY with post-rotation values.
+          SUPABASE_URL: ${{ secrets.GCQ_SYNC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.GCQ_SYNC_SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx script/dealer-sync/main.ts
