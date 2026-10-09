@@ -1,4 +1,4 @@
-import { formatPrice, dealRatingLabel, dealRatingClass, dealDeltaColor, dealDeltaText } from "@/lib/utils";
+import { formatPrice, isHiddenSavingsRating, dealRatingLabel, dealRatingClass, dealDeltaColor, dealDeltaText } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { normalizeWarranty } from "@shared/warranty";
 import type { Listing } from "@/lib/types";
@@ -10,7 +10,7 @@ export function MarketCompareCard({ listing }: { listing: Partial<Listing> }) {
     <div className="bg-white border border-border rounded-xl p-4 shadow-sm space-y-3 max-w-sm w-full" data-testid="market-compare-card">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">GolfCartIQ Market Compare</span>
-        {listing.dealRating && (
+        {listing.dealRating && !isHiddenSavingsRating(listing.dealRating) && (
           <span className={cn("px-2 py-0.5 rounded-full text-xs font-semibold", dealRatingClass(listing.dealRating))}>
             {dealRatingLabel(listing.dealRating)}
           </span>

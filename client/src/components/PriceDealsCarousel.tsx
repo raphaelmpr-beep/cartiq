@@ -7,7 +7,7 @@ import { Link } from "wouter";
 import { ChevronLeft, ChevronRight, Tag, MapPin, Users, Zap, RefreshCw, TrendingDown } from "lucide-react";
 import { useRef, useState, useCallback, useEffect } from "react";
 import { DealBadge } from "./Badges";
-import { formatPrice } from "@/lib/utils";
+import { formatPrice, SHOW_SAVINGS_CLAIMS } from "@/lib/utils";
 import type { Listing } from "@/lib/types";
 
 // ── Telemetry ─────────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ function LastRefreshedLabel({ lastUpdated }: { lastUpdated?: string | null }) {
 function DealCard({ listing, priority = false, position = 0 }: { listing: Listing; priority?: boolean; position?: number }) {
   const price = listing.salePrice ?? listing.askingPrice ?? listing.regularPrice;
   const marketVal = listing.cartiqEstimatedValue;
-  const savings = marketVal && price ? marketVal - price : null;
+  const savings = SHOW_SAVINGS_CLAIMS && marketVal && price ? marketVal - price : null;
   const days = daysSince(listing.updatedAt);
   const isPriceDrop = days !== null && days <= 1 && savings && savings > 0;
 
@@ -161,7 +161,7 @@ function DealCard({ listing, priority = false, position = 0 }: { listing: Listin
           <span className="text-base font-bold text-foreground">
             {price ? formatPrice(price) : "Call"}
           </span>
-          {marketVal && price && marketVal > price && (
+          {SHOW_SAVINGS_CLAIMS && marketVal && price && marketVal > price && (
             <span className="text-[10px] text-muted-foreground line-through">
               {formatPrice(marketVal)}
             </span>
@@ -314,9 +314,11 @@ export function PriceDealsCarousel({ inline = false }: { inline?: boolean }) {
       {/* Footer note */}
       <p className="text-[10px] text-muted-foreground mt-2">
         Prices verified daily via dealer sites. Subject to dealer confirmation.{" "}
-        <Link href="/search?dealRating=great_deal" className="text-green-700 hover:underline">
-          See all great deals
-        </Link>
+        {SHOW_SAVINGS_CLAIMS && (
+          <Link href="/search?dealRating=great_deal" className="text-green-700 hover:underline">
+            See all great deals
+          </Link>
+        )}
       </p>
     </div>
   );

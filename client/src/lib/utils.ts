@@ -12,6 +12,17 @@ export function formatPrice(price?: number | null): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(price);
 }
 
+// Savings claims ("Great Deal", "Good Deal", "$X Below Market", "Save $X") are
+// hidden until the GolfCartIQ Value has a substantiated basis. The Sep 2026
+// spot-check found 0 of 18 savings claims substantiated (GCQ-03). Flip to true
+// only once the underlying valuation is fixed.
+export const SHOW_SAVINGS_CLAIMS = false;
+
+/** True when a deal rating is a savings claim that should currently be hidden. */
+export function isHiddenSavingsRating(rating?: string | null): boolean {
+  return !SHOW_SAVINGS_CLAIMS && (rating === "great_deal" || rating === "good_deal");
+}
+
 export function dealRatingLabel(rating?: DealRating | string | null): string {
   switch (rating) {
     case "great_deal": return "Great Deal";
@@ -37,7 +48,7 @@ export function dealRatingClass(rating?: string | null): string {
 export function dealDeltaText(delta?: number | null): string {
   if (delta == null) return "";
   const abs = Math.abs(delta);
-  if (delta < 0) return `${formatPrice(abs)} Below Market`;
+  if (delta < 0) return SHOW_SAVINGS_CLAIMS ? `${formatPrice(abs)} Below Market` : "";
   if (delta > 0) return `${formatPrice(abs)} Above Market`;
   return "At Market Value";
 }

@@ -14,7 +14,7 @@ import { DealBadge, SourceBadge, WiseScoreBadge, WarrantyBadge, BatteryRiskBadge
 import { MarketCompareCard } from "@/components/MarketCompareCard";
 import { WarrantyDetails } from "@/components/WarrantyDetails";
 import { normalizeWarranty } from "@shared/warranty";
-import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText } from "@/lib/utils";
+import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText, isHiddenSavingsRating } from "@/lib/utils";
 import type { Listing, Dealer } from "@/lib/types";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -73,7 +73,7 @@ export default function ListingDetail() {
       listing.publicListing !== false;
     setSEO({
       title: listing.title,
-      description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"} — GolfCartIQ GolfCartIQ Deal Rating: ${listing.dealRating ?? "unknown"}.`,
+      description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"}${isHiddenSavingsRating(listing.dealRating) ? "." : ` — GolfCartIQ GolfCartIQ Deal Rating: ${listing.dealRating ?? "unknown"}.`}`,
       image: listing.imageUrl ?? undefined,
       canonical: `https://golfcartiq.com/listing/${listing.slug ?? listing.id}`,
       noindex: !isIndexable,

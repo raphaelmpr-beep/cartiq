@@ -181,7 +181,7 @@ export function GolfCartValuesPage() {
     setSEO({
       title: "Golf Cart Values 2026 — Free Price Guide by Brand, Year & Condition",
       description:
-        "See current golf cart values by brand, model year, and condition. 2026 pricing data for Club Car, E-Z-GO, Yamaha, Icon, Evolution, and more — updated weekly from live FL and GA dealer listings.",
+        "See current golf cart values by brand, model year, and condition. 2026 reference value ranges for Club Car, E-Z-GO, Yamaha, Icon, Evolution, and more, based on typical depreciation from MSRP.",
       canonical: "https://golfcartiq.com/golf-cart-values",
       jsonLd: [
         faqPageSchema(PILLAR_FAQS),
@@ -231,7 +231,7 @@ export function GolfCartValuesPage() {
 
         <p className="text-base md:text-lg text-muted-foreground leading-relaxed">
           Unlike cars, there is no single Kelley Blue Book for golf carts — but the answer is not guesswork either.
-          GolfCartIQ tracks live dealer listings across Florida and Georgia, cross-references MSRP data, and gives you honest value ranges by
+          GolfCartIQ gives you reference value ranges based on typical depreciation from MSRP, by
           brand, year, condition, and battery type. For a personalized number, use our{" "}
           <Link href="/golf-cart-value-estimator" className="text-green-700 hover:underline font-medium">
             Golf Cart Value Estimator
