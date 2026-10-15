@@ -16,13 +16,59 @@
  * MAX_PARALLEL_BROWSER_TASKS = 4 (enforced via concurrency limiter)
  */
 
-import { chromium, type BrowserContext } from 'playwright';
+// playwright is loaded lazily only when the full-browser path is needed.
+// DO NOT add a static import for playwright here — it causes the entire module
+// to require('playwright') at init time, which crashes Vercel Lambda (not installed).
+import type { BrowserContext } from 'playwright';
 import { createClient } from '@supabase/supabase-js';
 import {
   parseJaxListing,
   type ListingData,
 } from './adapters.js';
 import { stealthFetchSitemapUrls } from './stealth-fetcher.js';
+import { sitemapHeaders } from './http-headers.js';
+
+/**
+ * Plain HTTP sitemap fetch — works in Lambda (no Playwright required).
+ * Uses rotating browser UAs via sitemapHeaders(). Falls back to sub-sitemaps
+ * if the root returns a sitemap index.
+ */
+async function httpFetchSitemapUrls(
+  sitemapUrl: string,
+  pattern: RegExp
+): Promise<{ success: boolean; urls: string[]; error?: string }> {
+  try {
+    const res = await fetch(sitemapUrl, {
+      headers: sitemapHeaders(sitemapUrl),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) return { success: false, urls: [], error: `HTTP ${res.status} ${res.statusText}` };
+    const xml = await res.text();
+    const allLocs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
+    if (!allLocs.length) return { success: false, urls: [], error: 'No <loc> entries found' };
+
+    // If this is a sitemap index, follow listing-related sub-sitemaps
+    if (xml.includes('<sitemap>') || xml.toLowerCase().includes('sitemap-index')) {
+      const subSitemaps = allLocs.filter(u => /listing|inventory|product|golf/i.test(u)).slice(0, 5);
+      const subUrls: string[] = [];
+      for (const sub of subSitemaps) {
+        try {
+          const sr = await fetch(sub, { headers: sitemapHeaders(sub), signal: AbortSignal.timeout(8000) });
+          if (!sr.ok) continue;
+          const sxml = await sr.text();
+          const subLocs = [...sxml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
+          subUrls.push(...subLocs.filter(u => pattern.test(u)));
+        } catch { continue; }
+      }
+      return { success: subUrls.length > 0, urls: subUrls, error: subUrls.length === 0 ? 'No listing URLs in sub-sitemaps' : undefined };
+    }
+
+    const listingUrls = allLocs.filter(u => pattern.test(u));
+    return { success: listingUrls.length > 0, urls: listingUrls, error: listingUrls.length === 0 ? 'No listing URLs matched pattern' : undefined };
+  } catch (err: any) {
+    return { success: false, urls: [], error: err?.message || String(err) };
+  }
+}
 
 const MAX_CONCURRENCY = 4;
 
@@ -312,7 +358,91 @@ export async function runBrowserSync(
 
   log(`[BrowserSync] Starting ${dealerCfg.name}${limit ? ` (limit: ${limit})` : ''}`);
 
-  // ── Launch browser ──────────────────────────────────────────────────────────
+  // ── urlOnly path: HTTP stealth fetch only, no Playwright needed ─────────────
+  // These dealers just need URL discovery (no page parsing). stealthFetchSitemapUrls
+  // is a plain HTTP fetch so it works in Lambda without Playwright installed.
+  if (useUrlOnly) {
+    try {
+      log(`[BrowserSync] urlOnly — HTTP fetch: ${dealerCfg.sitemapUrl}`);
+      const httpResult = await httpFetchSitemapUrls(
+        dealerCfg.sitemapUrl,
+        dealerCfg.listingUrlPattern
+      );
+
+      if (!httpResult.success || httpResult.urls.length === 0) {
+        const msg = `[${dealerSlug}] HTTP fetch returned 0 URLs: ${httpResult.error ?? 'empty sitemap'}`;
+        result.summary.push(msg);
+        await supabase.from('dealers').update({
+          last_discovery_status: 'no_new',
+          last_discovery_message: msg,
+          last_discovery_at: new Date().toISOString(),
+        }).eq('slug', dealerSlug);
+        result.duration_ms = Date.now() - start;
+        return result;
+      }
+
+      const rawUrls = limit > 0 ? httpResult.urls.slice(0, limit) : httpResult.urls;
+      log(`[BrowserSync] urlOnly stealth found ${rawUrls.length} listing URL(s)`);
+
+      // Diff against known URLs
+      const [existingRaw, pendingRaw] = await Promise.all([
+        supabase.from('listings').select('source_listing_url').eq('sync_source', dealerSlug).not('source_listing_url', 'is', null),
+        supabase.from('pending_imports').select('source_url').eq('dealer_slug', dealerSlug),
+      ]);
+      const knownUrls = new Set<string>([
+        ...(existingRaw.data || []).map((r: any) => r.source_listing_url).filter(Boolean),
+        ...(pendingRaw.data  || []).map((r: any) => r.source_url).filter(Boolean),
+      ]);
+
+      const newUrls = rawUrls.filter(u => !knownUrls.has(u));
+      result.already_known = rawUrls.length - newUrls.length;
+      result.discovered    = rawUrls.length;
+      result.summary.push(`[${dealerSlug}] ${rawUrls.length} in sitemap | ${result.already_known} known | ${newUrls.length} new`);
+
+      if (!dry_run && newUrls.length > 0) {
+        const rows = newUrls.map(u => {
+          const meta = parseSlugForUrl(u);
+          const rawTitle = [meta.year, meta.make, meta.model].filter(Boolean).join(' ') || u.split('/').pop() || u;
+          return {
+            dealer_slug:    dealerSlug,
+            source_url:     u,
+            raw_title:      rawTitle,
+            year:           meta.year,
+            make:           meta.make,
+            model:          meta.model,
+            condition:      meta.condition,
+            location_city:  dealerCfg.locationCity,
+            location_state: dealerCfg.locationState,
+            status: 'pending' as const,
+          };
+        });
+        const { error: dbErr } = await supabase.from('pending_imports').upsert(rows, { onConflict: 'source_url', ignoreDuplicates: true });
+        if (dbErr) {
+          result.db_errors++;
+          result.summary.push(`[${dealerSlug}] DB error: ${dbErr.message}`);
+        } else {
+          result.new_queued = newUrls.length;
+          result.summary.push(`[${dealerSlug}] Queued ${newUrls.length} new listings`);
+        }
+      } else if (dry_run) {
+        result.new_queued = newUrls.length;
+        result.summary.push(`[${dealerSlug}] [DRY RUN] Would queue ${newUrls.length} listings`);
+      }
+
+      result.duration_ms = Date.now() - start;
+      return result;
+    } catch (err: any) {
+      result.parse_errors++;
+      result.summary.push(`[${dealerSlug}] urlOnly sync error: ${err?.message || err}`);
+      result.duration_ms = Date.now() - start;
+      return result;
+    }
+  }
+
+  // ── Full Playwright path (page parser required — e.g. JAX) ─────────────────
+  // Dynamic import keeps playwright out of the module's top-level require() calls
+  // so urlOnly dealers can run in Lambda without Playwright installed.
+  const { chromium } = await import('playwright');
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     userAgent:
@@ -411,7 +541,8 @@ export async function runBrowserSync(
     log(`[BrowserSync] Parsing ${urlsToProcess.length} listing pages (max ${MAX_CONCURRENCY} parallel)...`);
 
     // Relaunch browser for parsing (stealth-fetcher closed its own instance)
-    const parseBrowser = await chromium.launch({ headless: true });
+    const { chromium: chromiumParser } = await import('playwright');
+    const parseBrowser = await chromiumParser.launch({ headless: true });
     const parseContext = await parseBrowser.newContext({
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +

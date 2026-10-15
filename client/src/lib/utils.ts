@@ -1,6 +1,7 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { DealRating } from "./types";
+import { warrantyLabel } from "@shared/warranty";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -84,12 +85,8 @@ export function sourceBadgeClass(sellerType?: string | null): string {
   }
 }
 
-export function yesNoUnknownLabel(val?: string | null): string {
-  switch (val) {
-    case "yes": return "Yes";
-    case "no": return "No";
-    default: return "Unknown";
-  }
+export function yesNoUnknownLabel(val?: string | boolean | null): string {
+  return warrantyLabel(val);
 }
 
 export function warrantyProviderLabel(val?: string | null): string {

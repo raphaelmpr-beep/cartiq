@@ -1,5 +1,6 @@
 import { formatPrice, dealRatingLabel, dealRatingClass, dealDeltaColor, dealDeltaText } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { normalizeWarranty } from "@shared/warranty";
 import type { Listing } from "@/lib/types";
 
 export function MarketCompareCard({ listing }: { listing: Partial<Listing> }) {
@@ -37,8 +38,8 @@ export function MarketCompareCard({ listing }: { listing: Partial<Listing> }) {
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Warranty</span>
-          <span className={listing.warrantyIncluded === "yes" ? "text-green-700 font-medium" : "text-muted-foreground"}>
-            {listing.warrantyIncluded === "yes" ? "Included" : listing.warrantyIncluded === "no" ? "No Warranty Listed" : "Unknown"}
+          <span className={normalizeWarranty(listing.warrantyIncluded) === "yes" ? "text-green-700 font-medium" : "text-muted-foreground"}>
+            {normalizeWarranty(listing.warrantyIncluded) === "yes" ? "Included" : normalizeWarranty(listing.warrantyIncluded) === "no" ? "No Warranty Listed" : "Unknown"}
           </span>
         </div>
       </div>

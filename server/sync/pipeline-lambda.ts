@@ -17,6 +17,10 @@ import {
   isNavPage,
   cleanHtmlWhitespace,
 } from './adapters.js';
+import { sitemapHeaders } from './http-headers.js';
+import {
+  ECO_SLUG, ECO_ADAPTER, discoverEcoInventory, ecoPendingRows,
+} from './eco-golf-carts.js';
 // browser-sync is loaded lazily (dynamic import) to avoid pulling in playwright
 // at module load time, which crashes Vercel Lambda environments without playwright installed.
 // import { runBrowserSync } from './browser-sync.js'; // DO NOT re-add as static import
@@ -44,7 +48,18 @@ const BOTERO_LOCATION_MAP: Array<{ keywords: string[]; dealer_slug: string; city
 interface BoteroRecord { url: string; dealer_slug: string; city: string; state: string; }
 
 /** Fetch all Botero sitemaps and return structured records with dealer_slug/city/state per URL */
+interface BoteroFetchResult {
+  records: BoteroRecord[];   // location-tagged records
+  rawUrlCount: number;        // total URLs fetched (including untagged)
+  untaggedUrls: string[];     // URLs with no city keyword match
+}
+
 async function getBoteroLocationRecords(): Promise<BoteroRecord[]> {
+  const { records } = await getBoteroFetchResult();
+  return records;
+}
+
+async function getBoteroFetchResult(): Promise<BoteroFetchResult> {
   const sitemaps = [
     'https://boterocarts.com/glc_listing-sitemap.xml',
     'https://boterocarts.com/glc_listing-sitemap2.xml',
@@ -62,15 +77,17 @@ async function getBoteroLocationRecords(): Promise<BoteroRecord[]> {
   }
 
   const records: BoteroRecord[] = [];
+  const untaggedUrls: string[] = [];
   for (const url of allUrls) {
     const lower = url.toLowerCase();
     const loc = BOTERO_LOCATION_MAP.find(l => l.keywords.some(kw => lower.includes(kw)));
     if (loc) {
       records.push({ url, dealer_slug: loc.dealer_slug, city: loc.city, state: loc.state });
+    } else {
+      untaggedUrls.push(url);
     }
-    // Skip URLs with no recognizable location (older slugs without city keyword)
   }
-  return records;
+  return { records, rawUrlCount: allUrls.length, untaggedUrls };
 }
 
 // Legacy flat-URL helper (kept for back-compat, not used in main path)
@@ -143,6 +160,121 @@ function parseSlug(url: string, dealer: string): { year: number | null; make: st
   return { year, make, model: modelSlug || null, condition };
 }
 
+
+// ─── Advantage Golf Cars (Dealer Spike platform) ──────────────────────────────
+// Multi-location dealer group. Listing URLs carry the city before the trailing
+// numeric ID: /New-Inventory-2026-E-Z-GO-Golf-Cart-...-Orlando-19111541
+// Sitemap index at /sitemap.xml links two sub-sitemaps (new + pre-owned).
+
+const ADVANTAGE_LOCATION_MAP: Array<{ keyword: string; dealer_slug: string; city: string; state: string }> = [
+  { keyword: 'orlando',     dealer_slug: 'advantage-golf-cars-orlando',         city: 'Orlando',         state: 'FL' },
+  { keyword: 'gainesville', dealer_slug: 'advantage-golf-cars-gainesville',     city: 'Gainesville',     state: 'FL' },
+  { keyword: 'daytona',     dealer_slug: 'advantage-golf-cars-daytona',         city: 'Ormond Beach',    state: 'FL' },
+  { keyword: 'miami-showroom', dealer_slug: 'advantage-golf-cars-miami',        city: 'Miami',           state: 'FL' },
+  { keyword: 'miami',       dealer_slug: 'advantage-golf-cars-miami',           city: 'Miami',           state: 'FL' },
+  { keyword: 'palm-beach',  dealer_slug: 'advantage-golf-cars-west-palm-beach', city: 'West Palm Beach', state: 'FL' },
+];
+
+const ADVANTAGE_SITEMAPS = [
+  'https://www.advantagegolfcars.com/default.asp?page=xsitemap&s=NewInventory',
+  'https://www.advantagegolfcars.com/default.asp?page=xsitemap&s=PreOwnedInventory',
+];
+
+interface AdvantageRecord { url: string; dealer_slug: string; city: string; state: string; }
+
+/** City keyword must appear immediately before the trailing numeric listing ID. */
+function tagAdvantageUrl(url: string): { dealer_slug: string; city: string; state: string } | null {
+  const m = url.toLowerCase().match(/-(orlando|gainesville|daytona|miami-showroom|miami|palm-beach)-\d{6,}/);
+  if (!m) return null;
+  const loc = ADVANTAGE_LOCATION_MAP.find(l => l.keyword === m[1]);
+  return loc ? { dealer_slug: loc.dealer_slug, city: loc.city, state: loc.state } : null;
+}
+
+async function getAdvantageFetchResult(): Promise<{ records: AdvantageRecord[]; rawUrlCount: number; untaggedUrls: string[]; fetchErrors: string[] }> {
+  const allUrls: string[] = [];
+  const fetchErrors: string[] = [];
+  for (const sitemapUrl of ADVANTAGE_SITEMAPS) {
+    // Dealer Spike's WAF intermittently 403s under load — one retry with backoff.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 2500));
+        const res = await fetch(sitemapUrl, {
+          headers: sitemapHeaders(sitemapUrl),
+          signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+        });
+        if (res.status === 403 && attempt === 0) continue; // retry once on 403
+        if (!res.ok) { fetchErrors.push(`${sitemapUrl} → HTTP ${res.status}`); break; }
+        const xml = await res.text();
+        const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)]
+          .map(m => m[1].trim().replace(/&amp;/g, '&'))
+          .filter(u => u.startsWith('http') && /Inventory-\d{4}-/i.test(u));
+        allUrls.push(...locs);
+        break;
+      } catch (e: any) {
+        if (attempt === 1) fetchErrors.push(`${sitemapUrl} → ${e?.message || e}`);
+      }
+    }
+  }
+  const records: AdvantageRecord[] = [];
+  const untaggedUrls: string[] = [];
+  for (const url of allUrls) {
+    const tag = tagAdvantageUrl(url);
+    if (tag) records.push({ url, ...tag });
+    else untaggedUrls.push(url);
+  }
+  return { records, rawUrlCount: allUrls.length, untaggedUrls, fetchErrors };
+}
+
+/** Parse Advantage Dealer Spike URL slug: /{Condition}-Inventory-{Year}-{Make}-Golf-Cart-{Model}-(Golf-Car-){City}-{Id} */
+function parseAdvantageSlug(url: string): { year: number | null; make: string | null; model: string | null; condition: string | null } {
+  const path = (url.split('/').pop() || '').split('?')[0];
+  const condition = /^pre-owned-inventory/i.test(path) ? 'used'
+    : /^new-inventory/i.test(path) ? 'new' : null;
+  const yearM = path.match(/inventory-(19\d{2}|20\d{2})-/i);
+  const year = yearM ? parseInt(yearM[1]) : null;
+
+  const afterYear = yearM ? path.slice((yearM.index ?? 0) + yearM[0].length) : path;
+  const mk = afterYear.match(/^(.+?)-Golf-C(?:art|ar)-/i);
+  let make: string | null = null;
+  let model: string | null = null;
+  if (mk) {
+    const makeMap: Record<string, string> = {
+      'e-z-go': 'E-Z-GO', 'ezgo': 'E-Z-GO', 'club-car': 'Club Car', 'yamaha': 'Yamaha',
+      'sierra': 'Sierra', 'icon': 'ICON', 'evolution': 'Evolution', 'star-ev': 'Star EV',
+      'bintelli': 'Bintelli', 'denago': 'Denago', 'denago-ev': 'Denago EV', 'teko': 'Teko',
+      'cushman': 'Cushman', 'madjax': 'MadJax', 'atlas': 'Atlas', 'epic': 'Epic',
+    };
+    const raw = mk[1].toLowerCase();
+    make = makeMap[raw] || mk[1].split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+    let rest = afterYear.slice(mk[0].length);
+    rest = rest.replace(/-\d{6,}$/, '');                       // strip trailing listing ID
+    const cityM = rest.toLowerCase().match(/-(orlando|gainesville|daytona|miami-showroom|miami|palm-beach)$/i);
+    if (cityM) rest = rest.slice(0, rest.length - cityM[0].length); // strip trailing city
+    rest = rest.replace(/-?Golf-Car-?$/i, '');                 // strip trailing marker
+    model = rest.split('-').filter(Boolean).join(' ').trim() || null;
+  }
+  return { year, make, model, condition };
+}
+
+/** Fetch og:image + og:title from a Dealer Spike listing page. Never throws. */
+async function fetchDealerSpikeOg(url: string): Promise<{ title: string | null; image_url: string | null }> {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'CartIQ/1.0' },
+      signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+    });
+    if (!res.ok) return { title: null, image_url: null };
+    const html = await res.text();
+    const img = html.match(/<meta property="og:image" content="([^"]+)"/i)?.[1] || null;
+    const rawTitle = html.match(/<meta property="og:title" content="([^"]+)"/i)?.[1] || null;
+    // "2026 E-Z-GO RXV 2 Freedom ELiTE 2.2 Lithium Golf Car | Advantage Golf Cars" → strip site suffix
+    const title = rawTitle ? rawTitle.replace(/\s*\|\s*Advantage Golf Cars.*$/i, '').trim() : null;
+    return { title, image_url: img };
+  } catch {
+    return { title: null, image_url: null };
+  }
+}
 
 // ─── DX1/Algolia inventory fetcher ────────────────────────────────────────────
 // Golf Rider (and future DX1-platform dealers) use an Algolia-powered inventory
@@ -250,13 +382,39 @@ async function fetchDx1AlgoliaInventory(cfg: Dx1AlgoliaConfig): Promise<Dx1Unit[
   return units;
 }
 
-// Golf Rider DX1 config — extracted from their inventory page HTML
-const GOLF_RIDER_DX1: Dx1AlgoliaConfig = {
+// Golf Rider DX1 config — appId, indexName, and baseUrl are stable.
+// apiKey is a short-lived signed Algolia restricted key (~1h TTL) embedded in
+// the inventory page HTML. fetchDx1LiveApiKey() scrapes it fresh at sync time.
+const GOLF_RIDER_DX1: Omit<Dx1AlgoliaConfig, 'apiKey'> & { apiKey: string } = {
   appId:     'RBG3H22Y5V',
-  apiKey:    'MTE0ODVhZDAzNjQ2Y2I0Mzg5MGUzMzQ4Yjg3NmQ5MTI2ZmQ0Y2YwNjVkNDEzYmRkMDhjZjdjZTE3YzdlZWUwZGF0dHJpYnV0ZXNUb1JldHJpZXZlPSomYXR0cmlidXRlc1RvSGlnaGxpZ2h0PU1hbnVmYWN0dXJlcixQcm9kdWN0TmFtZSxQcm9kdWN0VHlwZSZmYWNldEZpbHRlcnM9JTVCJTVCJTIyT3JnYW5pemF0aW9uSWQlM0E2MGU4MzUyYi01MWU5LTRhNzQtYmE0Yi0xYzc3ZjFkY2MzZDIlMjIlNUQlMkMlNUIlMjJTaXRlR3VpZExpc3RzJTNBMTk3ZGI4ZjUtMGVhMy00OGQxLTgxZGEtMTA4N2I4ZGUzNTY3JTIyJTVEJTVEJmFuYWx5dGljcz10cnVlJmFuYWx5dGljc1RhZ3M9R29sZitSaWRlciUyQytJbmMuJm51bWVyaWNGaWx0ZXJzPSU1QiU1QiUyMkhhc0RhdGVTb2xkJTNEMCUyMiUyQyUyMlNvbGRVbml0c0V4cGlyZURhdGUlM0UlM0QxNzgyMzQ1NjAwJTIyJTVEJTVEJnJlc3RyaWN0SW5kaWNlcz1wcm9kX1dlYlNlbGxhYmxlLHByb2RfV2ViU2VsbGFibGVfUHJpY2VfQXNjLHByb2RfV2ViU2VsbGFibGVfUHJpY2VfRGVzYyxwcm9kX1dlYlNlbGxhYmxlX1llYXJfQXNjLHByb2RfV2ViU2VsbGFibGVfWWVhcl9EZXNjLHByb2RfV2ViU2VsbGFibGVfQWdlX0FzYyxwcm9kX1dlYlNlbGxhYmxlX0FnZV9EZXNjJnZhbGlkVW50aWw9MTc4MjM5MjAzMA==',
+  apiKey:    '', // populated at runtime by fetchDx1LiveApiKey()
   indexName: 'prod_WebSellable',
   baseUrl:   'https://www.golfrider.com',
 };
+
+/**
+ * Fetch a live Algolia restricted key from Golf Rider's inventory page.
+ * DX1 Showroom embeds the signed key directly in the HTML as JSON.
+ * The key has a ~1h validUntil so we always fetch fresh instead of hardcoding.
+ */
+async function fetchDx1LiveApiKey(baseUrl: string): Promise<string> {
+  const inventoryUrl = `${baseUrl}/Inventory/All-Inventory-In-Stock`;
+  const res = await fetch(inventoryUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) throw new Error(`fetchDx1LiveApiKey: HTTP ${res.status} from ${inventoryUrl}`);
+  const html = await res.text();
+  // DX1 Showroom embeds: "apiKey":"<base64-encoded-restricted-key>"
+  const m = html.match(/"apiKey":"([A-Za-z0-9+/=]{80,})"/);
+  if (!m) throw new Error('fetchDx1LiveApiKey: apiKey not found in Golf Rider inventory page HTML');
+  return m[1];
+}
 
 // ─── Main sync entry point (Lambda-safe) ─────────────────────────────────────
 
@@ -380,8 +538,33 @@ const ADAPTER_OVERRIDES: Record<string, () => Promise<string[]>> = {
 const BOTERO_MULTI_ADAPTER = getBoteroLocationRecords;
 
 // Rich adapters return pre-parsed Dx1Unit[] rows (full metadata, no slug-parsing needed)
+/**
+ * Check if a base64-encoded DX1 Algolia restricted key has expired.
+ * Returns an ISO date string if expired, or null if still valid.
+ */
+function getDx1KeyExpiry(apiKeyBase64: string): Date | null {
+  try {
+    const decoded = Buffer.from(apiKeyBase64, 'base64').toString('utf-8');
+    const m = decoded.match(/validUntil=(\d+)/);
+    if (!m) return null;
+    const expiry = new Date(parseInt(m[1]) * 1000);
+    return expiry < new Date() ? expiry : null;
+  } catch {
+    return null;
+  }
+}
+
 const RICH_ADAPTER_OVERRIDES: Record<string, (dealer: DealerSourceRecord) => Promise<Dx1Unit[]>> = {
-  golf_rider: () => fetchDx1AlgoliaInventory(GOLF_RIDER_DX1),
+  golf_rider: async () => {
+    // Always fetch a fresh key — the signed key has a ~1h TTL and is embedded
+    // in the inventory page HTML, so we scrape it at sync time instead of
+    // hardcoding it and dealing with periodic manual renewals.
+    console.log('[golf_rider] Fetching live DX1 Algolia key from Golf Rider inventory page...');
+    const liveKey = await fetchDx1LiveApiKey(GOLF_RIDER_DX1.baseUrl);
+    const cfg: Dx1AlgoliaConfig = { ...GOLF_RIDER_DX1, apiKey: liveKey };
+    console.log(`[golf_rider] Got live key (validUntil embedded), querying Algolia index ${cfg.indexName}`);
+    return fetchDx1AlgoliaInventory(cfg);
+  },
 };
 
 
@@ -581,6 +764,58 @@ async function runDiscoverSitemap(
   const adapterKey = dealer.adapter_key;
   const strategy   = dealer.discovery_strategy;
 
+  // Eco's sitemap contains sold history. Never fall through to URL-only discovery.
+  if (slug === ECO_SLUG || adapterKey === ECO_ADAPTER) {
+    try {
+      if (slug !== ECO_SLUG || adapterKey !== ECO_ADAPTER ||
+          dealer.canonical_domain !== 'ecogolfcarts.com') {
+        throw new Error('Eco dealer/adapter/domain configuration mismatch');
+      }
+      if (!dealer.sync_enabled && !dry_run) throw new Error('Eco sync is disabled');
+      const { data: block, error: blockError } = await supabase.from('dealer_block_log')
+        .select('block_reason').eq('dealer_slug', slug).eq('resolved', false).maybeSingle();
+      // Production may predate this optional table. Only an explicit missing-table
+      // error may fall back to discoverEcoInventory's mandatory live robots check.
+      if (blockError && !['42P01', 'PGRST205'].includes(blockError.code)) {
+        throw new Error(`Cannot verify Eco crawl permission: ${blockError.message}`);
+      }
+      if (block) throw new Error(`Eco source blocked: ${block.block_reason}`);
+      const discovery = await discoverEcoInventory();
+      const existing = await fetchAllPaginated<{ source_listing_url: string }>(
+        supabase, 'listings', 'source_listing_url',
+        q => q.like('source_listing_url', 'https://ecogolfcarts.com/listing/%'),
+      );
+      const pending = await fetchAllPaginated<{ source_url: string }>(
+        supabase, 'pending_imports', 'source_url',
+        q => q.like('source_url', 'https://ecogolfcarts.com/listing/%'),
+      );
+      const known = existing.map(r => r.source_listing_url).concat(pending.map(r => r.source_url));
+      const allNew = ecoPendingRows(discovery.units, known, 100);
+      const rows = ecoPendingRows(discovery.units, known, limit);
+      result.processed += discovery.units.length;
+      result.already_known += discovery.units.length - allNew.length;
+      if (!dry_run && rows.length) {
+        const { data: inserted, error } = await supabase.from('pending_imports')
+          .upsert(rows, { onConflict: 'source_url', ignoreDuplicates: true }).select('source_url');
+        if (error) throw new Error(`Eco pending queue write failed: ${error.message}`);
+        result.new_queued += inserted?.length || 0;
+      } else if (dry_run) {
+        result.new_queued += rows.length;
+      }
+      const message = `[${slug}] ${dry_run ? '[DRY RUN] ' : ''}${discovery.units.length} verified available; ` +
+        `${discovery.pendingSkipped} card-status exclusions; ${discovery.detailUnavailableSkipped} detail-status exclusions; ` +
+        `${discovery.sitemapUrls} sitemap detail URLs (includes history); ${rows.length} eligible new pending rows`;
+      result.summary.push(message);
+      if (!dry_run) await writeDiscoveryStatus(supabase, slug, 'ok', message);
+    } catch (e: any) {
+      result.errors++;
+      const message = `[${slug}] Eco adapter stopped safely: ${e?.message || e}`;
+      result.summary.push(message);
+      if (!dry_run) await writeDiscoveryStatus(supabase, slug, 'error', message);
+    }
+    return;
+  }
+
   // ── Known-blocked sources: skip fetch entirely, write block log ────────────
   // Dealers in dealer_block_log with resolved=false are flagged as blocked_public_crawl.
   // Fail-open: if the table doesn't exist yet (migration pending), skip gracefully.
@@ -619,46 +854,62 @@ async function runDiscoverSitemap(
   // runBrowserSync() will throw — the catch below marks the dealer as
   // 'needs_browser' so the next Playwright-capable run picks it up.
   if (dealer.browser_required) {
-    const browserSyncDealers = ['jax-golf-carts-jacksonville'];
-    if (browserSyncDealers.includes(slug)) {
-      try {
-        const { runBrowserSync } = await import('./browser-sync.js');
-        const bsResult = await runBrowserSync({
-          dealer: slug,
-          limit,
-          dry_run,
-          verbose: true,
-        });
-        result.new_queued    += bsResult.new_queued;
-        result.already_known += bsResult.already_known;
-        result.processed     += bsResult.discovered;
-        if (bsResult.parse_errors > 0 || bsResult.db_errors > 0) result.errors++;
-        bsResult.summary.forEach(s => result.summary.push(s));
-        await writeDiscoveryStatus(
-          supabase, slug,
-          bsResult.new_queued > 0 ? 'ok' : 'no_new',
-          bsResult.summary[bsResult.summary.length - 1] || 'Browser sync complete'
-        );
-      } catch (e: any) {
-        // Playwright unavailable in Lambda — mark for next Playwright-capable run.
-        const isPlaywrightMissing = /playwright|chromium|browserType|Executable doesn/i.test(e?.message || '');
-        const msg = isPlaywrightMissing
-          ? `[${slug}] Playwright not available in this environment — will retry from weekly cron`
-          : `[${slug}] Browser sync error: ${e?.message || e}`;
-        result.errors++;
-        result.summary.push(msg);
-        await writeDiscoveryStatus(supabase, slug, isPlaywrightMissing ? 'needs_browser' : 'error', msg);
-      }
-      return;
-      }
+    // Route ALL browser_required dealers through browser-sync.ts.
+    // The urlOnly:true dealers use stealthFetchSitemapUrls (HTTP, no Playwright) so they
+    // run safely in Lambda. Full-parser dealers (e.g. JAX) use Playwright and are caught
+    // below if Playwright is unavailable. browser-sync.ts handles "not in registry" gracefully.
+    try {
+      const { runBrowserSync } = await import('./browser-sync.js');
+      const bsResult = await runBrowserSync({
+        dealer: slug,
+        limit,
+        dry_run,
+        verbose: true,
+      });
+      result.new_queued    += bsResult.new_queued;
+      result.already_known += bsResult.already_known;
+      result.processed     += bsResult.discovered;
+      if (bsResult.parse_errors > 0 || bsResult.db_errors > 0) result.errors++;
+      bsResult.summary.forEach(s => result.summary.push(s));
+      // If browser-sync reported "not found in registry" treat as not_configured
+      const notInRegistry = bsResult.summary.some(s => s.includes('Not found in BROWSER_SYNC_DEALERS'));
+      const status = notInRegistry ? 'not_configured' : (bsResult.new_queued > 0 ? 'ok' : 'no_new');
+      await writeDiscoveryStatus(
+        supabase, slug,
+        status,
+        bsResult.summary[bsResult.summary.length - 1] || 'Browser sync complete'
+      );
+    } catch (e: any) {
+      // Playwright unavailable in Lambda — mark for next Playwright-capable run.
+      const isPlaywrightMissing = /playwright|chromium|browserType|Executable doesn/i.test(e?.message || '');
+      const msg = isPlaywrightMissing
+        ? `[${slug}] Playwright not available in this environment — will retry from weekly cron`
+        : `[${slug}] Browser sync error: ${e?.message || e}`;
+      result.errors++;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, isPlaywrightMissing ? 'needs_browser' : 'error', msg);
     }
+    return;
+  }
 
   // ── Resolve listing URLs ──────────────────────────────────────────────────
   let sitemapUrls: string[] = [];
 
   if (adapterKey && RICH_ADAPTER_OVERRIDES[adapterKey]) {
-    // Rich adapter — returns fully structured rows (no slug-parsing needed)
-    const units = await RICH_ADAPTER_OVERRIDES[adapterKey](dealer);
+    // Rich adapter — returns fully structured rows (no slug-parsing needed).
+    // Wrap in try/catch so a single dealer failure (e.g. expired API key)
+    // does NOT abort the whole dealer=all loop and cause a 500 response.
+    let units: Dx1Unit[];
+    try {
+      units = await RICH_ADAPTER_OVERRIDES[adapterKey](dealer);
+    } catch (e: any) {
+      const msg = `[${slug}] Rich adapter error: ${e?.message || e}`;
+      result.errors++;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, 'error', msg);
+      return;
+    }
+
     if (!units.length) {
       const msg = `[${slug}] Rich adapter returned 0 units`;
       result.summary.push(msg);
@@ -728,9 +979,12 @@ async function runDiscoverSitemap(
   } else if (adapterKey === 'botero') {
     // ── Botero multi-location adapter ───────────────────────────────────────
     // Each URL carries its own dealer_slug/city/state — queue per-location correctly.
-    const allRecords = await BOTERO_MULTI_ADAPTER();
-    if (!allRecords.length) {
-      const msg = `[botero] Sitemap returned 0 location-tagged URLs`;
+    // NOTE: Botero sitemap URLs use generic slugs (no city keyword), so location-tagged
+    // records are often 0 even when the sitemap has 1000+ URLs. getBoteroFetchResult()
+    // returns both tagged records AND the raw untagged pool so we can fall through.
+    const { records: allRecords, rawUrlCount, untaggedUrls: allUntaggedUrls } = await getBoteroFetchResult();
+    if (rawUrlCount === 0) {
+      const msg = `[botero] Sitemap fetch returned 0 URLs (fetch may have failed or been blocked)`;
       result.summary.push(msg);
       await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
       return;
@@ -739,15 +993,37 @@ async function runDiscoverSitemap(
     // Only process the target location (filter by dealer_slug) when called for a specific dealer
     const targetSlug = dealer.slug; // e.g. 'botero-carts-jacksonville'
     const isGenericBotero = targetSlug === 'botero'; // if somehow called with adapter slug directly
-    const relevantRecords = isGenericBotero
+    let relevantRecords: BoteroRecord[] = isGenericBotero
       ? allRecords                                             // all locations
       : allRecords.filter(r => r.dealer_slug === targetSlug); // just this location
 
     if (!relevantRecords.length) {
-      const msg = `[${targetSlug}] No location-tagged URLs found for this dealer (${allRecords.length} total across all Botero locations)`;
-      result.summary.push(msg);
-      await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
-      return;
+      // Fallback: Botero sitemap URLs often have no city keyword in the slug, so the
+      // location matcher returns 0 for all locations. Look up city/state from the DB,
+      // then claim untagged URLs (not owned by another location).
+      const { data: dealerRow } = await supabase
+        .from('dealers')
+        .select('city,state')
+        .eq('slug', targetSlug)
+        .single();
+      const city  = dealerRow?.city  || 'Unknown';
+      const state = dealerRow?.state || 'FL';
+      // URLs already tagged to a DIFFERENT Botero location — don't reassign them
+      const taggedToOther = new Set(
+        allRecords
+          .filter(r => r.dealer_slug !== targetSlug && r.dealer_slug !== 'botero')
+          .map(r => r.url)
+      );
+      // Use the untagged pool (URLs with no city keyword match at all)
+      const candidateUrls = allUntaggedUrls.filter(u => !taggedToOther.has(u));
+      if (!candidateUrls.length) {
+        const msg = `[${targetSlug}] No location-tagged or untagged URLs available (${rawUrlCount} total fetched, all tagged to other locations)`;
+        result.summary.push(msg);
+        await writeDiscoveryStatus(supabase, slug, 'no_new', msg);
+        return;
+      }
+      relevantRecords = candidateUrls.map(u => ({ url: u, dealer_slug: targetSlug, city, state }));
+      result.summary.push(`[${targetSlug}] 0 location-tagged URLs — using untagged pool (${relevantRecords.length}/${rawUrlCount} URLs) assigned to ${city}, ${state}`);
     }
 
     // Diff against all known URLs across ALL botero dealers (source_url is globally unique).
@@ -810,6 +1086,97 @@ async function runDiscoverSitemap(
       result.new_queued = rows.length;
       result.summary.push(`[${targetSlug}] [DRY RUN] Would queue ${rows.length} listings`);
       rows.slice(0, 5).forEach(r => result.summary.push(`  → ${r.raw_title || r.source_url} (${r.location_city}, ${r.location_state})`));
+    }
+    return;
+
+  } else if (adapterKey === 'advantage') {
+    // ── Advantage Golf Cars multi-location adapter (Dealer Spike) ─────────────
+    // Each URL carries its own dealer_slug/city/state — queue per-location.
+    // Pages are server-rendered; we enrich each queued row with og:image/title
+    // (no prices are published server-side — price stays NULL).
+    const { records: allRecords, rawUrlCount, untaggedUrls, fetchErrors } = await getAdvantageFetchResult();
+    fetchErrors.forEach(e => result.summary.push(`[advantage] Sitemap fetch issue: ${e}`));
+    if (!allRecords.length) {
+      const msg = `[${slug}] Advantage sitemaps returned 0 tagged records (raw: ${rawUrlCount})`;
+      result.summary.push(msg);
+      await writeDiscoveryStatus(supabase, slug, 'error', msg);
+      return;
+    }
+
+    const targetSlug = dealer.slug;
+    // Queue ALL locations in one run: dealer=all dedupes by adapter_key, so a
+    // per-location filter here would starve the other 4 locations of inventory.
+    const byLoc: Record<string, number> = {};
+    allRecords.forEach(r => { byLoc[r.dealer_slug] = (byLoc[r.dealer_slug] || 0) + 1; });
+    result.summary.push(`[advantage] Tagged ${allRecords.length}/${rawUrlCount} URLs: ${Object.entries(byLoc).map(([k, v]) => `${k.replace('advantage-golf-cars-', '')}=${v}`).join(' ')}`);
+    let relevantRecords = allRecords;
+
+    // Fallback: if NO location has tagged URLs, assign untagged URLs to the
+    // requesting dealer's city/state (mirrors the botero fallback).
+    if (!relevantRecords.length && untaggedUrls.length > 0) {
+      const { data: dealerRow } = await supabase
+        .from('dealers')
+        .select('city,state')
+        .eq('slug', targetSlug)
+        .single();
+      relevantRecords = untaggedUrls.map(url => ({
+        url,
+        dealer_slug: targetSlug,
+        city: dealerRow?.city || 'Unknown',
+        state: dealerRow?.state || 'FL',
+      }));
+      console.log(`[advantage] No tagged URLs for ${targetSlug}; falling back to ${untaggedUrls.length} untagged URLs`);
+    }
+
+    // Global diff: a listing URL is unique to one unit across all locations.
+    const [pendingKnown, existingListings] = await Promise.all([
+      fetchAllPaginated<{ source_url: string }>(supabase, 'pending_imports', 'source_url', (q) => q.not('source_url', 'is', null)),
+      fetchAllPaginated<{ source_listing_url: string }>(supabase, 'listings', 'source_listing_url', (q) => q.not('source_listing_url', 'is', null)),
+    ]);
+    const knownUrls = new Set<string>([
+      ...pendingKnown.map(r => r.source_url).filter(Boolean),
+      ...existingListings.map(r => r.source_listing_url).filter(Boolean),
+    ]);
+    const newRecords = relevantRecords.filter(r => !knownUrls.has(r.url));
+    result.already_known = relevantRecords.length - newRecords.length;
+    result.summary.push(`[${targetSlug}] ${relevantRecords.length} in sitemap for this location | ${result.already_known} known | ${newRecords.length} new`);
+
+    const toProcess = newRecords.slice(0, limit);
+    const rows: any[] = [];
+    for (const rec of toProcess) {
+      const meta = parseAdvantageSlug(rec.url);
+      const og = await fetchDealerSpikeOg(rec.url);
+      rows.push({
+        dealer_slug:    rec.dealer_slug,
+        source_url:     rec.url,
+        raw_title:      og.title || [meta.year, meta.make, meta.model].filter(Boolean).join(' ') || rec.url,
+        year:           meta.year,
+        make:           meta.make,
+        model:          meta.model,
+        condition:      meta.condition,
+        image_url:      og.image_url,
+        location_city:  rec.city,
+        location_state: rec.state,
+        status:         'pending',
+      });
+    }
+    result.processed = toProcess.length;
+
+    if (!dry_run && rows.length > 0) {
+      const { error } = await supabase.from('pending_imports').upsert(rows, { onConflict: 'source_url', ignoreDuplicates: true });
+      if (error) {
+        result.errors++;
+        result.summary.push(`[${targetSlug}] DB insert error: ${error.message}`);
+        await writeDiscoveryStatus(supabase, slug, 'error', error.message);
+      } else {
+        result.new_queued = rows.length;
+        await writeDiscoveryStatus(supabase, slug, 'ok', `Queued ${rows.length} new Advantage listings across all locations (${relevantRecords.length} in sitemap, ${result.already_known} already known)`);
+        result.summary.push(`[${targetSlug}] Queued ${rows.length} new listings across all Advantage locations`);
+      }
+    } else if (dry_run) {
+      result.new_queued = rows.length;
+      result.summary.push(`[${targetSlug}] [DRY RUN] Would queue ${rows.length} listings (all Advantage locations)`);
+      rows.slice(0, 5).forEach(r => result.summary.push(`  → ${r.raw_title} | img: ${r.image_url ? 'yes' : 'NO'} (${r.location_city}, ${r.location_state})`));
     }
     return;
 
@@ -1035,37 +1402,9 @@ export async function enrichFromJsonLd(listingPageUrl: string): Promise<Partial<
 
 // ─── Warranty parser ─────────────────────────────────────────────────────────
 function parseWarrantyFromHtml(html: string): Partial<ListingEnrichment> {
-  // Lifetime warranty
-  if (/lifetime\s+(?:lithium\s+)?(?:battery\s+)?warranty/i.test(html)) {
-    return {
-      warranty_included: true,
-      warranty_notes: 'Lifetime Lithium battery warranty',
-    };
-  }
-  // N-Year warranty
-  const yearMatch = html.match(/(\d+)\s*[-\s]?[Yy]ear\s+(?:Eco\s+Battery\s+)?(?:Manufacturer\s+)?Warranty/i);
-  if (yearMatch) {
-    const years = parseInt(yearMatch[1], 10);
-    return {
-      warranty_included: true,
-      warranty_months: years * 12,
-      warranty_notes: `${years}-Year manufacturer warranty`,
-    };
-  }
-  // Factory / Manufacturer warranty
-  if (/(?:factory|manufacturer)\s+warranty/i.test(html)) {
-    return {
-      warranty_included: true,
-      warranty_notes: 'Manufacturer warranty included',
-    };
-  }
-  // Generic warranty mention
-  if (/\bwarranty\b/i.test(html)) {
-    return {
-      warranty_included: true,
-      warranty_notes: 'Warranty available',
-    };
-  }
+  // Full-page text includes navigation, other units and paid service contracts.
+  // Do not infer inclusion, provider, battery scope or lifetime coverage from it.
+  // Reviewed unit-level fields remain intact; scoped extraction is a separate task.
   return {};
 }
 

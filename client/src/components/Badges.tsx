@@ -66,25 +66,29 @@ export function SourceBadge({ sellerType, sourceType, retailerName, className }:
   );
 }
 
+import { normalizeWarranty, normalizeWarrantyMonths } from "@shared/warranty";
+
 // ── WarrantyBadge ─────────────────────────────────────────────────────────────
 export function WarrantyBadge({ warrantyIncluded, warrantyMonths, className }: {
-  warrantyIncluded?: string | null;
+  warrantyIncluded?: string | boolean | number | null;
   warrantyMonths?: number | null;
   className?: string;
 }) {
   // Only render when we have a definitive yes/no — hide when unknown/null
-  if (!warrantyIncluded || warrantyIncluded === "unknown") return null;
+  const warrantyState = normalizeWarranty(warrantyIncluded);
+  const months = normalizeWarrantyMonths(warrantyMonths);
+  if (warrantyState === "unknown") return null;
 
-  const icon = warrantyIncluded === "yes"
+  const icon = warrantyState === "yes"
     ? <CheckCircle className="h-3 w-3" />
     : <XCircle className="h-3 w-3" />;
 
-  const cls = warrantyIncluded === "yes"
+  const cls = warrantyState === "yes"
     ? "bg-green-50 text-green-700 border border-green-200"
     : "bg-gray-50 text-gray-500 border border-gray-200";
 
-  const label = warrantyIncluded === "yes"
-    ? `Warranty${warrantyMonths ? ` (${warrantyMonths}mo)` : ""}`
+  const label = warrantyState === "yes"
+    ? `Warranty${months ? ` (${months}mo)` : ""}`
     : "No Warranty";
 
   return (

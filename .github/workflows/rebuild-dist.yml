@@ -1,0 +1,85 @@
+name: Rebuild dist on server source changes
+
+# Why this exists:
+#   vercel.json packages committed dist/ artifacts directly (no build step on
+#   Vercel). Without this workflow, any PR that edits server/*.ts, client/*,
+#   shared/*, script/build.ts, or package* files ships stale dist/ unless the
+#   author remembers to run `npm run build` locally and commit dist/.
+#
+#   This workflow catches the mismatch automatically: on every PR against main
+#   that touches source, it rebuilds and — if dist/ actually changed — pushes
+#   a follow-up commit to the PR branch so the merge deploys the intended code.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "client/**"
+      - "shared/**"
+      - "script/build.ts"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: write
+
+concurrency:
+  # One rebuild per PR at a time; new pushes cancel in-flight rebuilds.
+  group: rebuild-dist-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    # Skip PRs that originate from forks (no push perms) and skip PRs whose
+    # head branch itself only touches dist/ (avoid recursive self-triggering).
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v4
+        with:
+          # Check out the actual PR head so we can push commits back to it.
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          fetch-depth: 0
+          # Use the default GITHUB_TOKEN which has contents: write on this repo.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run build
+        run: npm run build
+
+      - name: Check whether dist/ changed
+        id: diff
+        run: |
+          if [[ -n "$(git status --porcelain dist/)" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "dist/ has uncommitted changes after build:"
+            git status --short dist/
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "dist/ is up to date; nothing to commit."
+          fi
+
+      - name: Commit and push rebuilt dist/
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dist/
+          git commit -m "build: rebuild dist/ (automated)
+
+          Rebuilt by .github/workflows/rebuild-dist.yml because source files in
+          this PR changed but dist/ was not manually rebuilt. Vercel packages
+          dist/ directly, so this commit is required for the source changes to
+          reach production."
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}

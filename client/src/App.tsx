@@ -102,7 +102,7 @@ function AppRoutes() {
           {/* Top row — brand + nav links */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-foreground">GolfCart<span className="text-green-600">Wise</span></span>
+              <span className="font-bold text-foreground">GolfCart<span className="text-green-600">IQ</span></span>
               <span>Know before you buy — Florida &amp; Georgia</span>
             </div>
             <div className="flex flex-wrap gap-4">

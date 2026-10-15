@@ -1,9 +1,11 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { timingSafeEqual } from "node:crypto";
 import { storage } from "./storage";
 import { calculateGolfCartWiseValue, enrichListing } from "./pricing";
 import { parseCsv, csvRowToListing } from "./csvParser";
 import { registerSitemapRoutes } from "./sitemaps";
+import { normalizeWarrantyFields } from "../shared/warranty";
 
 // ─── snake_case → camelCase normalizer ───────────────────────────────────────
 // Supabase returns column names as snake_case. The frontend expects camelCase.
@@ -15,7 +17,7 @@ function toCamel(obj: Record<string, any>): Record<string, any> {
     const camel = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
     out[camel] = obj[key];
   }
-  return out;
+  return normalizeWarrantyFields(out);
 }
 function normList(rows: any[]): any[] { return rows.map(r => norm(r)); }
 
@@ -90,12 +92,14 @@ async function enrichListingWithComps(data: Record<string, any>, excludeId?: num
   const condition = data.condition ?? "new";
   let comps: any[] = [];
   let brandComps: any[] = [];
+  const seating   = data.seating   ?? null;
+  const powerType = data.power_type ?? null;
   if (brand && model) {
-    comps = await storage.getCompsForListing(brand, model, year, condition, excludeId);
+    comps = await storage.getCompsForListing(brand, model, year, condition, excludeId, seating, powerType);
   }
   // Brand-only fallback when exact model returns no comps
   if (comps.length === 0 && brand) {
-    brandComps = await storage.getBrandCompsForListing(brand, year, condition, excludeId);
+    brandComps = await storage.getBrandCompsForListing(brand, year, condition, excludeId, seating, powerType);
   }
   const pricing = enrichListing(data, comps, brandComps);
   return { ...data, ...pricing };
@@ -221,7 +225,8 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       { path: "/search",       priority: "0.9", changefreq: "daily"   },
       { path: "/deal-checker", priority: "0.8", changefreq: "weekly"  },
       { path: "/buyer-guide",  priority: "0.8", changefreq: "weekly"  },
-      { path: "/sell-my-cart", priority: "0.5", changefreq: "monthly" },
+      // /sell is intentionally omitted while it's a placeholder page ("coming soon").
+      // Re-add here + in server/sitemap-config.ts + server/seo-meta.ts when it ships.
       { path: "/how-it-works", priority: "0.7", changefreq: "monthly" },
       { path: "/disclosure",   priority: "0.3", changefreq: "yearly"  },
       // City landing pages
@@ -236,7 +241,20 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       { path: "/golf-carts-for-sale/panama-city-beach-fl", priority: "0.7", changefreq: "daily" },
       { path: "/golf-carts-for-sale/peachtree-city-ga",    priority: "0.8", changefreq: "daily" },
       { path: "/golf-carts-for-sale/atlanta-ga",           priority: "0.8", changefreq: "daily" },
+      // Tier 1 city expansion — added 2026-08-25
+      { path: "/golf-carts-for-sale/woodstock-ga",          priority: "0.8", changefreq: "weekly" },
+      { path: "/golf-carts-for-sale/lakeland-fl",           priority: "0.8", changefreq: "weekly" },
+      { path: "/golf-carts-for-sale/ocala-fl",              priority: "0.8", changefreq: "weekly" },
+      { path: "/golf-carts-for-sale/cumming-ga",            priority: "0.7", changefreq: "weekly" },
+      { path: "/golf-carts-for-sale/tifton-ga",             priority: "0.7", changefreq: "weekly" },
+      { path: "/golf-carts-for-sale/pensacola-fl",          priority: "0.7", changefreq: "weekly" },
+      { path: "/golf-carts-for-sale/delray-beach-fl",       priority: "0.7", changefreq: "weekly" },
+      { path: "/golf-carts-for-sale/melbourne-fl",          priority: "0.7", changefreq: "weekly" },
+      { path: "/golf-carts-for-sale/ponte-vedra-beach-fl",  priority: "0.7", changefreq: "weekly" },
+      { path: "/golf-carts-for-sale/fort-lauderdale-fl",    priority: "0.7", changefreq: "weekly" },
+      { path: "/golf-carts-for-sale/jacksonville-beach-fl", priority: "0.7", changefreq: "weekly" },
       // Brand pages
+      { path: "/brands",           priority: "0.8", changefreq: "monthly" },
       { path: "/brands/ezgo",      priority: "0.8", changefreq: "weekly" },
       { path: "/brands/club-car",  priority: "0.8", changefreq: "weekly" },
       { path: "/brands/yamaha",    priority: "0.7", changefreq: "weekly" },
@@ -246,6 +264,14 @@ Source: [GolfCartIQ](https://golfcartiq.com) — Know before you buy.`);
       { path: "/brands/bintelli",  priority: "0.6", changefreq: "weekly" },
       { path: "/brands/epic",      priority: "0.6", changefreq: "weekly" },
       { path: "/brands/denago",    priority: "0.6", changefreq: "weekly" },
+      { path: "/brands/dach-vehicles", priority: "0.6", changefreq: "weekly" },
+      { path: "/brands/sivo",      priority: "0.6", changefreq: "weekly" },
+      { path: "/brands/teko-ev",   priority: "0.6", changefreq: "weekly" },
+      { path: "/brands/verdi",     priority: "0.6", changefreq: "weekly" },
+      // Valuation pillar pages (added 2026-07-27 CGI: GSC shows 25+ valuation queries)
+      { path: "/golf-cart-values",           priority: "0.9", changefreq: "weekly" },
+      { path: "/used-golf-cart-value",       priority: "0.8", changefreq: "weekly" },
+      { path: "/golf-cart-value-estimator",  priority: "0.9", changefreq: "weekly" },
       // Battery guide pages
       { path: "/golf-cart-batteries",                      priority: "0.8", changefreq: "monthly" },
       { path: "/golf-cart-batteries/lithium-vs-lead-acid", priority: "0.8", changefreq: "monthly" },
@@ -338,7 +364,13 @@ ${pageUrls.join("\n")}
   // ─── Auth middleware ─────────────────────────────────────────────────────────
   function requireAdmin(req: any, res: any, next: any) {
     const token = req.headers["x-admin-token"];
-    if (token === ADMIN_PASSWORD) return next();
+    const pw = ADMIN_PASSWORD!; // guarded by boot-time check above
+    if (
+      token &&
+      typeof token === "string" &&
+      token.length === pw.length &&
+      timingSafeEqual(Buffer.from(token), Buffer.from(pw))
+    ) return next();
     return res.status(401).json({ error: "Unauthorized" });
   }
 
@@ -668,12 +700,17 @@ ${pageUrls.join("\n")}
     try {
       const { eventType, listingId, dealerId, city, state, brand, isFeatured = false, position, sessionId } = req.body as Record<string, any>;
       if (!["impression", "click"].includes(eventType) || !listingId) return;
+      // Truncate free-form strings to bounded lengths before writing to DB
+      const safeCity      = typeof city      === "string" ? city.slice(0, 50)      : null;
+      const safeState     = typeof state     === "string" ? state.slice(0, 2)      : null;
+      const safeBrand     = typeof brand     === "string" ? brand.slice(0, 80)     : null;
+      const safeSessionId = typeof sessionId === "string" ? sessionId.slice(0, 128): null;
       const { createClient } = await import("@supabase/supabase-js");
       const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
       await sb.from("homepage_events").insert({
         event_type: eventType, listing_id: listingId, dealer_id: dealerId ?? null,
-        city: city ?? null, state: state ?? null, brand: brand ?? null,
-        is_featured: Boolean(isFeatured), position: position ?? null, session_id: sessionId ?? null,
+        city: safeCity, state: safeState, brand: safeBrand,
+        is_featured: Boolean(isFeatured), position: position ?? null, session_id: safeSessionId,
       });
     } catch (_) { /* silent — telemetry never crashes the app */ }
   });
@@ -1178,12 +1215,16 @@ ${pageUrls.join("\n")}
       const { email } = req.query as { email: string };
       if (!email) return res.status(400).json({ error: "email is required" });
       const watches = await storage.getWatchesByEmail(email);
-      const enriched = await Promise.all(watches.map(async (w) => {
-        const listing = await storage.getListingById(w.listing_id);
+      // Batch-fetch all listings in one query instead of N individual getListingById calls
+      const listingIds = watches.map(w => w.listing_id).filter((id): id is number => id != null);
+      const listingsArr = await storage.getListingsByIds(listingIds);
+      const listingMap = new Map(listingsArr.map(l => [l.id, l]));
+      const enriched = watches.map((w) => {
+        const listing = listingMap.get(w.listing_id);
         const normalized = norm(w as any);
         normalized.listing = listing ? norm(suppressDeliveryIfUnavailable(listing as any)) : null;
         return normalized;
-      }));
+      });
       res.json(enriched);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1207,6 +1248,11 @@ ${pageUrls.join("\n")}
   app.post("/api/watches/:id/dismiss", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      const email = (req.query.email as string | undefined) || (req.body?.email as string | undefined);
+      if (!email) return res.status(400).json({ error: "email is required" });
+      const watch = await storage.getWatchById(id);
+      if (!watch) return res.status(404).json({ error: "Watch not found" });
+      if (watch.email !== email.toLowerCase().trim()) return res.status(403).json({ error: "Unauthorized" });
       await storage.dismissWatch(id);
       res.json({ success: true });
     } catch (e: any) {
@@ -1255,12 +1301,16 @@ ${pageUrls.join("\n")}
       const { email } = req.query as { email: string };
       if (!email) return res.status(400).json({ error: "email is required" });
       const saves = await storage.getSavedByEmail(email);
-      const enriched = await Promise.all(saves.map(async (s) => {
-        const listing = await storage.getListingById(s.listing_id);
+      // Batch-fetch all listings in one query instead of N individual getListingById calls
+      const listingIds = saves.map(s => s.listing_id).filter((id): id is number => id != null);
+      const listingsArr = await storage.getListingsByIds(listingIds);
+      const listingMap = new Map(listingsArr.map(l => [l.id, l]));
+      const enriched = saves.map((s) => {
+        const listing = listingMap.get(s.listing_id);
         const normalized = norm(s as any);
         normalized.listing = listing ? norm(suppressDeliveryIfUnavailable(listing as any)) : null;
         return normalized;
-      }));
+      });
       res.json(enriched);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1322,11 +1372,17 @@ ${pageUrls.join("\n")}
             const model     = listing.model || "";
             const year      = listing.year  || new Date().getFullYear();
             const condition = listing.condition || "new";
-            const key: CompKey = `${brand}||${model}||${year}||${condition}`;
+            const seating   = listing.seating   ?? null;
+            const powerType = listing.power_type ?? null;
+            // Cache key must include seating bucket + power type to avoid mixing
+            // 2-seat and 4-seat comps, or gas and electric comps
+            const seatBucket = seating == null ? "any" : seating <= 2 ? "2" : seating <= 4 ? "4" : "6+";
+            const powerKey   = (powerType && powerType !== "unknown") ? powerType : "any";
+            const key: CompKey = `${brand}||${model}||${year}||${condition}||${seatBucket}||${powerKey}`;
 
             if (!compCache.has(key)) {
               const comps = brand && model
-                ? await storage.getCompsForListing(brand, model, year, condition, listing.id)
+                ? await storage.getCompsForListing(brand, model, year, condition, listing.id, seating, powerType)
                 : [];
               compCache.set(key, comps);
             }
@@ -1336,9 +1392,9 @@ ${pageUrls.join("\n")}
             // Brand-only fallback: when exact model has 0 comps, try brand-level
             let brandComps: any[] = [];
             if (comps.length === 0 && brand) {
-              const brandKey = `${brand}||${year}||${condition}`;
+              const brandKey = `${brand}||${year}||${condition}||${seatBucket}||${powerKey}`;
               if (!brandCompCache.has(brandKey)) {
-                brandComps = await storage.getBrandCompsForListing(brand, year, condition, listing.id);
+                brandComps = await storage.getBrandCompsForListing(brand, year, condition, listing.id, seating, powerType);
                 brandCompCache.set(brandKey, brandComps);
               } else {
                 brandComps = brandCompCache.get(brandKey)!;

@@ -24,6 +24,18 @@ export const CITY_PAGE_ENTRIES: StaticPageEntry[] = [
   { path: "/golf-carts-for-sale/panama-city-beach-fl", priority: "0.7", changefreq: "weekly" },
   { path: "/golf-carts-for-sale/peachtree-city-ga",    priority: "0.8", changefreq: "weekly" },
   { path: "/golf-carts-for-sale/atlanta-ga",           priority: "0.8", changefreq: "weekly" },
+  // Tier 1 expansion — added 2026-08-25
+  { path: "/golf-carts-for-sale/woodstock-ga",          priority: "0.8", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/lakeland-fl",           priority: "0.8", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/ocala-fl",              priority: "0.8", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/cumming-ga",            priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/tifton-ga",             priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/pensacola-fl",          priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/delray-beach-fl",       priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/melbourne-fl",          priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/ponte-vedra-beach-fl",  priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/fort-lauderdale-fl",    priority: "0.7", changefreq: "weekly" },
+  { path: "/golf-carts-for-sale/jacksonville-beach-fl", priority: "0.7", changefreq: "weekly" },
 ];
 
 export const STATIC_PAGE_ENTRIES: StaticPageEntry[] = [
@@ -32,8 +44,15 @@ export const STATIC_PAGE_ENTRIES: StaticPageEntry[] = [
   { path: "/search",        priority: "0.9", changefreq: "daily"  },
   { path: "/deal-checker",  priority: "0.8", changefreq: "weekly" },
   { path: "/buyer-guide",   priority: "0.8", changefreq: "weekly" },
+  // /sell is intentionally omitted while it's a placeholder page ("coming soon").
+  // Re-add here + in server/routes.ts + server/seo-meta.ts when it ships.
   { path: "/how-it-works",  priority: "0.7", changefreq: "monthly" },
   { path: "/disclosure",    priority: "0.3", changefreq: "yearly"  },
+
+  // Valuation pillar pages (added 2026-07-27 CGI: GSC shows 25+ valuation queries)
+  { path: "/golf-cart-values",           priority: "0.9", changefreq: "weekly" },
+  { path: "/used-golf-cart-value",       priority: "0.8", changefreq: "weekly" },
+  { path: "/golf-cart-value-estimator",  priority: "0.9", changefreq: "weekly" },
 
   // Brand hub + brand detail pages
   { path: "/brands",             priority: "0.8", changefreq: "monthly" },
@@ -46,6 +65,10 @@ export const STATIC_PAGE_ENTRIES: StaticPageEntry[] = [
   { path: "/brands/bintelli",    priority: "0.6", changefreq: "weekly"  },
   { path: "/brands/epic",        priority: "0.6", changefreq: "weekly"  },
   { path: "/brands/denago",      priority: "0.6", changefreq: "weekly"  },
+  { path: "/brands/dach-vehicles", priority: "0.6", changefreq: "weekly" },
+  { path: "/brands/sivo",        priority: "0.6", changefreq: "weekly"  },
+  { path: "/brands/teko-ev",     priority: "0.6", changefreq: "weekly"  },
+  { path: "/brands/verdi",       priority: "0.6", changefreq: "weekly"  },
 
   // Battery guide pages
   { path: "/golf-cart-batteries",                      priority: "0.8", changefreq: "monthly" },

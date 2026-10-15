@@ -17,6 +17,50 @@ export default function Home() {
       title: "Golf Cart Values, Prices & Deals 2026 — Florida & Georgia | GolfCartIQ",
       description: "Know what any golf cart is worth before you buy or sell. Compare live dealer prices, get a free value estimate, and see local deals across Florida and Georgia.",
       canonical: "https://golfcartiq.com/",
+      jsonLd: [
+        // WebPage with speakable for AI quick response cards
+        {
+          "@type": "WebPage",
+          "name": "GolfCartIQ — Golf Cart Price Intelligence for Florida & Georgia",
+          "description": "GolfCartIQ tracks 1,300+ golf cart listings from 50+ verified dealers across Florida and Georgia. Compare prices, check deal ratings, and find fair value before you buy.",
+          "url": "https://golfcartiq.com/",
+          "speakable": {
+            "@type": "SpeakableSpecification",
+            "cssSelector": ["h1", ".hero-description"],
+          },
+        },
+        // Homepage FAQPage — top buyer questions for AI Overviews
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "How much does a golf cart cost in Florida?",
+              "acceptedAnswer": { "@type": "Answer", "text": "New golf carts in Florida typically cost between $8,000 and $20,000 depending on brand, passenger count, and battery type. Used golf carts range from $3,000 to $12,000. GolfCartIQ tracks live dealer prices across Florida so you can compare deals before visiting a dealership." },
+            },
+            {
+              "@type": "Question",
+              "name": "What is the best golf cart brand to buy?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Club Car, E-Z-GO, and Yamaha are the most established brands with the strongest dealer networks and resale value. ICON EV and Evolution Electric Vehicles offer competitive lithium-equipped models at lower price points. The best brand depends on your use case, budget, and local dealer support." },
+            },
+            {
+              "@type": "Question",
+              "name": "What is a fair price for a used golf cart?",
+              "acceptedAnswer": { "@type": "Answer", "text": "A fair price for a used golf cart depends on brand, age, battery type, and condition. GolfCartIQ's Deal Checker compares any listing against real comparable sales to tell you if a price is a Good Deal, Fair, or Overpriced based on live market data." },
+            },
+            {
+              "@type": "Question",
+              "name": "Should I buy a lithium or lead-acid golf cart?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Lithium golf carts cost more upfront but have longer battery life (8–10+ years), require no maintenance, charge faster, and have better range. Lead-acid carts are cheaper to buy initially but require watering and replacement every 4–5 years. Most new golf carts now ship with lithium as standard." },
+            },
+            {
+              "@type": "Question",
+              "name": "Is GolfCartIQ free to use?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Yes. GolfCartIQ is a free golf cart research and pricing platform. You can browse listings, check deal ratings, compare brands, and use the Deal Checker at no cost. GolfCartIQ earns a referral fee if you contact a dealer through the platform." },
+            },
+          ],
+        },
+      ],
     });
   }, []);
   const [dealUrl, setDealUrl] = useState("");
@@ -89,7 +133,7 @@ export default function Home() {
                 Golf Cart Values, Prices &amp; Deals{" "}
                 <span className="text-green-600">— Florida &amp; Georgia</span>
               </h1>
-              <p className="text-base md:text-lg text-muted-foreground max-w-2xl">
+              <p className="hero-description text-base md:text-lg text-muted-foreground max-w-2xl">
                 Know what any cart is worth before you buy or sell. Compare live dealer prices with GolfCartIQ.
               </p>
             </div>
@@ -110,19 +154,34 @@ export default function Home() {
                   <Search className="h-4 w-4" /> Search Carts
                 </Button>
               </form>
-              <Link
-                href="/golf-cart-value-estimator"
-                title="What's my golf cart worth? Free value estimator"
-                aria-label="What's my golf cart worth? Free value estimator"
-              >
-                <Button
-                  variant="outline"
-                  className="gap-2 border-green-600 text-green-700 hover:bg-green-50 w-full sm:w-auto"
-                  data-testid="hero-value-btn"
+              <div className="flex flex-col items-start sm:items-center gap-0.5">
+                <Link
+                  href="/golf-cart-value-estimator"
+                  title="What's my golf cart worth? Free smart estimator using live listings"
+                  aria-label="What's my golf cart worth? Free smart estimator using live listings"
+                  className="w-full sm:w-auto"
                 >
-                  <ClipboardCheck className="h-4 w-4" /> What's my cart worth?
-                </Button>
-              </Link>
+                  <Button
+                    variant="ghost"
+                    className="gap-2 w-full sm:w-auto bg-[#01696F] hover:bg-[#0C4E54] text-white border-0 shadow-sm"
+                    data-testid="hero-value-btn"
+                    onClick={() => {
+                      if (typeof window !== 'undefined' && typeof (window as any).gtag === 'function') {
+                        (window as any).gtag('event', 'cta_click', {
+                          event_category: 'engagement',
+                          event_label: 'hero_valuation_cta',
+                          page_location: window.location.href,
+                        });
+                      }
+                    }}
+                  >
+                    <ClipboardCheck className="h-4 w-4" /> What's my cart worth?
+                  </Button>
+                </Link>
+                <p className="text-[10px] text-muted-foreground pl-0.5">
+                  Smart estimator · gauged from live dealer listings
+                </p>
+              </div>
             </div>
           </div>
         </div>

@@ -39,7 +39,10 @@ export interface RouteMeta {
 
 // ─── Static route map ─────────────────────────────────────────────────────────
 
-const STATIC_ROUTES: Record<string, { title: string; description: string }> = {
+const STATIC_ROUTES: Record<
+  string,
+  { title: string; description: string; noindex?: boolean }
+> = {
   "/": {
     title: DEFAULT_TITLE,
     description: DEFAULT_DESC,
@@ -283,10 +286,28 @@ const STATIC_ROUTES: Record<string, { title: string; description: string }> = {
     description:
       "List your golf cart for sale on GolfCartIQ. Reach buyers across Florida and Georgia.",
   },
+  // NOTE: /sell is intentionally omitted from STATIC_ROUTES while it is a placeholder
+  // ("seller-authorized import coming soon"). It is also excluded from the sitemap in
+  // server/routes.ts and server/sitemap-config.ts so we don't advertise a thin page to Google.
+  // When the real /sell page ships, add a static entry here and re-add it to the sitemaps.
+  "/brands": {
+    title: `Golf Cart Brands | Compare Club Car, ICON, E-Z-GO & More | ${SITE_NAME}`,
+    description:
+      "Compare all golf cart brands tracked on GolfCartIQ — Club Car, E-Z-GO, Yamaha, ICON, Evolution, Bintelli, Venom EV, Teko EV, and more. Specs, warranties, and verified listings in FL & GA.",
+  },
   "/disclosure": {
     title: `Disclosure & Affiliate Policy | ${SITE_NAME}`,
     description:
       "GolfCartIQ pricing and affiliate disclosure. Understand how we earn and how it affects our recommendations.",
+  },
+  // Personal saved-items / alerts page. Not for search engines — users only.
+  // GSC showed it ranking pos 70–98 for valuation queries because it fell back to
+  // homepage meta. Noindex to keep it out of the SERPs entirely.
+  "/garage": {
+    title: `My Garage | ${SITE_NAME}`,
+    description:
+      "Your saved golf cart listings, price-drop alerts, and personal watchlist on GolfCartIQ.",
+    noindex: true,
   },
 };
 
@@ -353,7 +374,11 @@ export function getRouteMeta(pathname: string): RouteMeta {
   if (staticMatch) {
     const canonical = `${BASE_URL}${normalized}`;
     const jsonLd = buildJsonLd(normalized, staticMatch.title, staticMatch.description, canonical);
-    return buildMeta(staticMatch.title, staticMatch.description, canonical, jsonLd);
+    const meta = buildMeta(staticMatch.title, staticMatch.description, canonical, jsonLd);
+    if (staticMatch.noindex) {
+      meta.noindex = true;
+    }
+    return meta;
   }
 
   // 2. Dynamic: /listing/:slug

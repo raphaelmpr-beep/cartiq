@@ -3,6 +3,7 @@
  * All methods are async. Routes call await storage.method().
  */
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { normalizeWarranty, normalizeWarrantyFields, WARRANTY_YES_PATTERN } from "../shared/warranty";
 import type {
   Listing, InsertListing,
   Dealer, InsertDealer,
@@ -38,6 +39,7 @@ export interface IStorage {
   getListings(filters?: Record<string, unknown>): Promise<Listing[]>;
   getHotDeals(limit?: number): Promise<Listing[]>;
   getListingById(id: number): Promise<Listing | undefined>;
+  getListingsByIds(ids: number[]): Promise<Listing[]>;
   getListingBySlug(slug: string): Promise<Listing | undefined>;
   createListing(data: InsertListing): Promise<Listing>;
   updateListing(id: number, data: Partial<InsertListing>): Promise<Listing | undefined>;
@@ -134,7 +136,7 @@ class SupabaseStorage implements IStorage {
       if (filters.sellerType)  q = q.eq("seller_type", filters.sellerType);
       if (filters.batteryType) q = q.eq("battery_type", filters.batteryType);
       if (filters.dealRating)  q = q.eq("deal_rating", filters.dealRating);
-      if (filters.warrantyIncluded) q = q.in("warranty_included", ["yes", "true"]);
+      if (normalizeWarranty(filters.warrantyIncluded) === "yes") q = q.filter("warranty_included", "imatch", WARRANTY_YES_PATTERN);
       if (filters.minPrice)    q = q.gte("asking_price", filters.minPrice);
       if (filters.maxPrice)    q = q.lte("asking_price", filters.maxPrice);
       if (filters.streetLegal === true) q = q.eq("street_legal_claimed", true);
@@ -206,13 +208,19 @@ class SupabaseStorage implements IStorage {
     return (data as Listing) ?? undefined;
   }
 
+  async getListingsByIds(ids: number[]): Promise<Listing[]> {
+    if (ids.length === 0) return [];
+    const { data } = await db().from("listings").select("*").in("id", ids);
+    return (data ?? []) as Listing[];
+  }
+
   async getListingBySlug(slug: string): Promise<Listing | undefined> {
     const { data } = await db().from("listings").select("*").eq("slug", slug).maybeSingle();
     return (data as Listing) ?? undefined;
   }
 
   async createListing(data: InsertListing): Promise<Listing> {
-    const result = check(await db().from("listings").insert(data).select().single());
+    const result = check(await db().from("listings").insert(normalizeWarrantyFields(data)).select().single());
     return result as Listing;
   }
 
@@ -221,7 +229,7 @@ class SupabaseStorage implements IStorage {
     // RLS-blocked writes stop silently returning undefined and confusing callers.
     const { data: result, error } = await db()
       .from("listings")
-      .update({ ...data, updated_at: new Date().toISOString() })
+      .update({ ...normalizeWarrantyFields(data), updated_at: new Date().toISOString() })
       .eq("id", id)
       .select()
       .maybeSingle();
@@ -265,23 +273,50 @@ class SupabaseStorage implements IStorage {
     model: string,
     year: number,
     condition: string,
-    excludeId?: number
+    excludeId?: number,
+    seating?: number | null,
+    powerType?: string | null
   ): Promise<any[]> {
-    let q = db()
-      .from("listings")
-      .select("asking_price,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available")
-      .eq("status", "active")
-      .eq("public_listing", true)
-      .eq("brand", brand)
-      .eq("model", model)
-      .eq("condition", condition)
-      .gte("year", year - 1)
-      .lte("year", year + 1)
-      .not("asking_price", "is", null)
-      .limit(60);
-    if (excludeId) q = q.neq("id", excludeId);
-    const { data } = await q;
-    return (data ?? []) as any[];
+    const sel = "asking_price,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available";
+
+    const buildQuery = (matchSeating: boolean, matchPower: boolean) => {
+      let q = db()
+        .from("listings")
+        .select(sel)
+        .eq("status", "active")
+        .eq("public_listing", true)
+        .eq("brand", brand)
+        .eq("model", model)
+        .eq("condition", condition)
+        .gte("year", year - 1)
+        .lte("year", year + 1)
+        .not("asking_price", "is", null)
+        .limit(60);
+      if (excludeId) q = q.neq("id", excludeId);
+      // Seating filter: group 2-seat together, 4-seat together, 6+ together
+      if (matchSeating && seating != null) {
+        if (seating <= 2)       q = q.lte("seating", 2);
+        else if (seating <= 4)  q = q.gte("seating", 3).lte("seating", 4);
+        else                    q = q.gte("seating", 5);
+      }
+      // Power type: only filter if known (gas vs electric are meaningfully different)
+      if (matchPower && powerType && powerType !== "unknown") {
+        q = q.eq("power_type", powerType);
+      }
+      return q;
+    };
+
+    // Tier A: exact seating bucket + exact power type
+    const { data: tierA } = await buildQuery(true, true);
+    if ((tierA ?? []).length >= 3) return (tierA ?? []) as any[];
+
+    // Tier B: exact seating bucket, any power type
+    const { data: tierB } = await buildQuery(true, false);
+    if ((tierB ?? []).length >= 3) return (tierB ?? []) as any[];
+
+    // Tier C: any seating, any power (original behaviour — widest net)
+    const { data: tierC } = await buildQuery(false, false);
+    return (tierC ?? []) as any[];
   }
 
   // ─── Brand-only comp fallback (same brand, any model, year±1, same condition) ─
@@ -289,22 +324,44 @@ class SupabaseStorage implements IStorage {
     brand: string,
     year: number,
     condition: string,
-    excludeId?: number
+    excludeId?: number,
+    seating?: number | null,
+    powerType?: string | null
   ): Promise<any[]> {
-    let q = db()
-      .from("listings")
-      .select("asking_price,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available")
-      .eq("status", "active")
-      .eq("public_listing", true)
-      .eq("brand", brand)
-      .eq("condition", condition)
-      .gte("year", year - 1)
-      .lte("year", year + 1)
-      .not("asking_price", "is", null)
-      .limit(60);
-    if (excludeId) q = q.neq("id", excludeId);
-    const { data } = await q;
-    return (data ?? []) as any[];
+    const sel = "asking_price,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available";
+
+    const buildQuery = (matchSeating: boolean, matchPower: boolean) => {
+      let q = db()
+        .from("listings")
+        .select(sel)
+        .eq("status", "active")
+        .eq("public_listing", true)
+        .eq("brand", brand)
+        .eq("condition", condition)
+        .gte("year", year - 1)
+        .lte("year", year + 1)
+        .not("asking_price", "is", null)
+        .limit(60);
+      if (excludeId) q = q.neq("id", excludeId);
+      if (matchSeating && seating != null) {
+        if (seating <= 2)       q = q.lte("seating", 2);
+        else if (seating <= 4)  q = q.gte("seating", 3).lte("seating", 4);
+        else                    q = q.gte("seating", 5);
+      }
+      if (matchPower && powerType && powerType !== "unknown") {
+        q = q.eq("power_type", powerType);
+      }
+      return q;
+    };
+
+    const { data: tierA } = await buildQuery(true, true);
+    if ((tierA ?? []).length >= 3) return (tierA ?? []) as any[];
+
+    const { data: tierB } = await buildQuery(true, false);
+    if ((tierB ?? []).length >= 3) return (tierB ?? []) as any[];
+
+    const { data: tierC } = await buildQuery(false, false);
+    return (tierC ?? []) as any[];
   }
 
   // ─── Bulk reprice fetch (returns raw snake_case rows) ────────────────────────
