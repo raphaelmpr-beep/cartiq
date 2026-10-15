@@ -1,3 +1,4 @@
+import { loadActiveBlocks, resolveBlock } from "../sync/dealer-blocks";
 import type { Express, RequestHandler } from "express";
 import { timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "../supabase-admin";
@@ -39,11 +40,12 @@ export function registerRecheckRoutes(app: Express, requireAdmin: RequestHandler
     res.setHeader("Cache-Control", "no-store");
     try {
       const db = supabaseAdmin();
-      const [rows, dealersRes, jobsRes, errLogRes] = await Promise.all([
+      const [rows, dealersRes, jobsRes, errLogRes, blocks] = await Promise.all([
         fetchAllListingsForQuality(db),
         db.from("dealers").select("slug,name,state,city,adapter_key,platform_type,sync_enabled,inventory_status,last_discovery_at,last_discovery_status,last_discovery_message").order("name"),
         db.from("recheck_jobs").select("*").order("created_at", { ascending: false }).limit(200),
         db.from("sync_log").select("dealer_slug,status,notes,synced_at").like("notes", "recheck:%").order("synced_at", { ascending: false }).limit(2000),
+        loadActiveBlocks(db),
       ]);
       const q = computeQuality(rows);
       const byDealer = new Map(q.by_dealer.map(d => [d.dealer, d]));
@@ -56,16 +58,19 @@ export function registerRecheckRoutes(app: Express, requireAdmin: RequestHandler
         const syncErr = d.last_discovery_status === "error" ? (d.last_discovery_message || "sync error") : null;
         const lastOk = [d.last_discovery_status === "ok" ? d.last_discovery_at : null, lastRecheck.get(d.slug) ?? null]
           .filter(Boolean).sort().pop() ?? null;
+        const blk = blocks.get(d.slug);
+        const paused = blk ? { reason: blk.block_reason, http_status: blk.http_status, since: blk.attempted_at, until: blk.paused_until,
+          host: blk.host, failures: blk.failure_count } : null;
         return {
-          slug: d.slug, name: d.name, state: d.state, city: d.city,
+          slug: d.slug, name: d.name, state: d.state, city: d.city, paused,
           adapter: d.adapter_key || d.platform_type || null, sync_enabled: !!d.sync_enabled, status: d.inventory_status ?? null,
           ...c, pct_stale: c.active ? Math.round((c.stale_7d / c.active) * 100) : 0,
-          last_successful_sync: lastOk, error: syncErr, health: dealerHealth(c, syncErr),
+          last_successful_sync: lastOk, error: syncErr, health: paused ? "Paused" : dealerHealth(c, syncErr),
           last_job: lastJob ? { id: lastJob.id, status: lastJob.status, processed: lastJob.processed, total: lastJob.total,
             archived: lastJob.archived, dead_pending: lastJob.dead_pending, errors: lastJob.errors, finished_at: lastJob.finished_at, dry_run: lastJob.dry_run } : null,
         };
       });
-      res.json({ totals: q.totals, dealers, jobs_available: !jobsRes.error });
+      res.json({ totals: q.totals, dealers, jobs_available: !jobsRes.error, paused_count: blocks.size });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -89,6 +94,15 @@ export function registerRecheckRoutes(app: Express, requireAdmin: RequestHandler
           condition: l.condition, last_checked_at: l.last_checked_at, age_days: age, source_url: l.source_listing_url, flags };
       });
       res.json({ dealer: req.params.slug, items });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Human "Resume" for an auto-paused dealer. Body: { notes?: string }
+  app.post("/api/admin/dealer-health/:slug/resume", requireAdmin, async (req, res) => {
+    try {
+      const { error } = await resolveBlock(supabaseAdmin(), String(req.params.slug), String(req.body?.notes ?? "resumed from admin"));
+      if (error) return res.status(error.code === "42P01" || error.code === "PGRST205" ? 501 : 500).json({ error: error.message });
+      res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

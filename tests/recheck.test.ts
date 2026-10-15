@@ -58,20 +58,23 @@ test('quality metrics and health', () => {
   assert.equal(dealerHealth({ active: 10, stale_7d: 0, dead_pending: 0 }, 'boom'), 'Failing');
 });
 
-function fakeDb(rows: any[], writes: any[]) {
+function fakeDb(rows: any[], writes: any[], extra: { blocks?: any[]; dealers?: any[] } = {}) {
   const chain = (table: string) => {
     const c: any = { _t: table };
     for (const m of ['select', 'eq', 'not', 'order', 'limit', 'in', 'or']) c[m] = () => c;
-    c.then = (res: any) => res({ data: rows, error: null });
+    const data = table === 'dealer_block_log' ? (extra.blocks ?? []) : table === 'dealers' ? (extra.dealers ?? []) : rows;
+    c.then = (res: any) => res({ data, error: null });
+    c.maybeSingle = () => Promise.resolve({ data: null, error: null });
     c.update = (v: any) => ({ eq: (_k: string, id: number) => { writes.push({ table, op: 'update', id, v }); return Promise.resolve({ error: null }); } });
     c.insert = (v: any) => { writes.push({ table, op: 'insert', v }); return Promise.resolve({ error: null }); };
+    c.upsert = (v: any) => { writes.push({ table, op: 'upsert', v }); return Promise.resolve({ error: null }); };
     return c;
   };
   return { from: chain } as any;
 }
-const fakeFetch = (map: Record<string, { status: number; url?: string; body?: string }>) => (async (input: any) => {
+const fakeFetch = (map: Record<string, { status: number; url?: string; body?: string; headers?: Record<string, string> }>) => (async (input: any) => {
   const u = String(input); const hit = map[u] ?? (u.endsWith('/robots.txt') ? { status: 404 } : { status: 200, body: 'ok' });
-  return { status: hit.status, ok: hit.status < 400, url: hit.url ?? u, text: async () => hit.body ?? '' } as any;
+  return { status: hit.status, ok: hit.status < 400, url: hit.url ?? u, headers: new Headers((hit as any).headers ?? {}), text: async () => hit.body ?? '' } as any;
 }) as any;
 
 test('runner: dry run makes no writes; live run writes transitions + sync_log', async () => {
@@ -82,11 +85,11 @@ test('runner: dry run makes no writes; live run writes transitions + sync_log', 
   ];
   const f = fakeFetch({ 'https://a.com/cart/2': { status: 404 }, 'https://b.com/cart/3': { status: 200, url: 'https://b.com/' } });
   const w1: any[] = [];
-  const dry = await runRecheck({ dryRun: true, db: fakeDb(rows, w1), fetchImpl: f, timeBudgetMs: 60000 });
+  const dry = await runRecheck({ dryRun: true, db: fakeDb(rows, w1), fetchImpl: f, timeBudgetMs: 60000, sleepImpl: async () => {} });
   assert.equal(w1.length, 0);
   assert.equal(dry.alive, 1); assert.equal(dry.archived, 1); assert.equal(dry.dead_pending, 1);
   const w2: any[] = [];
-  await runRecheck({ dryRun: false, db: fakeDb(rows, w2), fetchImpl: f, timeBudgetMs: 60000 });
+  await runRecheck({ dryRun: false, db: fakeDb(rows, w2), fetchImpl: f, timeBudgetMs: 60000, sleepImpl: async () => {} });
   const upd = (id: number) => w2.find(x => x.op === 'update' && x.id === id).v;
   assert.ok(upd(1).last_checked_at); assert.equal(upd(1).recheck_fail_count, 0);
   assert.equal(upd(2).status, 'archived'); assert.equal(upd(2).public_listing, false);
@@ -97,7 +100,7 @@ test('runner: robots disallow skips fetch', async () => {
   const rows = [{ id: 9, sync_source: 'c', source_listing_url: 'https://c.com/listing/9', recheck_fail_count: 0 }];
   let fetched = 0;
   const f = (async (u: any) => { if (String(u).endsWith('/robots.txt')) return { status: 200, ok: true, url: String(u), text: async () => 'User-agent: *\nDisallow: /listing/' } as any; fetched++; return { status: 200, ok: true, url: String(u), text: async () => '' } as any; }) as any;
-  const s = await runRecheck({ dryRun: true, db: fakeDb(rows, []), fetchImpl: f });
+  const s = await runRecheck({ dryRun: true, db: fakeDb(rows, []), fetchImpl: f, sleepImpl: async () => {} });
   assert.equal(fetched, 0); assert.equal(s.items[0].result.status, 'blocked_robots');
 });
 test('runner: Botero dealers are never auto-archived (needs_review, still logged)', async () => {
@@ -108,7 +111,7 @@ test('runner: Botero dealers are never auto-archived (needs_review, still logged
   const f = fakeFetch({ 'https://boterocarts.com/inventory/x': { status: 200, url: 'https://boterocarts.com/' },
     'https://www.boterocarts.com/inventory/y': { status: 404 } });
   const w: any[] = [];
-  const s = await runRecheck({ dryRun: false, db: fakeDb(rows, w), fetchImpl: f, timeBudgetMs: 60000 });
+  const s = await runRecheck({ dryRun: false, db: fakeDb(rows, w), fetchImpl: f, timeBudgetMs: 60000, sleepImpl: async () => {} });
   assert.equal(s.archived, 0); assert.equal(s.needs_review, 2);
   for (const id of [21, 22]) { const u = w.find(x => x.op === 'update' && x.id === id).v; assert.equal(u.status, undefined); assert.equal(u.public_listing, undefined); }
   const logs = w.filter(x => x.table === 'sync_log');
@@ -124,4 +127,43 @@ test('sync_log status stays within legacy CHECK vocabulary', () => {
   const ok = new Set(['ok','price_mismatch','not_found','error']);
   for (const a of ['touch','mark_dead_1','archive','needs_review','none'] as const) assert.ok(ok.has(syncLogStatus({ action: a })));
   assert.equal(syncLogStatus({ action: 'touch', priceUpdate: { from: 1, to: 2 } }), 'price_mismatch');
+});
+
+test('runner: 403 auto-pauses all dealers on the host and stops that host', async () => {
+  const rows = [1, 2, 3].map(i => ({ id: 30 + i, sync_source: i === 3 ? 'botero-carts-ocala' : 'botero-carts-clearwater', source_listing_url: `https://boterocarts.com/listing/x-${i}/`, recheck_fail_count: 0 }));
+  let pageHits = 0;
+  const base = fakeFetch({});
+  const f = (async (u: any) => { if (!String(u).endsWith('/robots.txt')) pageHits++; return String(u).endsWith('/robots.txt') ? base(u) : { status: 403, ok: false, url: String(u), headers: new Headers(), text: async () => 'Forbidden' } as any; }) as any;
+  const w: any[] = [];
+  const s = await runRecheck({ dryRun: false, db: fakeDb(rows, w, { dealers: [{ slug: 'botero-carts-jacksonville', name: 'Botero J', website_url: 'https://www.boterocarts.com/' }] }), fetchImpl: f, timeBudgetMs: 60000, sleepImpl: async () => {} });
+  assert.equal(pageHits, 1, 'stops after first block');
+  assert.equal(s.host_blocks.length, 1); assert.equal(s.host_blocks[0].kind, 'http_403');
+  const ups = w.filter(x => x.table === 'dealer_block_log' && x.op === 'upsert').map(x => x.v.dealer_slug).sort();
+  assert.deepEqual(ups, ['botero-carts-clearwater', 'botero-carts-jacksonville', 'botero-carts-ocala']);
+  assert.ok(w.filter(x => x.table === 'listings').every(x => x.v.status === undefined), 'block never archives');
+});
+test('runner: dry run records blocks in summary but writes nothing', async () => {
+  const rows = [{ id: 41, sync_source: 'x', source_listing_url: 'https://x.com/a', recheck_fail_count: 1 }];
+  const f = fakeFetch({ 'https://x.com/a': { status: 202, body: '<script src="/.well-known/sgcaptcha/?r=1"></script>' } });
+  const w: any[] = [];
+  const s = await runRecheck({ dryRun: true, db: fakeDb(rows, w), fetchImpl: f, sleepImpl: async () => {} });
+  assert.equal(w.length, 0); assert.equal(s.host_blocks[0].kind, 'challenge'); assert.equal(s.items[0].result.reason, 'blocked_challenge');
+});
+test('runner: paused dealers are skipped; expired Retry-After pauses resume', async () => {
+  const rows = [{ id: 51, sync_source: 'p', source_listing_url: 'https://p.com/a', recheck_fail_count: 0 },
+    { id: 52, sync_source: 'q', source_listing_url: 'https://q.com/a', recheck_fail_count: 0 }];
+  const blocks = [{ dealer_slug: 'p', block_reason: 'http_403', paused_until: null },
+    { dealer_slug: 'q', block_reason: 'http_429', paused_until: new Date(Date.now() - 1000).toISOString() }];
+  const s = await runRecheck({ dryRun: true, db: fakeDb(rows, [], { blocks }), fetchImpl: fakeFetch({}), sleepImpl: async () => {} });
+  assert.equal(s.paused_dealers_skipped, 1); assert.deepEqual(s.items.map(i => i.id), [52]);
+});
+test('runner: crawl-delay honored between requests to one host', async () => {
+  const rows = [1, 2, 3].map(i => ({ id: 60 + i, sync_source: 'd', source_listing_url: `https://d.com/c/${i}`, recheck_fail_count: 0 }));
+  const sleeps: number[] = [];
+  const f = fakeFetch({ 'https://d.com/robots.txt': { status: 200, body: 'User-agent: *\nCrawl-delay: 20\nDisallow:' } });
+  let t = 1_000_000;
+  const realNow = Date.now;
+  const s = await runRecheck({ dryRun: true, db: fakeDb(rows, []), fetchImpl: f, timeBudgetMs: 10 * 60_000, sleepImpl: async (ms) => { sleeps.push(ms); } });
+  assert.equal(s.processed, 3);
+  assert.equal(sleeps.length, 2); assert.ok(sleeps.every(ms => ms >= 19_000), `slept ${sleeps}`);
 });

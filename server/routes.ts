@@ -1,3 +1,4 @@
+import { BOT_UA } from './sync/polite-fetch.js';
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { timingSafeEqual } from "node:crypto";
@@ -866,7 +867,7 @@ ${pageUrls.join("\n")}
                 signal: AbortSignal.timeout(8000),
                 headers: {
                   "User-Agent":
-                    "Mozilla/5.0 (compatible; GolfCartIQ-PriceBot/1.0; +https://golfcartiq.com)",
+                    BOT_UA,
                 },
               });
               if (!resp.ok) { results.errors++; return; }
@@ -2556,7 +2557,7 @@ ${pageUrls.join("\n")}
         const resp = await fetch(targetUrl, {
           signal: controller.signal,
           headers: {
-            "User-Agent": "Mozilla/5.0 (compatible; GolfCartIQ-Detect/1.0; +https://golfcartiq.com)",
+            "User-Agent": BOT_UA,
             "Accept": "text/html,application/xhtml+xml",
           },
         });
@@ -2799,7 +2800,7 @@ ${pageUrls.join("\n")}
         try {
           const siteResp = await fetch(dealer.website_url, {
             signal: AbortSignal.timeout(10000),
-            headers: { "User-Agent": "Mozilla/5.0 (compatible; GolfCartIQ-PlatformBot/1.0)" },
+            headers: { "User-Agent": BOT_UA },
           });
           if (siteResp.ok) {
             const html = await siteResp.text();

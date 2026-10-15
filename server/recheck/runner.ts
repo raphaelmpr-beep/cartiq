@@ -1,15 +1,18 @@
 /**
  * Listing re-check runner (server-only; uses the secret-key admin client).
- * Small batches sized for one serverless invocation. Polite: honest UA,
- * robots.txt respected, >= PER_HOST_INTERVAL_MS between requests per host.
+ * Small batches sized for one serverless invocation. All requests go through PoliteFetcher:
+ * honest bot UA, robots Disallow + Crawl-delay honored, >= 10s per host, Retry-After honored,
+ * auto-pause (dealer_block_log) on 401/402/403/429/challenge, circuit breaker on repeated errors.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "../supabase-admin";
 import { parseEcoPrice } from "../sync/eco-golf-carts";
 import {
-  RECHECK_UA, PER_HOST_INTERVAL_MS, isAutoArchiveExcluded, classifyResponse, nextState, parseRobots, robotsAllows,
+  isAutoArchiveExcluded, classifyResponse, nextState,
   computeQuality, type CheckResult, type DQListing,
 } from "./core";
+import { PoliteFetcher, type BlockKind } from "../sync/polite-fetch";
+import { loadActiveBlocks, recordHostBlock, type HostBlock } from "../sync/dealer-blocks";
 
 export interface RecheckOptions {
   dryRun?: boolean;
@@ -17,13 +20,16 @@ export interface RecheckOptions {
   timeBudgetMs?: number;     // stop starting new fetches after this
   dealerSlugs?: string[];    // restrict to dealers (admin "Refresh now")
   notRecheckedSince?: string; // ISO; only listings not re-checked since (job pass)
+  sleepImpl?: (ms: number) => Promise<void>; // tests
+  minIntervalMs?: number;     // tests only; production uses the 10s floor
   fetchImpl?: typeof fetch;
   db?: SupabaseClient;
 }
 export interface RecheckItem { id: number; dealer: string | null; url: string; prevFails: number; result: CheckResult;
   action: "touch" | "mark_dead_1" | "archive" | "needs_review" | "none"; priceUpdate?: { from: number | null; to: number } }
 export interface RecheckSummary { dryRun: boolean; selected: number; processed: number; alive: number; dead_pending: number;
-  archived: number; needs_review: number; errors: number; price_updates: number; stopped_early: boolean; items: RecheckItem[] }
+  archived: number; needs_review: number; errors: number; price_updates: number; stopped_early: boolean;
+  paused_dealers_skipped: number; host_blocks: HostBlock[]; items: RecheckItem[] }
 
 /** Existing per-dealer price parsers that work without a browser. Others: liveness only. */
 const PRICE_ADAPTERS: { host: RegExp; parse: (html: string) => number | null }[] = [
@@ -67,7 +73,10 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
     ({ data, error } = await build(false) as any);
   }
   if (error) throw new Error(`recheck select failed: ${error.message}`);
-  const rows = ((data ?? []) as any[]).map(r => ({ ...r, source_listing_url: r.source_listing_url || r.source_url }));
+  // Auto-paused dealers (dealer_block_log, unresolved) are skipped entirely.
+  const paused = await loadActiveBlocks(db);
+  const allRows = ((data ?? []) as any[]).map(r => ({ ...r, source_listing_url: r.source_listing_url || r.source_url }));
+  const rows = allRows.filter(r => !paused.has(String(r.sync_source)));
 
   // Group by host; hosts run in parallel, each host strictly sequential + spaced.
   const byHost = new Map<string, any[]>();
@@ -76,31 +85,19 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
     (byHost.get(host) ?? byHost.set(host, []).get(host)!).push(r);
   }
   const summary: RecheckSummary = { dryRun, selected: rows.length, processed: 0, alive: 0, dead_pending: 0, archived: 0, needs_review: 0,
-    errors: 0, price_updates: 0, stopped_early: false, items: [] };
+    errors: 0, price_updates: 0, stopped_early: false, paused_dealers_skipped: allRows.length - rows.length, host_blocks: [], items: [] };
+  const pf = new PoliteFetcher({ fetchImpl: opts.fetchImpl, sleepImpl: opts.sleepImpl, minIntervalMs: opts.minIntervalMs });
 
-  async function robotsFor(origin: string): Promise<string[] | "unreachable"> {
-    try {
-      const r = await doFetch(origin + "/robots.txt", { headers: { "User-Agent": RECHECK_UA }, redirect: "follow", signal: AbortSignal.timeout(8000) });
-      if (r.status >= 400 && r.status < 500) return []; // no robots.txt → allowed
-      if (!r.ok) return "unreachable";
-      return parseRobots((await r.text()).slice(0, 200_000));
-    } catch { return "unreachable"; }
-  }
-
-  async function checkOne(r: any, disallow: string[] | "unreachable"): Promise<RecheckItem> {
+  async function checkOne(r: any): Promise<RecheckItem & { block?: BlockKind; retryAfterMs?: number }> {
     const url: string = r.source_listing_url;
     const prevFails = Number(r.recheck_fail_count ?? 0);
     let result: CheckResult;
     let html = "";
-    if (disallow === "unreachable") result = { status: "error", reason: "robots_unreachable" };
-    else if (!robotsAllows(disallow, new URL(url).pathname)) result = { status: "blocked_robots", reason: "robots_disallow" };
-    else {
-      try {
-        const res = await doFetch(url, { headers: { "User-Agent": RECHECK_UA, Accept: "text/html,*/*;q=0.8" }, redirect: "follow", signal: AbortSignal.timeout(15000) });
-        html = res.ok ? (await res.text()).slice(0, 1_500_000) : "";
-        result = classifyResponse(url, res.status, res.url || url, html);
-      } catch (e: any) { result = { status: "error", reason: `fetch_error:${String(e?.name || e).slice(0, 40)}` }; }
-    }
+    const res = await pf.get(url, { kind: "html" });
+    if (res.block === "robots_disallow") result = { status: "blocked_robots", reason: "robots_disallow" };
+    else if (res.block) result = { status: "error", reason: `blocked_${res.block}`, httpStatus: res.status };
+    else if (res.error) result = { status: "error", reason: res.error };
+    else { html = res.body; result = classifyResponse(url, res.status, res.finalUrl, html); }
     const st = nextState(prevFails, result);
     const excluded = isAutoArchiveExcluded(r.sync_source, url);
     if (excluded) st.archive = false; // never auto-archive excluded dealers
@@ -136,7 +133,7 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
       });
       if (lErr) console.warn(`[recheck] sync_log insert failed for listing ${r.id}: ${lErr.message}`);
     }
-    return item;
+    return res.block && res.block !== "robots_disallow" ? { ...item, block: res.block, retryAfterMs: res.retryAfterMs } : item;
   }
 
   await Promise.all(Array.from(byHost.entries()).map(async ([host, list]) => {
@@ -145,15 +142,23 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
         result: { status: "skipped", reason: "invalid_url" }, action: "none" });
       return;
     }
-    const origin = new URL(list[0].source_listing_url).origin;
-    const disallow = await robotsFor(origin);
     for (let i = 0; i < list.length; i++) {
       if (Date.now() > deadline) { summary.stopped_early = true; return; }
-      if (i > 0) await sleep(PER_HOST_INTERVAL_MS);
-      summary.items.push(await checkOne(list[i], disallow));
+      const it = await checkOne(list[i]);
+      summary.items.push(it);
+      if (it.block) {
+        // Per-site cutoff: stop this host for the run and auto-pause its dealers.
+        const dealers = Array.from(new Set(list.map(r => String(r.sync_source)).filter(Boolean)));
+        summary.host_blocks.push({ host, dealers, kind: it.block, httpStatus: it.result.httpStatus ?? 0, url: it.url,
+          pausedUntil: it.retryAfterMs ? new Date(Date.now() + it.retryAfterMs).toISOString() : null });
+        return;
+      }
+      // Don't start a wait that would overrun the time budget.
+      if (i + 1 < list.length && pf.nextAllowedAt(host) > deadline) { summary.stopped_early = true; return; }
     }
   }));
 
+  if (!dryRun) for (const b of summary.host_blocks) await recordHostBlock(db, b);
   for (const it of summary.items) {
     summary.processed++;
     if (it.action === "touch") summary.alive++;

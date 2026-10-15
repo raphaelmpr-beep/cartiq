@@ -45,7 +45,7 @@ function fetchUrl(url, timeoutMs = 12000) {
     try {
       const req = lib.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; CartIQ/1.0)',
+          'User-Agent': 'GolfCartIQ-Bot/1.0 (+https://golfcartiq.com/bot)',
           'Accept': 'text/html,application/xhtml+xml,*/*',
         },
         timeout: timeoutMs,
