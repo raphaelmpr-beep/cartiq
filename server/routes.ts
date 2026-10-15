@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { calculateGolfCartWiseValue, enrichListing } from "./pricing";
 import { parseCsv, csvRowToListing } from "./csvParser";
 import { registerSitemapRoutes } from "./sitemaps";
+import { registerGrowthRoutes } from "./growth-routes";
 import { normalizeWarrantyFields } from "../shared/warranty";
 
 // ─── snake_case → camelCase normalizer ───────────────────────────────────────
@@ -375,6 +376,8 @@ ${pageUrls.join("\n")}
   }
 
   // GET /api/admin/verify — lightweight endpoint the Admin UI uses to gate
+  registerGrowthRoutes(app, requireAdmin);
+
   // the client login. Replaces the old client-side hash comparison, which
   // had to ship a fingerprint of the admin password in the public bundle.
   app.get("/api/admin/verify", requireAdmin, (_req, res) => {

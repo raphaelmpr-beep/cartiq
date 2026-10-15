@@ -12,6 +12,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { setSEO } from "@/lib/seo";
+import { VerifiedComparables } from "@/components/VerifiedComparables";
+import { trackGrowth } from "@/lib/growth";
+import type { CompInput } from "@shared/growth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -634,15 +637,15 @@ const ESTIMATOR_FAQS: { q: string; a: string }[] = [
   },
   {
     q: "Is there a Kelley Blue Book (KBB) for golf carts?",
-    a: "Kelley Blue Book has added a limited golf cart category, but it does not weight battery age, lithium vs. lead-acid, or regional FL and GA demand — all of which materially move real sale prices. GolfCartIQ's Value Estimator is built specifically for golf carts and pulls from live Florida and Georgia dealer listings, so it is generally more accurate for this market. Use both if you want a second data point.",
+    a: "This tool provides a formula-based starting range for golf carts, not a Kelley Blue Book appraisal. Compare the result with relevant dealer asking prices and an inspection before making a buying or selling decision.",
   },
   {
     q: "How accurate is the GolfCartIQ Value Estimator?",
-    a: "The estimator returns a market-derived range, not a single price. Actual sale prices in Florida and Georgia typically land inside the estimated range 80–85% of the time. Extreme condition, rare accessories, or unusual battery states can push the sale price outside the range.",
+    a: "The estimator returns a formula-based range, not an appraisal. Accuracy against completed transactions has not been established. Condition, accessories and battery health can materially change the actual sale price.",
   },
   {
     q: "What data feeds the estimator?",
-    a: "Live dealer listings across Florida and Georgia (updated daily), historical price movement, brand-specific depreciation curves, battery type premiums, and regional demand signals. GolfCartIQ tracks 1,300+ active listings from 50+ verified dealers.",
+    a: "The estimate uses configured brand baselines and adjustments for age, condition and batteries. Separately, eligible comparable listings show recently checked dealer asking prices. Those asking prices are not completed sale prices and do not calculate this estimate.",
   },
   {
     q: "Does the estimator cover every brand?",
@@ -650,7 +653,7 @@ const ESTIMATOR_FAQS: { q: string; a: string }[] = [
   },
   {
     q: "How often is the estimator updated?",
-    a: "The underlying listing data refreshes daily; depreciation curves are recalibrated weekly against actual sale prices.",
+    a: "Formula assumptions change when the pricing code is updated. Comparable listings qualify only with an explicit source-price and branch check within seven days; each result shows its check date.",
   },
   {
     q: "Does battery age or lithium vs. lead-acid change my golf cart's value?",
@@ -792,6 +795,11 @@ export function GolfCartValueEstimatorPage() {
   const [batteryType, setBatteryType] = useState<string>("");
   const [batteryAge, setBatteryAge]   = useState<string>("");
   const [result, setResult]       = useState<EstimateResult | null>(null);
+  const [seating,setSeating] = useState("4");
+  const [state,setState] = useState("");
+  const [submitted,setSubmitted] = useState<CompInput|null>(null);
+  useEffect(()=>{trackGrowth("estimator_view",{},"estimator-view");},[]);
+  useEffect(()=>{setResult(null);setSubmitted(null);},[brand,model,year,condition,power,batteryType,batteryAge,seating,state]);
   const [, hashNav] = useLocation();
 
   const modelsForBrand = useMemo(
@@ -852,6 +860,8 @@ export function GolfCartValueEstimatorPage() {
       batteryAge:  power === "Electric" ? batteryAge  : undefined,
     });
     setResult(r);
+    setSubmitted({brand,model,year:yearNum,condition:condition as CompInput["condition"],power:power as CompInput["power"],batteryType:power==="Electric"?batteryType as CompInput["batteryType"]:undefined,seating:Number(seating),state:state ? state as "FL"|"GA" : undefined});
+    trackGrowth("estimator_complete");
   }
 
   return (
@@ -866,7 +876,7 @@ export function GolfCartValueEstimatorPage() {
         {/* Featured-snippet direct answer */}
         <SnippetAnswer
           question="How do I estimate my golf cart's value?"
-          answer="To estimate a golf cart's value, enter the brand, model, year, and condition into the calculator below. The estimator returns both a private-sale range (typically $2,000–$13,000) and a dealer trade-in range — usually 20–30% lower. Results reflect current 2026 dealer listings from Florida and Georgia."
+          answer="Enter the brand, model, year, condition and battery details for a formula-based private-sale and trade-in range. Review recently source-checked comparable dealer asking prices below the result when close matches are available. This is guidance, not an appraisal."
           bullets={[
             "Step 1: Pick your brand and model from the dropdown",
             "Step 2: Enter year and select condition (Excellent → Poor)",
@@ -957,6 +967,10 @@ export function GolfCartValueEstimatorPage() {
             )}
           </div>
 
+          <div className="flex flex-wrap gap-4">
+            <label className="text-sm font-medium">Seats (for matching)<select aria-label="Seats for matching" className="block border rounded p-2 mt-1" value={seating} onChange={e=>setSeating(e.target.value)}>{[2,4,6,8].map(n=><option key={n} value={n}>{n} seats</option>)}</select></label>
+            <label className="text-sm font-medium">Comparable location<select aria-label="Comparable location" className="block border rounded p-2 mt-1" value={state} onChange={e=>setState(e.target.value)}><option value="">Florida and Georgia</option><option value="FL">Florida</option><option value="GA">Georgia</option></select></label>
+          </div>
           <Button type="submit" size="lg" disabled={!canSubmit()} className="gap-2 w-full sm:w-auto">
             <Calculator className="h-4 w-4" /> Estimate my cart's value
           </Button>
@@ -968,7 +982,7 @@ export function GolfCartValueEstimatorPage() {
         <section className="rounded-xl border-2 border-green-500 bg-green-50 p-5 md:p-6 mb-10 space-y-4">
           <div>
             <h2 className="text-xl font-bold text-foreground mb-1">Your Estimated Value</h2>
-            <p className="text-xs text-muted-foreground">Ranges are based on 2026 Florida &amp; Georgia dealer data.</p>
+            <p className="text-xs text-muted-foreground">Formula-based guidance, not an appraisal or a sold-price analysis. Source-checked dealer asking prices are shown separately below when available.</p>
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4">
@@ -988,8 +1002,8 @@ export function GolfCartValueEstimatorPage() {
 
           <div className="flex items-center justify-between rounded-lg bg-white border border-border p-4">
             <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground font-semibold mb-1">IQ confidence score</div>
-              <div className="text-sm text-muted-foreground">Higher = tighter, more reliable range</div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground font-semibold mb-1">Formula input score</div>
+              <div className="text-sm text-muted-foreground">Heuristic only; not measured accuracy or comparable coverage</div>
             </div>
             <div className="text-3xl font-extrabold text-green-700">{result.iqScore}<span className="text-base font-medium text-muted-foreground">/100</span></div>
           </div>
@@ -1014,7 +1028,7 @@ export function GolfCartValueEstimatorPage() {
               onClick={() => hashNav(`/search?brands=${encodeURIComponent(brand)}`)}
               className="gap-2"
             >
-              See similar carts near me <ArrowRight className="h-4 w-4" />
+              Browse this brand <ArrowRight className="h-4 w-4" />
             </Button>
             <Link href="/deal-checker">
               <Button variant="outline" size="lg" className="gap-2">
@@ -1022,6 +1036,7 @@ export function GolfCartValueEstimatorPage() {
               </Button>
             </Link>
           </div>
+          {submitted && <VerifiedComparables input={submitted}/>}
         </section>
       )}
 
@@ -1031,7 +1046,7 @@ export function GolfCartValueEstimatorPage() {
         <div className="grid sm:grid-cols-3 gap-4">
           {[
             { n: "1", h: "MSRP baseline",     body: "We start from an MSRP baseline for the brand tier — Club Car, Yamaha, and E-Z-GO command a premium above emerging brands like Teko EV or Denago." },
-            { n: "2", h: "Depreciation curve", body: "Curves are built from actual FL and GA sale data, updated weekly. Year one loses 15–20%, then ~10% per year through year five." },
+            { n: "2", h: "Age adjustment", body: "A configured age multiplier adjusts the brand baseline. This formula is not calibrated from verified completed transactions." },
             { n: "3", h: "Adjustments",       body: "Condition, battery type, and battery age each apply a multiplier. Poor condition or dead batteries can drop the value 30–40%." },
           ].map((s) => (
             <div key={s.n} className="rounded-xl border border-border bg-white p-4">

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { trackGrowth } from "@/lib/growth";
 import { setSEO, listingToProductSchema, breadcrumbSchema } from "@/lib/seo";
 import { getBrandWikiByDbName } from "@/lib/brand-wiki-data";
 import { useQuery } from "@tanstack/react-query";
@@ -36,6 +37,13 @@ export default function ListingDetail() {
     enabled: !!id,
   });
 
+  useEffect(()=>{
+    if(listing?.status==="active" && listing.publicListing!==false)
+      trackGrowth("listing_view",{listingId:listing.id},`listing:${listing.id}`);
+  },[listing?.id,listing?.status,listing?.publicListing]);
+  const trackDealerContact=(channel:"phone"|"email"|"website")=>{
+    if(listing?.sellerType==="dealer")trackGrowth("dealer_contact_click",{listingId:listing.id,channel});
+  };
   // Redirect archived/non-public listings to city search (SEO 301 via meta refresh + JS redirect)
   const redirectPath = (listing as any)?._redirect as string | undefined;
   useEffect(() => {
@@ -440,6 +448,7 @@ export default function ListingDetail() {
               {listing.sellerPhone && (
                 <a
                   href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}
+                  onClick={()=>trackDealerContact("phone")}
                   className="flex items-center gap-2 text-sm text-green-700 hover:text-green-900 font-medium"
                 >
                   <Phone size={14} />
@@ -450,6 +459,7 @@ export default function ListingDetail() {
               {listing.sellerEmail && !listing.sellerEmail.endsWith(".local") && (
                 <a
                   href={`mailto:${listing.sellerEmail}`}
+                  onClick={()=>trackDealerContact("email")}
                   className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
                 >
                   <Mail size={14} />
@@ -460,6 +470,7 @@ export default function ListingDetail() {
               {listing.sourceUrl && (
                 <a
                   href={listing.sourceUrl}
+                  onClick={()=>trackDealerContact("website")}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 font-medium"
@@ -476,7 +487,7 @@ export default function ListingDetail() {
                     <Button className="w-full gap-2" data-testid="btn-view-retailer"><ExternalLink className="h-4 w-4" /> View Retailer</Button>
                   </a>
                 ) : listing.sellerPhone ? (
-                  <a href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}>
+                  <a href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`} onClick={()=>trackDealerContact("phone")}>
                     <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Call Seller</Button>
                   </a>
                 ) : (

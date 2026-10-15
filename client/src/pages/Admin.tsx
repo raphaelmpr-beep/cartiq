@@ -16,6 +16,7 @@ import { formatPrice } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import type { Listing, Dealer, InventorySource } from "@/lib/types";
 import InventoryCoverage from "@/pages/InventoryCoverage";
+import { GrowthScorecard } from "@/components/GrowthScorecard";
 
 // The admin token is whatever the user types — never a compiled constant.
 // The server is the source of truth: we probe /api/admin/verify with the
@@ -1664,6 +1665,7 @@ export default function Admin() {
             <TabsTrigger value="inventory" data-testid="tab-inventory">Inventory Gap</TabsTrigger>
             <TabsTrigger value="pending" data-testid="tab-pending">Pending Imports</TabsTrigger>
             <TabsTrigger value="algorithm" data-testid="tab-algorithm">Algorithm</TabsTrigger>
+            <TabsTrigger value="growth">Growth</TabsTrigger>
             <TabsTrigger value="settings" data-testid="tab-settings">Settings</TabsTrigger>
           </TabsList>
 
@@ -1877,6 +1879,7 @@ export default function Admin() {
             <AlgorithmTweaker adminToken={adminToken} />
           </TabsContent>
           {/* Settings Tab */}
+          <TabsContent value="growth"><GrowthScorecard adminToken={adminToken}/></TabsContent>
           <TabsContent value="settings">
             <SettingsPanel adminToken={adminToken} dealers={dealers} />
           </TabsContent>
