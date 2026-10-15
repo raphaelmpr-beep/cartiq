@@ -7,6 +7,19 @@ export const RECHECK_UA = "GolfCartIQ-Bot/1.0 (+https://golfcartiq.com/bot)";
 export const DEAD_CONFIRMATIONS = 2;
 /** Minimum delay between two requests to the same host. */
 export const PER_HOST_INTERVAL_MS = 3000;
+/**
+ * Dealers that must NEVER be auto-archived by the re-check. Their liveness is still checked and
+ * logged, but dead results are recorded as "needs_review" for a human to decide.
+ * Botero (all locations): their old listing URLs redirect to the homepage; needs manual review.
+ */
+export const NO_AUTO_ARCHIVE_SLUG_PREFIXES = ["botero"];
+export const NO_AUTO_ARCHIVE_HOSTS = [/(^|\.)boterocarts\.com$/i];
+export function isAutoArchiveExcluded(slug: string | null | undefined, url?: string | null): boolean {
+  const s = String(slug ?? "").toLowerCase();
+  if (NO_AUTO_ARCHIVE_SLUG_PREFIXES.some(p => s === p || s.startsWith(p + "-"))) return true;
+  if (url) { try { const h = new URL(url).host; if (NO_AUTO_ARCHIVE_HOSTS.some(r => r.test(h))) return true; } catch {} }
+  return false;
+}
 
 export type CheckStatus = "alive" | "dead" | "error" | "blocked_robots" | "skipped";
 export interface CheckResult {

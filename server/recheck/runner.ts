@@ -7,7 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "../supabase-admin";
 import { parseEcoPrice } from "../sync/eco-golf-carts";
 import {
-  RECHECK_UA, PER_HOST_INTERVAL_MS, classifyResponse, nextState, parseRobots, robotsAllows,
+  RECHECK_UA, PER_HOST_INTERVAL_MS, isAutoArchiveExcluded, classifyResponse, nextState, parseRobots, robotsAllows,
   computeQuality, type CheckResult, type DQListing,
 } from "./core";
 
@@ -21,9 +21,9 @@ export interface RecheckOptions {
   db?: SupabaseClient;
 }
 export interface RecheckItem { id: number; dealer: string | null; url: string; prevFails: number; result: CheckResult;
-  action: "touch" | "mark_dead_1" | "archive" | "none"; priceUpdate?: { from: number | null; to: number } }
+  action: "touch" | "mark_dead_1" | "archive" | "needs_review" | "none"; priceUpdate?: { from: number | null; to: number } }
 export interface RecheckSummary { dryRun: boolean; selected: number; processed: number; alive: number; dead_pending: number;
-  archived: number; errors: number; price_updates: number; stopped_early: boolean; items: RecheckItem[] }
+  archived: number; needs_review: number; errors: number; price_updates: number; stopped_early: boolean; items: RecheckItem[] }
 
 /** Existing per-dealer price parsers that work without a browser. Others: liveness only. */
 const PRICE_ADAPTERS: { host: RegExp; parse: (html: string) => number | null }[] = [
@@ -68,7 +68,7 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
     let host = "invalid"; try { host = new URL(r.source_listing_url).host.toLowerCase(); } catch {}
     (byHost.get(host) ?? byHost.set(host, []).get(host)!).push(r);
   }
-  const summary: RecheckSummary = { dryRun, selected: rows.length, processed: 0, alive: 0, dead_pending: 0, archived: 0,
+  const summary: RecheckSummary = { dryRun, selected: rows.length, processed: 0, alive: 0, dead_pending: 0, archived: 0, needs_review: 0,
     errors: 0, price_updates: 0, stopped_early: false, items: [] };
 
   async function robotsFor(origin: string): Promise<string[] | "unreachable"> {
@@ -95,8 +95,11 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
       } catch (e: any) { result = { status: "error", reason: `fetch_error:${String(e?.name || e).slice(0, 40)}` }; }
     }
     const st = nextState(prevFails, result);
+    const excluded = isAutoArchiveExcluded(r.sync_source, url);
+    if (excluded) st.archive = false; // never auto-archive excluded dealers
     const item: RecheckItem = { id: r.id, dealer: r.sync_source, url, prevFails, result,
-      action: result.status === "alive" ? "touch" : st.archive ? "archive" : result.status === "dead" ? "mark_dead_1" : "none" };
+      action: result.status === "alive" ? "touch" : (excluded && result.status === "dead") ? "needs_review"
+        : st.archive ? "archive" : result.status === "dead" ? "mark_dead_1" : "none" };
 
     if (result.status === "alive" && html) {
       const host = new URL(url).host;
@@ -118,7 +121,7 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
       await db.from("sync_log").insert({
         listing_id: r.id, dealer_slug: r.sync_source, source_url: url,
         price_found: item.priceUpdate?.to ?? null, price_changed: !!item.priceUpdate,
-        status: `recheck_${item.action}`, notes: `${result.status}:${result.reason}`.slice(0, 500), synced_at: now,
+        status: `recheck_${item.action}`, notes: `${item.action === "needs_review" ? "needs manual review (auto-archive excluded) | " : ""}${result.status}:${result.reason}`.slice(0, 500), synced_at: now,
       });
     }
     return item;
@@ -144,6 +147,7 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
     if (it.action === "touch") summary.alive++;
     else if (it.action === "mark_dead_1") summary.dead_pending++;
     else if (it.action === "archive") summary.archived++;
+    else if (it.action === "needs_review") summary.needs_review++;
     else summary.errors++;
     if (it.priceUpdate) summary.price_updates++;
   }
@@ -169,7 +173,7 @@ export async function advanceJob(timeBudgetMs = 40_000, db: SupabaseClient = sup
       notRecheckedSince: startedAt });
     const processed = job.processed + res.processed;
     const done = res.selected === 0 || processed >= (job.total || 0) || job.dry_run;
-    const upd = { processed, alive: job.alive + res.alive, dead_pending: job.dead_pending + res.dead_pending,
+    const upd = { processed, alive: job.alive + res.alive, dead_pending: job.dead_pending + res.dead_pending + res.needs_review,
       archived: job.archived + res.archived, errors: job.errors + res.errors,
       status: done ? "done" : "running", finished_at: done ? new Date().toISOString() : null, updated_at: new Date().toISOString() };
     await db.from("recheck_jobs").update(upd).eq("id", job.id);

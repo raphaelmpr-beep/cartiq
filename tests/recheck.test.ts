@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyResponse, isRootOrIndexRedirect, nextState, parseRobots, robotsAllows, soldMarker, computeQuality, dealerHealth, outlierIds } from '../server/recheck/core.ts';
+import { classifyResponse, isRootOrIndexRedirect, nextState, parseRobots, robotsAllows, soldMarker, computeQuality, dealerHealth, outlierIds, isAutoArchiveExcluded } from '../server/recheck/core.ts';
 import { runRecheck } from '../server/recheck/runner.ts';
 
 const U = 'https://boterocarts.com/listing/used-2022-gas-yamaha-drive2-peachtree-city-ga-31128/';
@@ -99,4 +99,23 @@ test('runner: robots disallow skips fetch', async () => {
   const f = (async (u: any) => { if (String(u).endsWith('/robots.txt')) return { status: 200, ok: true, url: String(u), text: async () => 'User-agent: *\nDisallow: /listing/' } as any; fetched++; return { status: 200, ok: true, url: String(u), text: async () => '' } as any; }) as any;
   const s = await runRecheck({ dryRun: true, db: fakeDb(rows, []), fetchImpl: f });
   assert.equal(fetched, 0); assert.equal(s.items[0].result.status, 'blocked_robots');
+});
+test('runner: Botero dealers are never auto-archived (needs_review, still logged)', async () => {
+  const rows = [
+    { id: 21, sync_source: 'botero-carts-jacksonville', source_listing_url: 'https://boterocarts.com/inventory/x', recheck_fail_count: 1 },
+    { id: 22, sync_source: 'other', source_listing_url: 'https://www.boterocarts.com/inventory/y', recheck_fail_count: 5 },
+  ];
+  const f = fakeFetch({ 'https://boterocarts.com/inventory/x': { status: 200, url: 'https://boterocarts.com/' },
+    'https://www.boterocarts.com/inventory/y': { status: 404 } });
+  const w: any[] = [];
+  const s = await runRecheck({ dryRun: false, db: fakeDb(rows, w), fetchImpl: f, timeBudgetMs: 60000 });
+  assert.equal(s.archived, 0); assert.equal(s.needs_review, 2);
+  for (const id of [21, 22]) { const u = w.find(x => x.op === 'update' && x.id === id).v; assert.equal(u.status, undefined); assert.equal(u.public_listing, undefined); }
+  const logs = w.filter(x => x.table === 'sync_log');
+  assert.equal(logs.length, 2); assert.ok(logs.every(l => l.v.status === 'recheck_needs_review' && /needs manual review/.test(l.v.notes)));
+});
+test('isAutoArchiveExcluded', () => {
+  assert.equal(isAutoArchiveExcluded('botero-carts-ocala'), true);
+  assert.equal(isAutoArchiveExcluded('boterox'), false);
+  assert.equal(isAutoArchiveExcluded('golf-rider', 'https://golfrider.com/a'), false);
 });
