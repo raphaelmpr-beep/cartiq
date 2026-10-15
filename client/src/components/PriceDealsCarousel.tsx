@@ -142,6 +142,12 @@ function DealCard({ listing, priority = false, position = 0 }: { listing: Listin
         <p className="text-xs font-semibold leading-snug line-clamp-2 text-foreground group-hover:text-green-700 transition-colors">
           {listing.title}
         </p>
+        {listing.brand && (
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+            {listing.brand}
+            {listing.model ? ` · ${listing.model}` : ""}
+          </p>
+        )}
         <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
           <div className="flex items-center gap-2">
             {listing.city && (
