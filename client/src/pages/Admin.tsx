@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DealerInventory } from "@/components/admin/DealerInventory";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { DealBadge } from "@/components/Badges";
@@ -1657,6 +1658,7 @@ export default function Admin() {
           <TabsList className="mb-6 flex overflow-x-auto whitespace-nowrap w-full">
             <TabsTrigger value="listings" data-testid="tab-listings">All Listings ({listings.length})</TabsTrigger>
             <TabsTrigger value="csv" data-testid="tab-csv">CSV Import</TabsTrigger>
+            <TabsTrigger value="dealer-health" data-testid="tab-dealer-health">Dealer Inventory · Health</TabsTrigger>
             <TabsTrigger value="dealers" data-testid="tab-dealers">Dealers · Source of Truth ({dealers.length})</TabsTrigger>
             <TabsTrigger value="sources" data-testid="tab-sources">Inventory Sources</TabsTrigger>
             <TabsTrigger value="blocked" data-testid="tab-blocked">Blocked Sources</TabsTrigger>
@@ -1731,6 +1733,10 @@ export default function Admin() {
           </TabsContent>
 
           {/* Dealers Tab — Source of Truth */}
+          <TabsContent value="dealer-health">
+            <DealerInventory adminToken={adminToken} />
+          </TabsContent>
+
           <TabsContent value="dealers">
             <div className="space-y-4">
               <Card>

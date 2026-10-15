@@ -39,6 +39,10 @@
     { "src": "/fonts/(.*)", "dest": "dist/public/fonts/$1" },
     { "src": "/(.*)",        "dest": "dist/vercel-handler.cjs" }
   ],
+  "crons": [
+    { "path": "/api/cron/recheck",      "schedule": "*/10 * * * *" },
+    { "path": "/api/cron/data-quality", "schedule": "15 7 * * *" }
+  ],
   "env": {
     "NODE_ENV": "production",
     "VERCEL": "1"
