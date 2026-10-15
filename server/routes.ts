@@ -1,4 +1,5 @@
 import { BOT_UA } from './sync/polite-fetch.js';
+import { extractListingPrice } from "./sync/price-extract.js";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { timingSafeEqual } from "node:crypto";
@@ -831,29 +832,9 @@ ${pageUrls.join("\n")}
       const results = { checked: 0, updated: 0, unchanged: 0, errors: 0, skipped: 0 };
       results.skipped = (candidates?.length ?? 0) - toCheck.length;
 
-      // Price extraction: look for common patterns in page HTML
-      const extractPrice = (html: string): number | null => {
-        // Matches: $9,999  $9999  9,999.00  9999
-        const patterns = [
-          /\$([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?)/g,
-          /"price"\s*:\s*"?([0-9]{3,6}(?:\.[0-9]{2})?)"?/gi,
-          /data-price="([0-9]{3,6})"/gi,
-          /class="[^"]*price[^"]*"[^>]*>\s*\$?([0-9]{1,3}(?:,[0-9]{3})*)/gi,
-        ];
-        const found: number[] = [];
-        for (const pattern of patterns) {
-          let m;
-          while ((m = pattern.exec(html)) !== null) {
-            const n = parseFloat(m[1].replace(/,/g, ""));
-            if (n >= 500 && n <= 80000) found.push(n);
-          }
-        }
-        if (!found.length) return null;
-        // Return the most-frequently-occurring price
-        const freq: Record<number, number> = {};
-        for (const p of found) freq[p] = (freq[p] || 0) + 1;
-        return Number(Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]);
-      };
+      // Price extraction: shared rules (JSON-LD first, sale before regular, never MSRP,
+      // never down payment / monthly amounts, null when no price). See server/sync/price-extract.ts.
+      const extractPrice = (html: string): number | null => extractListingPrice(html).price;
 
       // Process in small batches to avoid timeout
       const BATCH = 5;

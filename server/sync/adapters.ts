@@ -6,6 +6,7 @@
  */
 
 import { sitemapHeaders } from './http-headers.js';
+import { extractListingPrice, priceFromElementText } from './price-extract.js';
 
 export interface ListingData {
   source_url: string;
@@ -327,7 +328,9 @@ export async function parseBoteroListing(
       document.querySelector('[class*="sale-price"]') ||
       document.querySelector('.glc-listing-price');
 
-    const rawPrice = priceEl?.textContent?.replace(/[^0-9.]/g, '') || null;
+    // Raw element text + nearby text (financing/MSRP rejection happens in Node: price-extract.ts)
+    const rawPrice = priceEl?.textContent?.trim() || null;
+    const rawPriceCtx = (priceEl?.parentElement?.textContent || '').trim().slice(0, 160);
 
     const title =
       document.querySelector('h1.entry-title')?.textContent?.trim() ||
@@ -360,7 +363,7 @@ export async function parseBoteroListing(
       null;
 
     return {
-      title, rawPrice,
+      title, rawPrice, rawPriceCtx,
       year: getMeta('year'), make: getMeta('make'), model: getMeta('model'),
       condition: getMeta('condition'), battery: getMeta('battery') || getMeta('power'),
       seating: getMeta('seat') || getMeta('passenger'),
@@ -368,7 +371,8 @@ export async function parseBoteroListing(
     };
   });
 
-  return normalizeListing(data, url, 'botero');
+  const pageHtml = await page.content().catch(() => '');
+  return normalizeListing({ ...data, priceInfo: extractListingPrice(pageHtml) }, url, 'botero');
 }
 
 /**
@@ -417,7 +421,9 @@ export async function parseJaxListing(
       document.querySelector('.price .woocommerce-Price-amount') ||
       document.querySelector('h2 .woocommerce-Price-amount') ||
       document.querySelector('.woocommerce-Price-amount');
-    const rawPrice = priceEl?.textContent?.replace(/[^0-9.]/g, '') || null;
+    // Raw element text + nearby text (financing/MSRP rejection happens in Node: price-extract.ts)
+    const rawPrice = priceEl?.textContent?.trim() || null;
+    const rawPriceCtx = (priceEl?.parentElement?.textContent || '').trim().slice(0, 160);
 
     // ── Specs table ──────────────────────────────────────────────────────────
     // Confirmed: #tab-details table with <th> labels and <td> values
@@ -491,13 +497,15 @@ export async function parseJaxListing(
       null;
     const location = locationEl?.textContent?.trim() || null;
 
-    return { title, rawPrice, specs, images, location, conditionRaw, battery, seatingRaw, descText };
+    return { title, rawPrice, rawPriceCtx, specs, images, location, conditionRaw, battery, seatingRaw, descText };
   });
 
   // ── Normalize ─────────────────────────────────────────────────────────────
+  const pageHtml = await page.content().catch(() => '');
   const parsed = normalizeListing(
     {
       ...data,
+      priceInfo: extractListingPrice(pageHtml),
       condition: data.conditionRaw,
       seating: data.seatingRaw,
     },
@@ -541,7 +549,9 @@ export async function parseDiscoveryListing(
       document.querySelector('[class*="price"] .amount') ||
       document.querySelector('.glc-listing-price') ||
       document.querySelector('[data-price]');
-    const rawPrice = priceEl?.textContent?.replace(/[^0-9.]/g, '') || null;
+    // Raw element text + nearby text (financing/MSRP rejection happens in Node: price-extract.ts)
+    const rawPrice = priceEl?.textContent?.trim() || null;
+    const rawPriceCtx = (priceEl?.parentElement?.textContent || '').trim().slice(0, 160);
 
     const title =
       document.querySelector('h1.entry-title')?.textContent?.trim() ||
@@ -598,7 +608,7 @@ export async function parseDiscoveryListing(
     });
 
     return {
-      title, rawPrice,
+      title, rawPrice, rawPriceCtx,
       year: getMeta('year'), make: getMeta('make'), model: getMeta('model'),
       condition: getMeta('condition') || getMeta('type'),
       battery: getMeta('battery') || getMeta('power'),
@@ -607,7 +617,8 @@ export async function parseDiscoveryListing(
     };
   });
 
-  const normalized = normalizeListing(data, url, 'discovery');
+  const pageHtml = await page.content().catch(() => '');
+  const normalized = normalizeListing({ ...data, priceInfo: extractListingPrice(pageHtml) }, url, 'discovery');
 
   // Map city to specific dealer slug
   const city = normalized.location_city?.toLowerCase() || '';
@@ -642,7 +653,9 @@ export async function parseDiscoveryListing(
 // ── Normalizer ─────────────────────────────────────────────────────────────────
 
 function normalizeListing(raw: any, url: string, dealer_slug: string): ListingData {
-  const price = raw.rawPrice ? Math.round(parseFloat(raw.rawPrice.replace(/,/g, ''))) : null;
+  // Structured/labeled page price first; legacy element text only as a guarded fallback.
+  // No price found → null (shown as "Call for price"). Never a down payment, monthly amount or MSRP.
+  const price = raw.priceInfo?.price ?? (raw.priceInfo?.source === 'msrp_only' ? null : priceFromElementText(raw.rawPrice, raw.rawPriceCtx));
 
   const conditionMap: Record<string, ListingData['condition']> = {
     new: 'new', used: 'used', 'pre-owned': 'used', preowned: 'used',

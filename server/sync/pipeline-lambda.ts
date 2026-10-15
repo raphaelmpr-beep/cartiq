@@ -12,6 +12,7 @@
  */
 import { BOT_UA } from './polite-fetch.js';
 
+import { priceFromFeed } from './price-extract.js';
 import { createSupabaseAdmin } from "../supabase-admin.js";
 import {
   getGcrSitemapUrls,
@@ -344,7 +345,8 @@ async function fetchDx1AlgoliaInventory(cfg: Dx1AlgoliaConfig): Promise<Dx1Unit[
         const make = h.Manufacturer || null;
         const model = h.ProductName || null;
         const cond = (h.Condition || '').toLowerCase() === 'used' ? 'used' : 'new';
-        const price = h.Price || h.SalePrice || h.Msrp || null;
+        // Sale price first, then price; MSRP is never used as the price (audit 2026-10-15).
+        const price = priceFromFeed(h).price;
         const photos: string[] = h.PhotoLists || [];
         const image_url = photos.length > 0 ? photos[0] : null;
 
@@ -361,7 +363,7 @@ async function fetchDx1AlgoliaInventory(cfg: Dx1AlgoliaConfig): Promise<Dx1Unit[
           make,
           model,
           condition: cond,
-          price: price ? parseFloat(String(price)) : null,
+          price: price ?? null,
           image_url,
           seating,
           location_city: h.City || null,
@@ -1476,7 +1478,7 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
     dealer_id: dealerId,              // set from dealer slug lookup
     verified_at: imp.price ? new Date().toISOString() : null,
     last_checked_at: new Date().toISOString(),
-    price_confidence: imp.price ? 'confirmed' : 'estimated',
+    price_confidence: imp.price ? 'confirmed' : 'unavailable',
     deal_rating: 'unknown',           // always unknown on import — verify comps first
     valuation_confidence: 'low',      // always low on import — set via admin after review
     status: 'active',
