@@ -583,10 +583,10 @@ export async function runBrowserSync(
           public_listing: true,
           updated_at:     new Date().toISOString(),
         };
-        if (listing.price)              update.price       = listing.price;
+        if (listing.price)              update.asking_price = listing.price;
         if (listing.raw_title)          update.title       = listing.raw_title;
         if (listing.year)               update.year        = listing.year;
-        if (listing.make)               update.make        = listing.make;
+        if (listing.make)               update.brand       = listing.make;
         if (listing.model)              update.model       = listing.model;
         if (listing.image_url)          update.image_url   = listing.image_url;
         if (listing.image_urls?.length) update.image_urls  = listing.image_urls;

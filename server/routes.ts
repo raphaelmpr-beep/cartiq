@@ -52,6 +52,7 @@ function norm(row: any): any { return toCamel(row); }
 import { getMetaConnectorStatus } from "./connectors/metaMarketplace";
 import { getRetailConnectorStatus } from "./connectors/retailSource";
 import { supabaseAdmin } from "./supabase-admin";
+import { registerRecheckRoutes } from "./recheck/routes";
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 if (!ADMIN_PASSWORD) {
@@ -374,6 +375,8 @@ ${pageUrls.join("\n")}
     ) return next();
     return res.status(401).json({ error: "Unauthorized" });
   }
+  registerRecheckRoutes(app, requireAdmin);
+
 
   // GET /api/admin/verify — lightweight endpoint the Admin UI uses to gate
   // the client login. Replaces the old client-side hash comparison, which
