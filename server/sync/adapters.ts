@@ -51,6 +51,7 @@ export function isNavPage(url: string): boolean {
     /\/used-inventory\/?$/i,
     /\/all-inventory\/?$/i,
     /\/shop-our-inventory\/?$/i,
+    /\/(product|products|listing|listings|shop)\/?$/i, // bare index roots, not units
     /\/shop-brp\/?$/i,
     /\/about/i,
     /\/contact/i,
