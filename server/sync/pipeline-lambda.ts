@@ -13,6 +13,7 @@
 import { BOT_UA } from './polite-fetch.js';
 
 import { priceFromFeed } from './price-extract.js';
+import { isAutoArchiveExcluded } from '../recheck/core.js';
 import { createSupabaseAdmin } from "../supabase-admin.js";
 import {
   getGcrSitemapUrls,
@@ -58,7 +59,17 @@ async function getBoteroLocationRecords(): Promise<BoteroRecord[]> {
   return records;
 }
 
+let _boteroCache: { at: number; p: Promise<BoteroFetchResult> } | null = null;
+/** One Botero sitemap fetch per 10 minutes per process (all 7 locations share it). */
 async function getBoteroFetchResult(): Promise<BoteroFetchResult> {
+  if (_boteroCache && Date.now() - _boteroCache.at < 600_000) return _boteroCache.p;
+  const p = fetchBoteroSitemaps();
+  _boteroCache = { at: Date.now(), p };
+  p.then(r => { if (!r.rawUrlCount) _boteroCache = null; }, () => { _boteroCache = null; });
+  return p;
+}
+
+async function fetchBoteroSitemaps(): Promise<BoteroFetchResult> {
   const sitemaps = [
     'https://boterocarts.com/glc_listing-sitemap.xml',
     'https://boterocarts.com/glc_listing-sitemap2.xml',
@@ -477,10 +488,17 @@ export async function runLambdaSync(opts: SyncOptions): Promise<SyncResult> {
         .eq('sync_enabled', true)
         .not('adapter_key', 'is', null);
 
-      // Dedupe by adapter_key so shared-sitemap dealers (e.g. 5 Jenkins locations) run once
+      // Dedupe by adapter_key + site host so shared-sitemap dealers (e.g. Jenkins locations on
+      // jenkinsmotorsports.com) run once, but a location on its OWN domain under the same adapter
+      // (e.g. jenkinsmotorsportsavonpark.com) still runs instead of shadowing its siblings.
       const seen = new Set<string>();
+      const hostOf = (d: DealerSourceRecord) => {
+        try { return new URL(d.inventory_source_url || d.website_url || '').host.replace(/^www\./, ''); } catch { return d.slug; }
+      };
       for (const d of (allDealers || []) as DealerSourceRecord[]) {
-        const key = d.adapter_key!;
+        // Botero's path syncs only the requested location, so every Botero location must run
+        // (the shared sitemap fetch is memoized below, so this adds no extra requests).
+        const key = d.adapter_key === 'botero' ? `botero|${d.slug}` : `${d.adapter_key}|${hostOf(d)}`;
         if (seen.has(key)) continue;
         seen.add(key);
         await runDiscoverSitemap(d, opts.limit || 100, opts.dry_run || false, result);
@@ -1524,6 +1542,14 @@ async function runImport(import_id: number, dry_run: boolean, result: SyncResult
  * Safe: only touches listings with a source_listing_url (sync-tracked).
  * Never touches manually-imported listings.
  */
+/** Max share of a dealer's active listings one sitemap diff may archive. */
+export const AUTO_ARCHIVE_MAX_SHARE = 0.3;
+/** Normalize listing URLs for sitemap comparison (scheme, www, trailing slash, fragment). */
+export function normListingUrl(u: string): string {
+  try { const x = new URL(u.trim()); return (x.host.replace(/^www\./, "") + x.pathname.replace(/\/+$/, "") + x.search).toLowerCase(); }
+  catch { return u.trim().toLowerCase(); }
+}
+
 export async function autoArchiveRemovedListings(
   dealerSlug: string,
   liveSitemapUrls: string[],
@@ -1531,7 +1557,18 @@ export async function autoArchiveRemovedListings(
 ): Promise<{ archived: number; summary: string[] }> {
   const supabase = getSupabase();
   const summary: string[] = [];
-  const liveSet = new Set(liveSitemapUrls);
+  // Safety (Oct 2026): never auto-archive excluded dealers (Botero → manual review), never act on an
+  // empty sitemap, compare normalized URLs, and stop when an implausible share would be archived
+  // (a partial/blocked sitemap must not wipe a dealer's inventory).
+  if (isAutoArchiveExcluded(dealerSlug)) {
+    summary.push(`[auto-archive][${dealerSlug}] skipped — dealer excluded from auto-archive (manual review)`);
+    return { archived: 0, summary };
+  }
+  if (!liveSitemapUrls.length) {
+    summary.push(`[auto-archive][${dealerSlug}] skipped — empty sitemap`);
+    return { archived: 0, summary };
+  }
+  const liveSet = new Set(liveSitemapUrls.map(normListingUrl));
 
   const { data: activeListings, error } = await supabase
     .from('listings')
@@ -1547,12 +1584,17 @@ export async function autoArchiveRemovedListings(
   }
 
   const removed = (activeListings || []).filter(
-    (l: any) => l.source_listing_url && !liveSet.has(l.source_listing_url)
+    (l: any) => l.source_listing_url && !liveSet.has(normListingUrl(l.source_listing_url))
   );
 
   summary.push(`[auto-archive][${dealerSlug}] ${activeListings?.length ?? 0} active | ${removed.length} no longer in sitemap`);
 
   if (removed.length === 0) return { archived: 0, summary };
+  const active = activeListings?.length ?? 0;
+  if (removed.length > Math.max(5, Math.ceil(active * AUTO_ARCHIVE_MAX_SHARE))) {
+    summary.push(`[auto-archive][${dealerSlug}] SAFETY STOP — ${removed.length}/${active} would be archived (> ${Math.round(AUTO_ARCHIVE_MAX_SHARE * 100)}%); needs manual review`);
+    return { archived: 0, summary };
+  }
 
   if (dryRun) {
     removed.forEach((l: any) => summary.push(`  [DRY RUN] Would archive: #${l.id} ${l.title}`));
