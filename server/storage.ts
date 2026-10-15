@@ -2,7 +2,8 @@
  * CartIQ Storage — Supabase/Postgres backend
  * All methods are async. Routes call await storage.method().
  */
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createSupabaseAdmin } from "./supabase-admin";
 import { normalizeWarranty, normalizeWarrantyFields, WARRANTY_YES_PATTERN } from "../shared/warranty";
 import type {
   Listing, InsertListing,
@@ -15,11 +16,11 @@ import type {
   SavedListing, InsertSavedListing,
 } from "@shared/schema";
 
+// Server-side storage runs every query (public and admin) with the privileged
+// server-only client. Public routes keep their own filters (status/public_listing);
+// archived-listing redirects and admin views need rows that anon RLS will hide.
 function getClient(): SupabaseClient {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_ANON_KEY;
-  if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_ANON_KEY");
-  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  return createSupabaseAdmin();
 }
 
 // Lazy singleton

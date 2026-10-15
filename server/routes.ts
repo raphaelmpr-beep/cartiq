@@ -51,6 +51,7 @@ function norm(row: any): any { return toCamel(row); }
 
 import { getMetaConnectorStatus } from "./connectors/metaMarketplace";
 import { getRetailConnectorStatus } from "./connectors/retailSource";
+import { supabaseAdmin } from "./supabase-admin";
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 if (!ADMIN_PASSWORD) {
@@ -417,8 +418,7 @@ ${pageUrls.join("\n")}
 
   app.get("/api/admin/pricing-config", requireAdmin, async (_req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const { data, error } = await sb.from("pricing_config").select("key,value,updated_at,updated_by");
       if (error) return res.status(500).json({ error: error.message });
       const config: Record<string, any> = {};
@@ -435,8 +435,7 @@ ${pageUrls.join("\n")}
       if (!key || value === undefined) return res.status(400).json({ error: "key and value required" });
       const ALLOWED_KEYS = ["thresholds", "geo_tiers", "feature_adjustments", "depreciation", "brand_bases", "buyer_score_weights"];
       if (!ALLOWED_KEYS.includes(key)) return res.status(400).json({ error: `Unknown config key: ${key}` });
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const { error } = await sb.from("pricing_config").upsert({
         key,
         value,
@@ -530,8 +529,7 @@ ${pageUrls.join("\n")}
 
     // ── Build homepage payload ────────────────────────────────────────────
     const buildHomepage = async (): Promise<Record<string, unknown>> => {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb: any = supabaseAdmin();
 
       // Per-request seed — used both for scoring jitter and offset randomisation
       const seed = Date.now();
@@ -705,8 +703,7 @@ ${pageUrls.join("\n")}
       const safeState     = typeof state     === "string" ? state.slice(0, 2)      : null;
       const safeBrand     = typeof brand     === "string" ? brand.slice(0, 80)     : null;
       const safeSessionId = typeof sessionId === "string" ? sessionId.slice(0, 128): null;
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb: any = supabaseAdmin();
       await sb.from("homepage_events").insert({
         event_type: eventType, listing_id: listingId, dealer_id: dealerId ?? null,
         city: safeCity, state: safeState, brand: safeBrand,
@@ -719,8 +716,7 @@ ${pageUrls.join("\n")}
   // Aggregates a day's homepage_events into homepage_ctr_daily. Idempotent.
   app.post("/api/admin/aggregate-ctr", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb: any = supabaseAdmin();
       const targetDate = (req.body as any)?.date ?? new Date(Date.now() - 86_400_000).toISOString().split("T")[0];
       const { data: events, error } = await sb.from("homepage_events")
         .select("event_type,listing_id,dealer_id,city,state,brand,is_featured")
@@ -756,8 +752,7 @@ ${pageUrls.join("\n")}
   // GET /api/admin/ctr-report?days=7
   app.get("/api/admin/ctr-report", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb: any = supabaseAdmin();
       const days = parseInt((req.query as any).days as string) || 7;
       const since = new Date(Date.now() - days * 86_400_000).toISOString().split("T")[0];
       const { data, error } = await sb.from("homepage_ctr_daily")
@@ -800,8 +795,7 @@ ${pageUrls.join("\n")}
     if (!token || token !== ADMIN_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
 
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const db = supabaseAdmin();
 
       // Fetch all active hot-deal listings with a non-category source_url
       const { data: candidates, error } = await db
@@ -922,8 +916,7 @@ ${pageUrls.join("\n")}
   // Last-refresh status endpoint (public — used by carousel header)
   app.get("/api/listings/hot-deals-meta", async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const db = supabaseAdmin();
       const { data } = await db
         .from("listings")
         .select("updated_at")
@@ -1637,8 +1630,7 @@ ${pageUrls.join("\n")}
   // GET /api/admin/pending-imports — list queued listings awaiting review
   app.get("/api/admin/pending-imports", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const status = (req.query.status as string) || "pending";
       const dealer   = req.query.dealer as string | undefined;
       const reqLimit = Math.min(parseInt(req.query.limit as string) || 500, 1000);
@@ -1747,8 +1739,7 @@ ${pageUrls.join("\n")}
   // PATCH /api/admin/pending-imports/:id — approve/reject a pending import
   app.patch("/api/admin/pending-imports/:id", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const id = parseInt(req.params.id);
       const { action } = req.body; // 'approve' | 'reject'
       if (action === "approve") {
@@ -1771,8 +1762,7 @@ ${pageUrls.join("\n")}
   // POST /api/admin/pending-imports/bulk-approve-all — approve ALL pending, optionally filtered by dealer_slug
   app.post("/api/admin/pending-imports/bulk-approve-all", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const { dealer_slug } = req.body as { dealer_slug?: string };
 
       // Fetch all pending IDs (paginate to handle 1000+)
@@ -1806,8 +1796,7 @@ ${pageUrls.join("\n")}
   // POST /api/admin/pending-imports/bulk-approve — approve a set of pending imports
   app.post("/api/admin/pending-imports/bulk-approve", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const { dealer_slug, ids } = req.body as { dealer_slug?: string; ids?: number[] };
 
       let q = sb.from("pending_imports").select("id").eq("status", "pending");
@@ -1848,8 +1837,7 @@ ${pageUrls.join("\n")}
   // Stale dealer_coverage_log slugs that don't match any dealer row are excluded.
   app.get("/api/admin/coverage-audit", requireAdmin, async (_req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
 
       // 1. All real dealers — the authoritative list
       const { data: dealerRows, error: dealerErr } = await sb
@@ -1985,8 +1973,7 @@ ${pageUrls.join("\n")}
   // Sets coverage_status = 'partial_inventory' (has real data, not yet fully audited).
   app.post("/api/admin/coverage-baseline", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const { dealer_slug } = req.body;
       if (!dealer_slug) return res.status(400).json({ error: "dealer_slug required" });
 
@@ -2044,8 +2031,7 @@ ${pageUrls.join("\n")}
   // GET /api/admin/inventory-reconciliation — full inventory gap audit
   app.get("/api/admin/inventory-reconciliation", requireAdmin, async (_req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
 
       // Paginated fetch — Supabase/PostgREST caps at 1000 rows per request even
       // when .limit(N) is larger. Explicit .range() pagination is required to
@@ -2298,8 +2284,7 @@ ${pageUrls.join("\n")}
   // Read-only. Does not modify any backend process.
   app.get("/api/admin/dealers-integrity", requireAdmin, async (_req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
 
       // Paginated fetch (Supabase/PostgREST caps at 1000 rows even when .limit is larger)
       const fetchAll = async <T = any>(table: string, select: string, pageSize = 1000, maxRows = 50000): Promise<T[]> => {
@@ -2379,8 +2364,7 @@ ${pageUrls.join("\n")}
   // POST /api/admin/run-migration — execute DDL using service-role key
   app.post("/api/admin/run-migration", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const { query } = req.body;
       if (!query || typeof query !== "string") return res.status(400).json({ error: "query required" });
       // Only allow DDL (ALTER, CREATE, CREATE INDEX, COMMENT)
@@ -2401,8 +2385,7 @@ ${pageUrls.join("\n")}
   // POST /api/admin/fix-sequence — reset listings.id sequence to avoid duplicate key errors
   app.post("/api/admin/fix-sequence", requireAdmin, async (_req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
 
       // Step 1: Get current max id from listings
       const { data: maxRow, error: maxErr } = await sb
@@ -2417,28 +2400,19 @@ ${pageUrls.join("\n")}
       const maxId: number = maxRow?.id ?? 0;
       const nextVal = maxId + 1;
 
-      // Step 2: Use pg directly to run setval — service key is the Postgres JWT password
-      const { Client } = await import("pg");
-      const supabaseUrl = (process.env.SUPABASE_URL || "").trim();
-      const projectRef = supabaseUrl.replace(/^https:\/\//, "").replace(/\.supabase\.co.*$/, "").trim();
-      const serviceKey = (process.env.SUPABASE_KEY || "").trim();
-
-      const client = new Client({
-        host: `db.${projectRef}.supabase.co`,
-        port: 5432,
-        database: "postgres",
-        user: "postgres",
-        password: serviceKey,
-        ssl: { rejectUnauthorized: false },
-        connectionTimeoutMillis: 10000,
-      });
-
-      await client.connect();
-      const result = await client.query(
-        `SELECT setval(pg_get_serial_sequence('public.listings', 'id'), $1)`,
-        [nextVal]
-      );
-      await client.end();
+      // Step 2: setval via a SECURITY DEFINER function executable only by
+      // service_role (migration 20261015_lock_down_anon_rls.sql). The old code
+      // used SUPABASE_KEY as a Postgres password, which never worked.
+      const { data: seqVal, error: seqErr } = await sb.rpc("admin_reset_listings_id_seq");
+      if (seqErr) {
+        const missing = seqErr.code === "PGRST202" || seqErr.code === "42883";
+        return res.status(missing ? 501 : 500).json({
+          error: missing
+            ? "admin_reset_listings_id_seq() not installed; apply migration 20261015_lock_down_anon_rls.sql"
+            : `Sequence reset failed: ${seqErr.message}`,
+        });
+      }
+      const result = { rows: [{ setval: seqVal }] };
 
       const newSeqVal = result.rows[0]?.setval ?? nextVal;
       res.json({ ok: true, maxId, nextVal, sequenceSetTo: newSeqVal });
@@ -2450,8 +2424,7 @@ ${pageUrls.join("\n")}
   // PATCH /api/admin/dealers/:slug/source-registry — update source registry fields
   app.patch("/api/admin/dealers/:slug/source-registry", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const { slug } = req.params;
       const allowed = [
         "adapter_key", "platform_type", "discovery_strategy",
@@ -2473,8 +2446,7 @@ ${pageUrls.join("\n")}
   // GET /api/admin/sync-log — recent sync activity
   app.get("/api/admin/sync-log", requireAdmin, async (_req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const { data, error } = await sb.from("sync_log").select("*, listings(title)").order("synced_at", { ascending: false }).limit(100);
       if (error) return res.status(500).json({ error: error.message });
       res.json(data || []);
@@ -2540,8 +2512,7 @@ ${pageUrls.join("\n")}
     let jobId: string | null = null;
 
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb: any = supabaseAdmin();
       const { dealer_slug, force = false } = req.body as { dealer_slug?: string; force?: boolean };
 
       // Input validation
@@ -2660,8 +2631,7 @@ ${pageUrls.join("\n")}
       // Unexpected error — mark job failed if it was created
       if (jobId) {
         try {
-          const { createClient } = await import("@supabase/supabase-js");
-          const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+          const sb: any = supabaseAdmin();
           await sb.from("detect_source_jobs").update({
             status: "failed", finished_at: new Date().toISOString(), error_msg: e.message,
           }).eq("id", jobId);
@@ -2674,8 +2644,7 @@ ${pageUrls.join("\n")}
   // POST /api/admin/cache-image — fetch image URL, upload to Supabase Storage, patch listing
   app.post("/api/admin/cache-image", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb: any = supabaseAdmin();
 
       const { id, imageUrl } = req.body as { id: number; imageUrl: string };
       if (!id || !imageUrl) return res.status(400).json({ error: "id and imageUrl are required" });
@@ -2763,8 +2732,7 @@ ${pageUrls.join("\n")}
   // detect duplicate place_ids, and fingerprint the site platform.
   app.post("/api/admin/dealers/:slug/google-validate", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
       const { slug } = req.params;
 
       // Fetch dealer record
@@ -2927,8 +2895,7 @@ ${pageUrls.join("\n")}
   // POST /api/admin/dealers/bulk-google-validate — validate all dealers in sequence
   app.post("/api/admin/dealers/bulk-google-validate", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb = supabaseAdmin();
 
       const { data: dealers } = await sb
         .from("dealers")
@@ -2980,8 +2947,7 @@ ${pageUrls.join("\n")}
   // GET /api/admin/detect-source-jobs?dealer_slug=:slug — recent detection jobs for a dealer
   app.get("/api/admin/detect-source-jobs", requireAdmin, async (req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb: any = supabaseAdmin();
       const dealer_slug = req.query.dealer_slug as string | undefined;
       if (!dealer_slug) return res.status(400).json({ error: "dealer_slug is required" });
       const { data, error } = await sb
@@ -3019,8 +2985,7 @@ ${pageUrls.join("\n")}
   // Returns all dealer_block_log rows, enriched with live dealer name + website_url.
   app.get("/api/admin/blocked-sources", requireAdmin, async (_req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb: any = supabaseAdmin();
 
       const { data: rows, error } = await sb
         .from("dealer_block_log")
@@ -3072,8 +3037,7 @@ ${pageUrls.join("\n")}
       if (outreach_notes  !== undefined) patch.outreach_notes  = outreach_notes;
       if (resolved        !== undefined) patch.resolved        = resolved;
 
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb: any = supabaseAdmin();
 
       const { error } = await sb
         .from("dealer_block_log")
@@ -3091,8 +3055,7 @@ ${pageUrls.join("\n")}
   // Seeds dealer_block_log with all 11 known-blocked dealers. Safe to re-run (upsert).
   app.post("/api/admin/blocked-sources/seed", requireAdmin, async (_req, res) => {
     try {
-      const { createClient } = await import("@supabase/supabase-js");
-      const sb: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+      const sb: any = supabaseAdmin();
 
       const now = new Date().toISOString();
       const rows = KNOWN_BLOCKED_DEALERS_SEED.map((d) => ({

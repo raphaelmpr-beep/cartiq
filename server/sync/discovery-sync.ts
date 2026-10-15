@@ -13,11 +13,9 @@
  */
 
 import { chromium } from 'playwright';
-import { createClient } from '@supabase/supabase-js';
+import { createSupabaseAdmin } from "../supabase-admin.js";
 import { getDiscoveryListingUrls, parseDiscoveryListing, type ListingData } from './adapters.js';
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_KEY = process.env.SUPABASE_KEY!;
 const MAX_CONCURRENCY = 4;
 
 interface SyncOptions {
@@ -66,7 +64,7 @@ export async function runDiscoverySync(opts: SyncOptions = {}): Promise<SyncResu
   const { limit = 0, dryRun = false, verbose = true } = opts;
   const log = verbose ? console.log : () => {};
 
-  const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const sb = createSupabaseAdmin();
   const result: SyncResult = {
     discovered: 0, inserted: 0, duplicates: 0, errors: 0, listings: [],
   };

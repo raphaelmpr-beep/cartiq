@@ -20,7 +20,7 @@
 // DO NOT add a static import for playwright here — it causes the entire module
 // to require('playwright') at init time, which crashes Vercel Lambda (not installed).
 import type { BrowserContext } from 'playwright';
-import { createClient } from '@supabase/supabase-js';
+import { createSupabaseAdmin } from "../supabase-admin.js";
 import {
   parseJaxListing,
   type ListingData,
@@ -351,10 +351,7 @@ export async function runBrowserSync(
     return result;
   }
 
-  const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_KEY!
-  );
+  const supabase = createSupabaseAdmin();
 
   log(`[BrowserSync] Starting ${dealerCfg.name}${limit ? ` (limit: ${limit})` : ''}`);
 

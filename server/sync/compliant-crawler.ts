@@ -18,11 +18,9 @@
  * and the run-pipeline worker which have Playwright available.
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createSupabaseAdmin } from "../supabase-admin.js";
 import { bm25Trim, INVENTORY_QUERY } from './bm25-trim.js';
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_KEY = process.env.SUPABASE_KEY!;
 
 const USER_AGENT = 'GolfCartIQ-Bot/1.0 (+https://golfcartiq.com/bot)';
 const REQUEST_DELAY_MS = 3000;   // 1 req / 3s per domain — conservative
@@ -337,7 +335,7 @@ export async function compliantCrawl(url: string): Promise<CrawlResult> {
  * Uses ON CONFLICT (dealer_slug) DO UPDATE so only the latest attempt is kept.
  */
 export async function writeBlockLog(entry: BlockLogEntry): Promise<void> {
-  const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const sb = createSupabaseAdmin();
   await sb.from('dealer_block_log').upsert({
     dealer_slug:          entry.dealer_slug,
     dealer_name:          entry.dealer_name,
