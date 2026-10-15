@@ -19,8 +19,12 @@
 import { createClient } from "@supabase/supabase-js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const SUPABASE_URL = "https://aagwrcdvhuuzwrglamrt.supabase.co";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_ANON_KEY ?? "sb_publishable_AMYcEYmVFC7zSGT_c1GTaw_IlWrtbyU";
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://aagwrcdvhuuzwrglamrt.supabase.co";
+// Writes pricing flags, so it needs the server-only secret key. Fail loud.
+const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+if (!SUPABASE_KEY || SUPABASE_KEY.startsWith("sb_publishable_")) {
+  throw new Error("pricing-watchdog: SUPABASE_SERVICE_ROLE_KEY (sb_secret_...) is required");
+}
 const DRIFT_THRESHOLD = 0.15; // 15% — flag for human review
 const MIN_LISTINGS    = 5;    // minimum sample size to trust a bucket
 

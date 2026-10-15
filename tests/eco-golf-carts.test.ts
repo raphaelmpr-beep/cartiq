@@ -155,13 +155,13 @@ async function pipelineScenario(options: {
   const requests: Array<{ table: string; method: string; body: any }> = [];
   const realFetch = globalThis.fetch;
   const oldUrl = process.env.SUPABASE_URL;
-  const oldKey = process.env.SUPABASE_KEY;
+  const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const oldWebSocket = globalThis.WebSocket;
   // Production targets Node 22; the sandbox is Node 20. Supply the repository's
   // existing ws transport so Supabase can construct its client during integration tests.
   (globalThis as any).WebSocket = WebSocket;
   process.env.SUPABASE_URL = 'https://eco-adapter-test.invalid';
-  process.env.SUPABASE_KEY = 'not-a-real-key';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'not-a-real-key';
   const dealer = { slug: ECO_SLUG, adapter_key: options.wrongAdapter ? null : ECO_ADAPTER,
     canonical_domain: 'ecogolfcarts.com', sync_enabled: options.enabled !== false, browser_required: false };
   globalThis.fetch = (async (input: any, init: any = {}) => {
@@ -201,7 +201,7 @@ async function pipelineScenario(options: {
   } finally {
     globalThis.fetch = realFetch;
     if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;
-    if (oldKey === undefined) delete process.env.SUPABASE_KEY; else process.env.SUPABASE_KEY = oldKey;
+    if (oldKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
     if (oldWebSocket === undefined) delete (globalThis as any).WebSocket;
     else globalThis.WebSocket = oldWebSocket;
   }

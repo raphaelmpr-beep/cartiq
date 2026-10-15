@@ -10,7 +10,8 @@
  */
 
 import { chromium, type Browser, type Page } from 'playwright';
-import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { supabaseAdmin } from "../supabase-admin.js";
 import {
   getBoteroListingUrls,
   getJaxListingUrls,
@@ -20,10 +21,11 @@ import {
   type ListingData,
 } from './adapters.js';
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY!;
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// Privileged server-only client; resolved lazily so importing this module
+// never throws, but the first DB call fails loud without SUPABASE_SERVICE_ROLE_KEY.
+const supabase: SupabaseClient<any> = new Proxy({} as any, {
+  get: (_t, prop) => (supabaseAdmin() as any)[prop],
+});
 
 // Price drift threshold — flag if live price differs by more than 5%
 const PRICE_DRIFT_THRESHOLD = 0.05;

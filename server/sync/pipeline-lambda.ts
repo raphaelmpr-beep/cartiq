@@ -11,7 +11,7 @@
  * in the pplx.app environment where Playwright IS available.
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createSupabaseAdmin } from "../supabase-admin.js";
 import {
   getGcrSitemapUrls,
   isNavPage,
@@ -26,10 +26,7 @@ import {
 // import { runBrowserSync } from './browser-sync.js'; // DO NOT re-add as static import
 
 function getSupabase() {
-  return createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_KEY!
-  );
+  return createSupabaseAdmin();
 }
 
 // ─── Sitemap fetchers (HTTP only, no browser) ─────────────────────────────────
