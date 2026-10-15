@@ -25,12 +25,12 @@ import {
   parseJaxListing,
   type ListingData,
 } from './adapters.js';
-import { stealthFetchSitemapUrls } from './stealth-fetcher.js';
 import { sitemapHeaders } from './http-headers.js';
+import { BOT_UA, PoliteFetcher, hostIntervalMs, robotsPolicyAllows } from './polite-fetch.js';
 
 /**
  * Plain HTTP sitemap fetch — works in Lambda (no Playwright required).
- * Uses rotating browser UAs via sitemapHeaders(). Falls back to sub-sitemaps
+ * Uses the honest GolfCartIQ-Bot UA via sitemapHeaders(). Falls back to sub-sitemaps
  * if the root returns a sitemap index.
  */
 async function httpFetchSitemapUrls(
@@ -70,7 +70,8 @@ async function httpFetchSitemapUrls(
   }
 }
 
-const MAX_CONCURRENCY = 4;
+// One page at a time per dealer host (crawl-delay is enforced between pages below).
+const MAX_CONCURRENCY = 1;
 
 // ── Dealer registry for browser-based sync ────────────────────────────────────
 
@@ -355,8 +356,8 @@ export async function runBrowserSync(
 
   log(`[BrowserSync] Starting ${dealerCfg.name}${limit ? ` (limit: ${limit})` : ''}`);
 
-  // ── urlOnly path: HTTP stealth fetch only, no Playwright needed ─────────────
-  // These dealers just need URL discovery (no page parsing). stealthFetchSitemapUrls
+  // ── urlOnly path: plain HTTP fetch only, no Playwright needed ───────────────
+  // These dealers just need URL discovery (no page parsing). httpFetchSitemapUrls
   // is a plain HTTP fetch so it works in Lambda without Playwright installed.
   if (useUrlOnly) {
     try {
@@ -379,7 +380,7 @@ export async function runBrowserSync(
       }
 
       const rawUrls = limit > 0 ? httpResult.urls.slice(0, limit) : httpResult.urls;
-      log(`[BrowserSync] urlOnly stealth found ${rawUrls.length} listing URL(s)`);
+      log(`[BrowserSync] urlOnly found ${rawUrls.length} listing URL(s)`);
 
       // Diff against known URLs
       const [existingRaw, pendingRaw] = await Promise.all([
@@ -442,38 +443,37 @@ export async function runBrowserSync(
   const { chromium } = await import('playwright');
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    userAgent: BOT_UA,
     viewport: { width: 1280, height: 800 },
   });
 
   try {
-    // ── Step 1: Fetch sitemap via stealth browser (bypasses SG JS challenge) ────
-    log(`[BrowserSync] Fetching sitemap via stealth: ${dealerCfg.sitemapUrl}`);
-    await browser.close(); // close plain browser — stealth-fetcher manages its own
+    // ── Step 1: Fetch sitemap over plain HTTP with our honest bot UA ────────────
+    // (No challenge solving: a SiteGround/Cloudflare challenge is treated as a block.)
+    log(`[BrowserSync] Fetching sitemap: ${dealerCfg.sitemapUrl}`);
+    await browser.close();
 
-    const stealthResult = await stealthFetchSitemapUrls(
+    const sitemapResult = await httpFetchSitemapUrls(
       dealerCfg.sitemapUrl,
       dealerCfg.listingUrlPattern
     );
 
-    if (!stealthResult.success || stealthResult.urls.length === 0) {
+    if (!sitemapResult.success || sitemapResult.urls.length === 0) {
       result.summary.push(
-        `[${dealerSlug}] Stealth fetch failed or returned 0 URLs: ${stealthResult.error ?? 'empty sitemap'}`
+        `[${dealerSlug}] Sitemap fetch failed or returned 0 URLs (blocked or empty): ${sitemapResult.error ?? 'empty sitemap'}`
       );
       // Update dealer status
       await supabase.from('dealers').update({
         last_discovery_status: 'needs_browser',
-        last_discovery_message: `[${dealerSlug}] Stealth fetch: ${stealthResult.error ?? 'no listing URLs found'}`,
+        last_discovery_message: `[${dealerSlug}] Sitemap fetch: ${sitemapResult.error ?? 'no listing URLs found'}`,
         last_discovery_at: new Date().toISOString(),
       }).eq('slug', dealerSlug);
       result.duration_ms = Date.now() - start;
       return result;
     }
 
-    const rawUrls = limit > 0 ? stealthResult.urls.slice(0, limit) : stealthResult.urls;
-    log(`[BrowserSync] Stealth fetch found ${rawUrls.length} listing URL(s)`);
+    const rawUrls = limit > 0 ? sitemapResult.urls.slice(0, limit) : sitemapResult.urls;
+    log(`[BrowserSync] Sitemap fetch found ${rawUrls.length} listing URL(s)`);
 
     // ── Step 2: Diff against known URLs ─────────────────────────────────────────
     // "Active" listings: already public+active → skip (no re-parse needed)
@@ -537,17 +537,24 @@ export async function runBrowserSync(
     // ── Step 3: Parse each listing page via Playwright (capped concurrency) ──────
     log(`[BrowserSync] Parsing ${urlsToProcess.length} listing pages (max ${MAX_CONCURRENCY} parallel)...`);
 
-    // Relaunch browser for parsing (stealth-fetcher closed its own instance)
+    // Relaunch browser for parsing
     const { chromium: chromiumParser } = await import('playwright');
     const parseBrowser = await chromiumParser.launch({ headless: true });
     const parseContext = await parseBrowser.newContext({
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      userAgent: BOT_UA,
       viewport: { width: 1280, height: 800 },
     });
 
+    // Honor robots (Disallow + Crawl-delay, min 10s) between listing pages.
+    const pf = new PoliteFetcher();
+    const origin = new URL(dealerCfg.sitemapUrl).origin;
+    const policy = await pf.robots(origin);
+    const gapMs = hostIntervalMs(policy);
+    let firstPage = true;
     const parseTasks = urlsToProcess.map(url => async (): Promise<ListingData | null> => {
+      if (!robotsPolicyAllows(policy, new URL(url).pathname)) { log(`  robots disallows: ${url}`); return null; }
+      if (!firstPage) await new Promise(r => setTimeout(r, gapMs));
+      firstPage = false;
       const page = await parseContext.newPage();
       try {
         log(`  Parsing: ${url}`);

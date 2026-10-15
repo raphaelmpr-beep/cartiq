@@ -3,11 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
-type Health = "Fresh" | "Stale" | "Failing";
+type Health = "Fresh" | "Stale" | "Failing" | "Paused";
 interface DealerRow {
   slug: string; name: string; state: string | null; city: string | null; adapter: string | null; sync_enabled: boolean; status: string | null;
   active: number; stale_7d: number; stale_30d: number; dead_pending: number; missing_price: number; outliers: number; duplicates: number;
   pct_stale: number; last_successful_sync: string | null; error: string | null; health: Health;
+  paused: { reason: string; http_status: number | null; since: string; until: string | null; host: string | null; failures: number } | null;
   last_job: { id: number; status: string; processed: number; total: number; archived: number; dead_pending: number; errors: number; finished_at: string | null; dry_run: boolean } | null;
 }
 interface Job { id: number; scope: string; dealer_slugs: string[]; status: string; processed: number; total: number; alive: number;
@@ -18,6 +19,12 @@ const HEALTH_CLASS: Record<Health, string> = {
   Fresh: "bg-green-100 text-green-800 border-green-200",
   Stale: "bg-amber-100 text-amber-800 border-amber-200",
   Failing: "bg-red-100 text-red-800 border-red-200",
+  Paused: "bg-slate-200 text-slate-800 border-slate-300",
+};
+const PAUSE_LABEL: Record<string, string> = {
+  http_401: "401 auth required", http_402: "402 site suspended", http_403: "403 forbidden", http_429: "429 rate limited",
+  http_503: "503 unavailable", challenge: "bot challenge (CAPTCHA/JS)", policy_crawl_delay: "robots crawl-delay too long for page checks",
+  circuit_open: "repeated errors",
 };
 const FLAG_LABEL: Record<string, string> = {
   never_checked: "Never checked", stale_30d: "Stale 30d+", stale_7d: "Stale 7d+", dead_pending: "Possibly gone",
@@ -72,6 +79,15 @@ export function DealerInventory({ adminToken }: { adminToken: string }) {
       await load();
     } catch (e: any) { setErr(e.message); } finally { setBusy(null); }
   }
+  async function resume(slug: string) {
+    if (!window.confirm("Resume automated checks for this dealer? Only do this if the site now allows our bot (or the dealer gave permission/a feed).")) return;
+    setBusy(slug);
+    try {
+      const r = await fetch(`/api/admin/dealer-health/${encodeURIComponent(slug)}/resume`, { method: "POST", headers: H, body: JSON.stringify({ notes: "resumed from admin" }) });
+      const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      await load();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(null); }
+  }
   async function openDealer(slug: string) {
     if (open === slug) { setOpen(null); return; }
     setOpen(slug); setDetail(null);
@@ -81,7 +97,7 @@ export function DealerInventory({ adminToken }: { adminToken: string }) {
 
   const states = Array.from(new Set(rows.map(r => r.state).filter(Boolean))).sort() as string[];
   const adapters = Array.from(new Set(rows.map(r => r.adapter).filter(Boolean))).sort() as string[];
-  const order: Record<Health, number> = { Failing: 2, Stale: 1, Fresh: 0 };
+  const order: Record<Health, number> = { Paused: 3, Failing: 2, Stale: 1, Fresh: 0 };
   const view = rows
     .filter(r => !q || `${r.name} ${r.slug} ${r.city ?? ""}`.toLowerCase().includes(q.toLowerCase()))
     .filter(r => fState === "all" || r.state === fState)
@@ -113,7 +129,7 @@ export function DealerInventory({ adminToken }: { adminToken: string }) {
         <Input placeholder="Search dealers…" value={q} onChange={e => setQ(e.target.value)} className="w-full sm:w-64" data-testid="dealer-search" />
         <select className={sel} value={fState} onChange={e => setFState(e.target.value)} aria-label="State"><option value="all">All states</option>{states.map(s => <option key={s}>{s}</option>)}</select>
         <select className={sel} value={fAdapter} onChange={e => setFAdapter(e.target.value)} aria-label="Adapter"><option value="all">All adapters</option>{adapters.map(s => <option key={s}>{s}</option>)}</select>
-        <select className={sel} value={fHealth} onChange={e => setFHealth(e.target.value)} aria-label="Status"><option value="all">All statuses</option><option>Fresh</option><option>Stale</option><option>Failing</option></select>
+        <select className={sel} value={fHealth} onChange={e => setFHealth(e.target.value)} aria-label="Status"><option value="all">All statuses</option><option>Fresh</option><option>Stale</option><option>Failing</option><option>Paused</option></select>
         <div className="flex gap-2 sm:ml-auto">
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>{loading ? "Loading…" : "Reload"}</Button>
           <Button size="sm" onClick={() => queue({ scope: "stale_dealers" }, "all")} disabled={!!busy || !jobsAvailable} data-testid="refresh-all-stale">
@@ -154,7 +170,8 @@ export function DealerInventory({ adminToken }: { adminToken: string }) {
                     <button className="text-left font-medium hover:underline" onClick={() => openDealer(r.slug)} aria-expanded={open === r.slug}>{r.name}</button>
                     <div className="text-xs text-muted-foreground">{[r.city, r.state].filter(Boolean).join(", ")} · {r.adapter ?? "no adapter"}{r.sync_enabled ? "" : " · sync off"}</div>
                   </td>
-                  <td className="p-2"><Badge variant="outline" className={HEALTH_CLASS[r.health]}>{r.health}</Badge></td>
+                  <td className="p-2"><Badge variant="outline" className={HEALTH_CLASS[r.health]} data-testid={`health-${r.slug}`}>{r.health}</Badge>
+                    {r.paused && <div className="text-[11px] text-muted-foreground mt-1 max-w-[160px]">{PAUSE_LABEL[r.paused.reason] ?? r.paused.reason} · since {fmtDate(r.paused.since)}{r.paused.until ? ` · until ${fmtDate(r.paused.until)}` : " · manual review"}</div>}</td>
                   <td className="p-2 tabular-nums">{r.active}</td>
                   <td className="p-2 whitespace-nowrap">{fmtDate(r.last_successful_sync)}</td>
                   <td className="p-2 tabular-nums">{r.pct_stale}%</td>
@@ -165,6 +182,7 @@ export function DealerInventory({ adminToken }: { adminToken: string }) {
                     <Button size="sm" variant="outline" disabled={!!busy || !jobsAvailable || r.active === 0} onClick={() => queue({ dealer_slugs: [r.slug] }, r.slug)}>
                       {busy === r.slug ? "Queuing…" : "Refresh now"}
                     </Button>
+                    {r.paused && <Button size="sm" variant="ghost" className="ml-1" disabled={!!busy} onClick={() => resume(r.slug)} data-testid={`resume-${r.slug}`}>Resume</Button>}
                     {r.last_job && <div className="text-[11px] text-muted-foreground mt-1">Last run: {r.last_job.status}{r.last_job.total ? ` ${r.last_job.processed}/${r.last_job.total}` : ""} · {r.last_job.archived} archived</div>}
                   </td>
                 </tr>

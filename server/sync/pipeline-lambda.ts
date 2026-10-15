@@ -10,6 +10,7 @@
  * Full Playwright-based parsing is handled by the weekly cron (run-pipeline.ts) which runs
  * in the pplx.app environment where Playwright IS available.
  */
+import { BOT_UA } from './polite-fetch.js';
 
 import { createSupabaseAdmin } from "../supabase-admin.js";
 import {
@@ -107,7 +108,7 @@ async function getJaxSitemapUrls(): Promise<string[]> {
 
 // The Villages Golf Cars — 6 paginated product sitemaps, requires browser-like UA
 async function getVillagesGolfCarsSitemapUrls(): Promise<string[]> {
-  const UA = 'Mozilla/5.0 (compatible; GolfCartWise-Sync/1.0)';
+  const UA = BOT_UA;
   const urls: string[] = [];
   const suffixes = ['', '2', '3', '4', '5', '6'];
   for (const suffix of suffixes) {
@@ -258,7 +259,7 @@ function parseAdvantageSlug(url: string): { year: number | null; make: string | 
 async function fetchDealerSpikeOg(url: string): Promise<{ title: string | null; image_url: string | null }> {
   try {
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'CartIQ/1.0' },
+      headers: { 'User-Agent': BOT_UA },
       signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
     });
     if (!res.ok) return { title: null, image_url: null };
@@ -398,7 +399,7 @@ async function fetchDx1LiveApiKey(baseUrl: string): Promise<string> {
   const inventoryUrl = `${baseUrl}/Inventory/All-Inventory-In-Stock`;
   const res = await fetch(inventoryUrl, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      'User-Agent': BOT_UA,
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
     },
@@ -852,7 +853,7 @@ async function runDiscoverSitemap(
   // 'needs_browser' so the next Playwright-capable run picks it up.
   if (dealer.browser_required) {
     // Route ALL browser_required dealers through browser-sync.ts.
-    // The urlOnly:true dealers use stealthFetchSitemapUrls (HTTP, no Playwright) so they
+    // The urlOnly:true dealers use httpFetchSitemapUrls (HTTP, no Playwright) so they
     // run safely in Lambda. Full-parser dealers (e.g. JAX) use Playwright and are caught
     // below if Playwright is unavailable. browser-sync.ts handles "not in registry" gracefully.
     try {
@@ -1351,7 +1352,7 @@ function parsePowerTypeFromModel(model: string): string | null {
 export async function enrichFromJsonLd(listingPageUrl: string): Promise<Partial<ListingEnrichment>> {
   try {
     const res = await fetch(listingPageUrl, {
-      headers: { 'User-Agent': 'CartIQ/1.0' },
+      headers: { 'User-Agent': BOT_UA },
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) {
