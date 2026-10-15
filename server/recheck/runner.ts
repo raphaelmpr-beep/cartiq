@@ -30,6 +30,13 @@ const PRICE_ADAPTERS: { host: RegExp; parse: (html: string) => number | null }[]
   { host: /(^|\.)ecogolfcarts\.com$/i, parse: parseEcoPrice },
 ];
 
+/** Map a re-check action onto the legacy sync_log status vocabulary. */
+export function syncLogStatus(it: Pick<RecheckItem, "action" | "priceUpdate">): "ok" | "price_mismatch" | "not_found" | "error" {
+  if (it.action === "touch") return it.priceUpdate ? "price_mismatch" : "ok";
+  if (it.action === "mark_dead_1" || it.action === "archive" || it.action === "needs_review") return "not_found";
+  return "error";
+}
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSummary> {
@@ -118,11 +125,16 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
       if (item.priceUpdate) { upd.asking_price = item.priceUpdate.to; upd.verified_at = now; upd.price_confidence = "confirmed"; }
       const { error: uErr } = await db.from("listings").update(upd).eq("id", r.id);
       if (uErr) { item.result = { ...result, status: "error", reason: `db_update:${uErr.message}`.slice(0, 200) }; }
-      await db.from("sync_log").insert({
-        listing_id: r.id, dealer_slug: r.sync_source, source_url: url,
+      // Legacy sync_log has CHECK (status IN ('ok','price_mismatch','not_found','error')), so the
+      // re-check action is encoded in notes as "recheck:<action> | ...".
+      const { error: lErr } = await db.from("sync_log").insert({
+        listing_id: r.id, dealer_slug: r.sync_source ?? "unknown", source_url: url,
         price_found: item.priceUpdate?.to ?? null, price_changed: !!item.priceUpdate,
-        status: `recheck_${item.action}`, notes: `${item.action === "needs_review" ? "needs manual review (auto-archive excluded) | " : ""}${result.status}:${result.reason}`.slice(0, 500), synced_at: now,
+        status: syncLogStatus(item),
+        notes: `recheck:${item.action} | ${item.action === "needs_review" ? "needs manual review (auto-archive excluded) | " : ""}${result.status}:${result.reason}`.slice(0, 500),
+        synced_at: now,
       });
+      if (lErr) console.warn(`[recheck] sync_log insert failed for listing ${r.id}: ${lErr.message}`);
     }
     return item;
   }

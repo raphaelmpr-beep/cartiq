@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyResponse, isRootOrIndexRedirect, nextState, parseRobots, robotsAllows, soldMarker, computeQuality, dealerHealth, outlierIds, isAutoArchiveExcluded } from '../server/recheck/core.ts';
-import { runRecheck } from '../server/recheck/runner.ts';
+import { runRecheck, syncLogStatus } from '../server/recheck/runner.ts';
 
 const U = 'https://boterocarts.com/listing/used-2022-gas-yamaha-drive2-peachtree-city-ga-31128/';
 
@@ -112,10 +112,16 @@ test('runner: Botero dealers are never auto-archived (needs_review, still logged
   assert.equal(s.archived, 0); assert.equal(s.needs_review, 2);
   for (const id of [21, 22]) { const u = w.find(x => x.op === 'update' && x.id === id).v; assert.equal(u.status, undefined); assert.equal(u.public_listing, undefined); }
   const logs = w.filter(x => x.table === 'sync_log');
-  assert.equal(logs.length, 2); assert.ok(logs.every(l => l.v.status === 'recheck_needs_review' && /needs manual review/.test(l.v.notes)));
+  assert.equal(logs.length, 2); assert.ok(logs.every(l => l.v.status === 'not_found' && /^recheck:needs_review \| needs manual review/.test(l.v.notes)));
 });
 test('isAutoArchiveExcluded', () => {
   assert.equal(isAutoArchiveExcluded('botero-carts-ocala'), true);
   assert.equal(isAutoArchiveExcluded('boterox'), false);
   assert.equal(isAutoArchiveExcluded('golf-rider', 'https://golfrider.com/a'), false);
+});
+
+test('sync_log status stays within legacy CHECK vocabulary', () => {
+  const ok = new Set(['ok','price_mismatch','not_found','error']);
+  for (const a of ['touch','mark_dead_1','archive','needs_review','none'] as const) assert.ok(ok.has(syncLogStatus({ action: a })));
+  assert.equal(syncLogStatus({ action: 'touch', priceUpdate: { from: 1, to: 2 } }), 'price_mismatch');
 });

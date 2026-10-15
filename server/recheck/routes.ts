@@ -43,13 +43,13 @@ export function registerRecheckRoutes(app: Express, requireAdmin: RequestHandler
         fetchAllListingsForQuality(db),
         db.from("dealers").select("slug,name,state,city,adapter_key,platform_type,sync_enabled,inventory_status,last_discovery_at,last_discovery_status,last_discovery_message").order("name"),
         db.from("recheck_jobs").select("*").order("created_at", { ascending: false }).limit(200),
-        db.from("sync_log").select("dealer_slug,status,notes,synced_at").like("status", "recheck_%").order("synced_at", { ascending: false }).limit(2000),
+        db.from("sync_log").select("dealer_slug,status,notes,synced_at").like("notes", "recheck:%").order("synced_at", { ascending: false }).limit(2000),
       ]);
       const q = computeQuality(rows);
       const byDealer = new Map(q.by_dealer.map(d => [d.dealer, d]));
       const jobs = jobsRes.error ? [] : (jobsRes.data ?? []);
       const lastRecheck = new Map<string, string>();
-      for (const l of errLogRes.data ?? []) if (l.dealer_slug && !lastRecheck.has(l.dealer_slug) && l.status !== "recheck_none") lastRecheck.set(l.dealer_slug, l.synced_at);
+      for (const l of errLogRes.data ?? []) if (l.dealer_slug && !lastRecheck.has(l.dealer_slug) && !String(l.notes ?? "").startsWith("recheck:none")) lastRecheck.set(l.dealer_slug, l.synced_at);
       const dealers = (dealersRes.data ?? []).map((d: any) => {
         const c = byDealer.get(d.slug) ?? { active: 0, stale_7d: 0, stale_30d: 0, never_checked: 0, dead_pending: 0, missing_price: 0, outliers: 0, duplicates: 0 };
         const lastJob = jobs.find((j: any) => (j.dealer_slugs ?? []).includes(d.slug));
