@@ -34,3 +34,6 @@ Scheduler shell + runner for GolfCartIQ dealer inventory sync. **Disabled.** Wri
 - Spec 4: `dealer_sync_daily_snapshot()`, scorecard, alerts, dead-man switch; retire/confirm the external pplx.app cron.
 
 Tests: `npx tsx --test tests/dealer-sync.test.ts` (no network, no DB).
+
+## Scheduled ingest cron
+See `INGEST-CRON.md`. Owner: Raphael Martinez. Off unless `SYNC_SCHEDULER_ENABLED=true`.

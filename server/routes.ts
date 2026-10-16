@@ -1581,6 +1581,35 @@ ${pageUrls.join("\n")}
     }
   });
 
+  // ─── Scheduled new-listing ingest (DRAFT; off unless SYNC_SCHEDULER_ENABLED=true) ──
+  // Vercel cron GET with Authorization: Bearer CRON_SECRET. Owner: Raphael Martinez.
+  app.get("/api/cron/ingest", async (req, res) => {
+    const { runIngestCron } = await import("../script/dealer-sync/ingest-cron.js");
+    const { sendOwnerAlert } = await import("../script/dealer-sync/owner-alert.js");
+    const result = await runIngestCron(req.headers.authorization, {
+      env: process.env,
+      now: () => new Date(),
+      runSync: async () => {
+        const { runLambdaSync } = await import("./sync/pipeline-lambda.js");
+        return (await runLambdaSync({ mode: "discover_sitemap", dealer: "all", limit: 100, dry_run: false })) as any;
+      },
+      latestNewListingAt: async () => {
+        const { createClient } = await import("@supabase/supabase-js");
+        const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+        // Read-only: newest of pending_imports.found_at and listings.created_at.
+        const [p, l] = await Promise.all([
+          db.from("pending_imports").select("found_at").order("found_at", { ascending: false }).limit(1),
+          db.from("listings").select("created_at").order("created_at", { ascending: false }).limit(1),
+        ]);
+        const ts = [(p.data?.[0] as any)?.found_at, (l.data?.[0] as any)?.created_at].filter(Boolean).map((t) => new Date(t).getTime());
+        return ts.length ? new Date(Math.max(...ts)) : null;
+      },
+      sendAlert: (m) => sendOwnerAlert(m),
+    });
+    if (result.status === "UNAUTHORIZED") return res.status(401).json({ error: "Unauthorized" });
+    res.json(result);
+  });
+
   /**
    * POST /api/admin/sync-browser
    * Trigger a Playwright-based browser sync for dealers protected by bot-detection
