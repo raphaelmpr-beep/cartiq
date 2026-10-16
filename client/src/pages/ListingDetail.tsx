@@ -17,7 +17,7 @@ import { normalizeWarranty } from "@shared/warranty";
 import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText } from "@/lib/utils";
 import type { Listing, Dealer } from "@/lib/types";
 import { apiRequest } from "@/lib/queryClient";
-import { resolveGoneMode } from "@shared/listing-lifecycle";
+import { resolveGoneMode, clientNoindex, showSoldBanner } from "@shared/listing-lifecycle";
 
 const GONE_MODE = resolveGoneMode(import.meta.env.VITE_LISTING_GONE_MODE as string | undefined);
 
@@ -70,16 +70,14 @@ export default function ListingDetail() {
   // link. Sitemap already excludes these; the tag is defense-in-depth.
   useEffect(() => {
     if (!listing) return;
-    // Sold/unavailable pages stay indexable by default (Director condition 2);
-    // noindex only when VITE_LISTING_GONE_MODE=noindex (SRE/Raphael decision).
-    const isActive = String(listing.status ?? "active") === "active" && listing.publicListing !== false;
-    const isIndexable = isActive || GONE_MODE === "sold_page";
+    // Default (legacy_noindex) = pre-P0 rule: noindex for any non-active/non-public listing.
+    // VITE_LISTING_GONE_MODE=sold_page (opt-in, Raphael's SEO call) keeps them indexable.
     setSEO({
       title: listing.title,
       description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"} — GolfCartIQ GolfCartIQ Deal Rating: ${listing.dealRating ?? "unknown"}.`,
       image: listing.imageUrl ?? undefined,
       canonical: `https://golfcartiq.com/listing/${listing.slug ?? listing.id}`,
-      noindex: !isIndexable,
+      noindex: clientNoindex(listing, GONE_MODE),
       jsonLd: [
         listingToProductSchema(listing),
         breadcrumbSchema([
@@ -189,8 +187,8 @@ export default function ListingDetail() {
             <ArrowLeft className="h-4 w-4" /> Back to Search
           </Link>
 
-        {/* Sold / unavailable: page stays live with similar carts (Director condition 2). */}
-        {(String(listing.status ?? "active") !== "active" || listing.publicListing === false) && (
+        {/* Sold banner + similar carts: opt-in sold_page mode only (default = unchanged page). */}
+        {showSoldBanner(listing, GONE_MODE) && (
           <SoldBanner listing={listing} />
         )}
 

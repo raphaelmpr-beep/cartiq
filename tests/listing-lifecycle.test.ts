@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveGoneMode, shouldHide, isGolfCartListing } from '../shared/listing-lifecycle.ts';
 
-test('gone mode defaults to sold_page; 410/noindex/redirect are opt-in', () => {
-  assert.equal(resolveGoneMode(undefined), 'sold_page');
-  assert.equal(resolveGoneMode(''), 'sold_page');
-  assert.equal(resolveGoneMode('bogus'), 'sold_page');
+test('gone mode defaults to legacy_noindex; sold_page/410/redirect are opt-in', () => {
+  assert.equal(resolveGoneMode(undefined), 'legacy_noindex');
+  assert.equal(resolveGoneMode(''), 'legacy_noindex');
+  assert.equal(resolveGoneMode('bogus'), 'legacy_noindex');
   assert.equal(resolveGoneMode('GONE_410'), 'gone_410');
-  assert.equal(resolveGoneMode('noindex'), 'noindex');
+  assert.equal(resolveGoneMode('noindex'), 'legacy_noindex');
   assert.equal(resolveGoneMode('redirect'), 'redirect');
 });
 test('never hide on unseen or stale', () => {

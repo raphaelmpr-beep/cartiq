@@ -4,20 +4,58 @@
  * 1. Hide only on POSITIVE evidence (Director condition 1): the listing is missing from the
  *    latest SUCCESSFUL dealer feed, or the dealer page itself shows sold / 404 / 410.
  *    "Unseen for N days" or "stale" is never a reason to hide.
- * 2. Gone-page behavior is configurable (Director condition 2; SRE/Raphael own the choice):
- *    default "sold_page" keeps the URL live (HTTP 200, indexable, marked sold/unavailable, similar
- *    carts listed). "noindex", "gone_410" and "redirect" are opt-in only.
- * 3. Non-golf-cart items (e-bikes, scooters...) are excluded from public listings and deal ratings.
+ * 2. Gone-page behavior is configurable; Raphael owns the SEO choice. The DEFAULT "legacy_noindex"
+ *    is byte-for-byte today's behavior: client <meta robots noindex> on any non-active/non-public
+ *    listing, server `Link: <fallback>; rel="canonical"` header, no banner. "sold_page"
+ *    (keep live + indexable + sold banner), "gone_410" and "redirect" are opt-in only.
+ * 3. Non-golf-cart items (e-bikes, scooters...) are excluded from public lists, hot deals and deal
+ *    ratings. Sitemap exclusion is a separate opt-in (LISTING_SITEMAP_EXCLUDE_NON_CART=true).
  */
 
-export type GoneMode = "sold_page" | "noindex" | "gone_410" | "redirect";
-export const GONE_MODES: readonly GoneMode[] = ["sold_page", "noindex", "gone_410", "redirect"];
-export const DEFAULT_GONE_MODE: GoneMode = "sold_page";
+export type GoneMode = "legacy_noindex" | "sold_page" | "gone_410" | "redirect";
+export const GONE_MODES: readonly GoneMode[] = ["legacy_noindex", "sold_page", "gone_410", "redirect"];
+/** Default = today's behavior exactly (zero SEO-visible change). */
+export const DEFAULT_GONE_MODE: GoneMode = "legacy_noindex";
 
 /** Parse LISTING_GONE_MODE (server) / VITE_LISTING_GONE_MODE (client). Unknown or unset -> default. */
 export function resolveGoneMode(raw: string | null | undefined): GoneMode {
   const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "noindex" || v === "legacy") return "legacy_noindex";
   return (GONE_MODES as readonly string[]).includes(v) ? (v as GoneMode) : DEFAULT_GONE_MODE;
+}
+
+type LifecycleLike = { status?: string | null; publicListing?: boolean | null };
+/** Client: is this listing active+public (same test the page used before the P0 change)? */
+export function isActivePublic(l: LifecycleLike): boolean {
+  return String(l.status ?? "active") === "active" && l.publicListing !== false;
+}
+/** Client meta robots: legacy = noindex for every non-active/non-public listing (pre-P0 rule). */
+export function clientNoindex(l: LifecycleLike, mode: GoneMode): boolean {
+  if (isActivePublic(l)) return false;
+  return mode !== "sold_page";
+}
+/** Client: show the sold banner + similar carts only in the opt-in sold_page mode. */
+export function showSoldBanner(l: LifecycleLike, mode: GoneMode): boolean {
+  return !isActivePublic(l) && mode === "sold_page";
+}
+
+export type GoneResponse =
+  | { action: "next"; headers: Record<string, string> }
+  | { action: "redirect"; location: string; headers: Record<string, string> }
+  | { action: "gone_410"; fallback: string | null; headers: Record<string, string> };
+/** Server response plan for a non-active/non-public listing page. legacy_noindex == pre-P0 headers. */
+export function goneResponse(status: string | null | undefined, fallback: string | null, mode: GoneMode): GoneResponse {
+  const headers: Record<string, string> = {};
+  if (mode === "legacy_noindex" && fallback) headers["Link"] = `<${fallback}>; rel="canonical"`;
+  headers["X-Listing-Lifecycle"] = String(status ?? "inactive");
+  if (mode === "redirect" && fallback) return { action: "redirect", location: fallback, headers };
+  if (mode === "gone_410") return { action: "gone_410", fallback, headers };
+  return { action: "next", headers };
+}
+
+/** LISTING_SITEMAP_EXCLUDE_NON_CART: opt-in; default off so sitemap output is unchanged. */
+export function sitemapExcludesNonCart(raw: string | null | undefined): boolean {
+  return String(raw ?? "").trim().toLowerCase() === "true";
 }
 
 export type HideEvidence =
