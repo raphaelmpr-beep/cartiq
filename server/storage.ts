@@ -1,4 +1,5 @@
 import { safeChemParam } from "../shared/battery";
+import { isGolfCartListing, filterLivePublic } from "../shared/listing-lifecycle";
 /**
  * CartIQ Storage — Supabase/Postgres backend
  * All methods are async. Routes call await storage.method().
@@ -178,6 +179,10 @@ class SupabaseStorage implements IStorage {
       if (batch.length < PAGE_SIZE) break; // no more rows
       offset += PAGE_SIZE;
     }
+    // Public lists never include e-bikes or other non-golf-cart items (P0 2026-10-16).
+    // Defense in depth (AC5): the query already requires active+public; re-check rows so a gone
+    // listing can never reach search/filter/city/brand/similar lists even if the query changes.
+    if (renderable) all = filterLivePublic(all as any[]) as Listing[];
     return all.slice(0, hardLimit);
   }
 
@@ -199,7 +204,7 @@ class SupabaseStorage implements IStorage {
       .order("updated_at", { ascending: false })
       .limit(pool);
     if (error) throw new Error(error.message);
-    const candidates = (data ?? []) as Listing[];
+    const candidates = filterLivePublic((data ?? []) as any[]) as Listing[]; // AC5: live golf carts only
 
     // Weighted Fisher-Yates: great_deal entries are duplicated once so they
     // appear roughly 2× as often, then we deduplicate after the shuffle.

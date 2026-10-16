@@ -17,6 +17,9 @@ import { normalizeWarranty } from "@shared/warranty";
 import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText } from "@/lib/utils";
 import type { Listing, Dealer } from "@/lib/types";
 import { apiRequest } from "@/lib/queryClient";
+import { resolveGoneMode, clientNoindex, showSoldBanner, showDealClaims, showLeadActions, similarCarts, SIMILAR_MIN } from "@shared/listing-lifecycle";
+
+const GONE_MODE = resolveGoneMode(import.meta.env.VITE_LISTING_GONE_MODE as string | undefined);
 
 // We run the pricing engine client-side so questions/redFlags are available
 function usePricingResult(listing?: Listing) {
@@ -67,16 +70,14 @@ export default function ListingDetail() {
   // link. Sitemap already excludes these; the tag is defense-in-depth.
   useEffect(() => {
     if (!listing) return;
-    const INDEXABLE_STATUSES = new Set(["active"]);
-    const isIndexable =
-      INDEXABLE_STATUSES.has(String(listing.status ?? "active")) &&
-      listing.publicListing !== false;
+    // Default (legacy_noindex) = pre-P0 rule: noindex for any non-active/non-public listing.
+    // VITE_LISTING_GONE_MODE=sold_page (opt-in, Raphael's SEO call) keeps them indexable.
     setSEO({
       title: listing.title,
       description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"} — GolfCartIQ GolfCartIQ Deal Rating: ${listing.dealRating ?? "unknown"}.`,
       image: listing.imageUrl ?? undefined,
       canonical: `https://golfcartiq.com/listing/${listing.slug ?? listing.id}`,
-      noindex: !isIndexable,
+      noindex: clientNoindex(listing, GONE_MODE),
       jsonLd: [
         listingToProductSchema(listing),
         breadcrumbSchema([
@@ -186,6 +187,11 @@ export default function ListingDetail() {
             <ArrowLeft className="h-4 w-4" /> Back to Search
           </Link>
 
+        {/* Sold banner + similar carts: opt-in sold_page mode only (default = unchanged page). */}
+        {showSoldBanner(listing, GONE_MODE) && (
+          <SoldBanner listing={listing} />
+        )}
+
         {/* Image Carousel */}
         {(() => {
           const extraImages = parseJsonField<string>(listing.imageUrls);
@@ -197,7 +203,7 @@ export default function ListingDetail() {
               <ImageCarousel images={allImages} alt={listing.title} aspectClass="aspect-[16/7]" />
               {/* Overlay badges */}
               <div className="absolute top-3 left-3 flex gap-2 z-20">
-                <DealBadge rating={listing.dealRating} />
+                {showDealClaims(listing) && <DealBadge rating={listing.dealRating} />}
                 <SourceBadge sellerType={listing.sellerType} sourceType={listing.sourceType} retailerName={listing.retailerName} />
               </div>
               <div className="absolute top-3 right-3 flex gap-1.5 z-20">
@@ -240,10 +246,12 @@ export default function ListingDetail() {
                 {(!listing.salePrice || listing.sellerType !== "retail") && (
                   <div className="text-2xl font-bold">{formatPrice(effectivePrice)}</div>
                 )}
+                {showDealClaims(listing) && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">GolfCartIQ Value</span>
                   <span className="font-semibold">{formatPrice(listing.cartiqEstimatedValue)}</span>
                 </div>
+                )}
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Delivery Cost</span>
                   <DeliveryCostBadge deliveryIncluded={listing.deliveryIncluded} deliveryCost={listing.estimatedDeliveryCost} deliveryAvailable={listing.deliveryAvailable} />
@@ -254,7 +262,9 @@ export default function ListingDetail() {
                     <span className="font-bold">{formatPrice(listing.totalDeliveredCost)}</span>
                   </div>
                 )}
+                {showDealClaims(listing) && (
                 <div className={`text-base font-bold ${dealDeltaColor(listing.dealDelta)}`}>{dealDeltaText(listing.dealDelta)}</div>
+                )}
                 {listing.sellerType === "retail" && listing.lastVerifiedAt && (
                   <p className="text-xs text-muted-foreground">Price/availability last verified: {listing.lastVerifiedAt}</p>
                 )}
@@ -436,7 +446,7 @@ export default function ListingDetail() {
 
           {/* Sidebar */}
           <div className="space-y-5">
-            <MarketCompareCard listing={listing} />
+            {showDealClaims(listing) && <MarketCompareCard listing={listing} />}
             <WiseScoreBadge score={listing.buyerScore} className="text-lg" />
             <a href="/how-it-works" className="block text-xs text-green-700 hover:underline text-right -mt-3">
               How is this score calculated? →
@@ -455,6 +465,7 @@ export default function ListingDetail() {
                 </span>
               </div>
 
+              {showLeadActions(listing) ? (<>
               {listing.sellerPhone && (
                 <a
                   href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}
@@ -500,12 +511,49 @@ export default function ListingDetail() {
                 ) : (
                   <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Contact Seller</Button>
                 )}
+              </div>
+              </>) : (
+                <p className="text-sm text-muted-foreground" data-testid="text-no-longer-available">No longer available from this seller.</p>
+              )}
+              <div className="space-y-2 pt-1">
                 <Link href="/deal-checker"><Button variant="outline" className="w-full" data-testid="btn-check-similar">Check Similar Deals</Button></Link>
               </div>
             </div>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Shown when the dealer page confirmed sold/404 (or the listing left a complete feed). */
+function SoldBanner({ listing }: { listing: Listing }) {
+  const qs = new URLSearchParams({ limit: "6" });
+  if (listing.brand) qs.set("brand", String(listing.brand));
+  if (listing.state) qs.set("state", String(listing.state));
+  const { data: similar } = useQuery<Listing[]>({ queryKey: [`/api/listings?${qs.toString()}`], retry: false });
+  // AC4: live (active+public) golf carts only, never this unit or an e-bike.
+  const items = similarCarts(listing, similar ?? [], 6);
+  return (
+    <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4" data-testid="banner-listing-sold">
+      <p className="font-semibold text-amber-900">This golf cart is no longer available from the dealer.</p>
+      <p className="text-sm text-amber-800">Price and details are shown as last confirmed. Similar carts for sale:</p>
+      {items.length < SIMILAR_MIN && (
+        <Link href={listing.brand ? `/search?brand=${encodeURIComponent(String(listing.brand))}` : "/search"} className="mt-2 inline-block text-sm underline" data-testid="link-similar-fallback">See more {listing.brand ?? "golf"} carts for sale</Link>
+      )}
+      {items.length >= SIMILAR_MIN && (
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map(l => (
+            <li key={l.id}>
+              <Link href={`/listing/${l.slug ?? l.id}`} className="block rounded-lg border bg-white p-2 text-sm hover:border-primary" data-testid={`link-similar-${l.id}`}>
+                <span className="font-medium">{l.title}</span>
+                <span className="block text-muted-foreground">{formatPrice(l.salePrice ?? l.askingPrice ?? l.regularPrice)} · {[l.city, l.state].filter(Boolean).join(", ")}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Link href="/search" className="mt-3 inline-block text-sm underline">Browse all active listings</Link>
     </div>
   );
 }

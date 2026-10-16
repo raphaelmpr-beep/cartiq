@@ -7,10 +7,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "../supabase-admin";
 import { parseEcoPrice } from "../sync/eco-golf-carts";
+import { extractListingPrice } from "../sync/price-extract";
 import {
   isAutoArchiveExcluded, classifyResponse, nextState,
   computeQuality, type CheckResult, type DQListing,
 } from "./core";
+import { shouldHide } from "../../shared/listing-lifecycle";
 import { PoliteFetcher, type BlockKind } from "../sync/polite-fetch";
 import { loadActiveBlocks, recordHostBlock, type HostBlock } from "../sync/dealer-blocks";
 
@@ -32,9 +34,40 @@ export interface RecheckSummary { dryRun: boolean; selected: number; processed: 
   paused_dealers_skipped: number; host_blocks: HostBlock[]; items: RecheckItem[] }
 
 /** Existing per-dealer price parsers that work without a browser. Others: liveness only. */
-const PRICE_ADAPTERS: { host: RegExp; parse: (html: string) => number | null }[] = [
+export const PRICE_ADAPTERS: { host: RegExp; parse: (html: string) => number | null }[] = [
   { host: /(^|\.)ecogolfcarts\.com$/i, parse: parseEcoPrice },
+  // Botero: shared extractor (#41) prefers Sale/Our Price over Original/Regular, never MSRP or monthly.
+  { host: /(^|\.)boterocarts\.com$/i, parse: (html) => extractListingPrice(html).price },
 ];
+/** RECHECK_PRICE_ALL_FEEDS (default on): hosts without a dedicated adapter use the shared extractor
+ *  (JSON-LD / Woo / labeled Sale-over-Original), never MSRP or monthly; no confident price -> no write. */
+export function recheckPriceAllFeeds(raw = process.env.RECHECK_PRICE_ALL_FEEDS): boolean {
+  return String(raw ?? "").trim().toLowerCase() !== "false";
+}
+export function priceFromDealerPage(url: string, html: string, allFeeds = recheckPriceAllFeeds()): number | null {
+  let host = ""; try { host = new URL(url).host; } catch { return null; }
+  const ad = PRICE_ADAPTERS.find(a => a.host.test(host));
+  if (ad) return ad.parse(html);
+  if (!allFeeds) return null;
+  const info = extractListingPrice(html);
+  return info.source === "none" || info.source === "msrp_only" ? null : info.price;
+}
+
+/** LIVE_FLAG_ACTION (Raphael's decision): what to do when the re-check confirms a listing gone.
+ *  queue_review (DEFAULT): never hide; record needs_review for a human.
+ *  auto_hide: hide only on positive evidence (DEALER_PAGE_CONFIRMATIONS dead signals: sold marker /
+ *  404 / 410 / index redirect). The hidden page then renders per LISTING_GONE_MODE (no separate mode). */
+export type LiveFlagAction = "queue_review" | "auto_hide";
+export function resolveLiveFlagAction(raw = process.env.LIVE_FLAG_ACTION): LiveFlagAction {
+  return String(raw ?? "").trim().toLowerCase() === "auto_hide" ? "auto_hide" : "queue_review";
+}
+export function flaggedAction(confirmedDead: boolean, isDead: boolean, excluded: boolean, mode: LiveFlagAction): RecheckItem["action"] {
+  if (!isDead) return "none";
+  if (excluded) return "needs_review"; // excluded dealers: always human review (pre-existing rule)
+  if (!confirmedDead) return "mark_dead_1";
+  if (mode === "queue_review") return "needs_review";
+  return "archive";
+}
 
 /** Map a re-check action onto the legacy sync_log status vocabulary. */
 export function syncLogStatus(it: Pick<RecheckItem, "action" | "priceUpdate">): "ok" | "price_mismatch" | "not_found" | "error" {
@@ -103,15 +136,16 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
     else { html = res.body; result = classifyResponse(url, res.status, res.finalUrl, html); }
     const st = nextState(prevFails, result);
     const excluded = isAutoArchiveExcluded(r.sync_source, url);
-    if (excluded) st.archive = false; // never auto-archive excluded dealers
-    const item: RecheckItem = { id: r.id, dealer: r.sync_source, url, prevFails, result,
-      action: result.status === "alive" ? "touch" : (excluded && result.status === "dead") ? "needs_review"
-        : st.archive ? "archive" : result.status === "dead" ? "mark_dead_1" : "none" };
+    const flagMode = resolveLiveFlagAction();
+    const dead = result.status === "dead";
+    const action: RecheckItem["action"] = result.status === "alive" ? "touch"
+      : flaggedAction(st.archive && shouldHide({ kind: "dealer_page", status: "sold", confirmations: st.failCount }), dead, excluded, flagMode);
+    // Hide only when LIVE_FLAG_ACTION=auto_hide and positive evidence is confirmed; default queues review.
+    st.archive = action === "archive";
+    const item: RecheckItem = { id: r.id, dealer: r.sync_source, url, prevFails, result, action };
 
     if (result.status === "alive" && html) {
-      const host = new URL(url).host;
-      const ad = PRICE_ADAPTERS.find(a => a.host.test(host));
-      const p = ad ? ad.parse(html) : null;
+      const p = priceFromDealerPage(url, html);
       const cur = r.sale_price ?? r.asking_price ?? r.regular_price ?? null;
       if (p && p !== cur) item.priceUpdate = { from: cur, to: p };
     }
@@ -122,7 +156,12 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
         recheck_last_reason: result.reason.slice(0, 200), recheck_last_at: now };
       if (st.touchLastChecked) upd.last_checked_at = now;
       if (st.archive) { upd.status = "archived"; upd.public_listing = false; upd.recheck_archived_at = now; }
-      if (item.priceUpdate) { upd.asking_price = item.priceUpdate.to; upd.verified_at = now; upd.price_confidence = "confirmed"; }
+      if (item.priceUpdate) {
+        // Displayed price = sale_price ?? asking_price, so a stale sale_price must be overwritten too,
+        // otherwise the page keeps the old price and the next pass re-detects the same mismatch.
+        upd.asking_price = item.priceUpdate.to; if (r.sale_price != null) upd.sale_price = item.priceUpdate.to;
+        upd.verified_at = now; upd.price_confidence = "confirmed";
+      }
       const { error: uErr } = await db.from("listings").update(upd).eq("id", r.id);
       if (uErr) { item.result = { ...result, status: "error", reason: `db_update:${uErr.message}`.slice(0, 200) }; }
       // Legacy sync_log has CHECK (status IN ('ok','price_mismatch','not_found','error')), so the
@@ -131,7 +170,7 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
         listing_id: r.id, dealer_slug: r.sync_source ?? "unknown", source_url: url,
         price_found: item.priceUpdate?.to ?? null, price_changed: !!item.priceUpdate,
         status: syncLogStatus(item),
-        notes: `recheck:${item.action} | ${item.action === "needs_review" ? "needs manual review (auto-archive excluded) | " : ""}${result.status}:${result.reason}`.slice(0, 500),
+        notes: `recheck:${item.action} | ${item.action === "needs_review" ? "needs manual review (excluded dealer or LIVE_FLAG_ACTION=queue_review) | " : ""}${result.status}:${result.reason}`.slice(0, 500),
         synced_at: now,
       });
       if (lErr) console.warn(`[recheck] sync_log insert failed for listing ${r.id}: ${lErr.message}`);

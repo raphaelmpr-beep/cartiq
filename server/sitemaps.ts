@@ -28,6 +28,7 @@
  * Lastmod: listing.updated_at || listing.created_at. No fake daily refresh.
  */
 
+import { resolveGoneMode, isGolfCartListing, goneResponse, sitemapExcludesNonCart } from "../shared/listing-lifecycle";
 import type { Express, Request, Response } from "express";
 import { storage } from "./storage";
 import type { Listing, Dealer, SeoArticle } from "@shared/schema";
@@ -129,6 +130,8 @@ export function isListingSitemapEligible(l: Listing): boolean {
   if (l.status !== "active") return false;
   if (BAD_STATUSES.has(String(l.status).toLowerCase())) return false;
   if (l.public_listing !== true) return false;
+  // Opt-in only (default off => sitemap unchanged): drop e-bikes/non-golf-cart items.
+  if (sitemapExcludesNonCart(process.env.LISTING_SITEMAP_EXCLUDE_NON_CART) && !isGolfCartListing(l as any)) return false;
 
   // Canonical URL must be constructible
   const slug = l.slug ?? (l.id != null ? String(l.id) : "");
@@ -351,9 +354,19 @@ async function handleListingLifecycle(req: Request, res: Response, next: () => v
     }
 
     if (listing.status !== "active" || listing.public_listing !== true) {
-      const fallback = resolveClosestFallback(listing);
-      if (fallback) res.setHeader("Link", `<${fallback}>; rel="canonical"`);
-      res.setHeader("X-Listing-Lifecycle", String(listing.status ?? "inactive"));
+      // LISTING_GONE_MODE (Raphael's SEO decision). Default "legacy_noindex" = pre-P0 headers
+      // exactly (Link canonical to fallback + X-Listing-Lifecycle). Others are opt-in.
+      const mode = resolveGoneMode(process.env.LISTING_GONE_MODE);
+      const plan = goneResponse(listing.status, resolveClosestFallback(listing), mode);
+      for (const [k, v] of Object.entries(plan.headers)) res.setHeader(k, v);
+      if (plan.action === "redirect") { res.redirect(301, plan.location); return; }
+      if (plan.action === "gone_410") {
+        res.status(410).type("text/html").send(
+          `<!doctype html><html><head><meta name="robots" content="noindex,nofollow">` +
+          `<title>Listing no longer available | GolfCartIQ</title></head><body>` +
+          `<h1>This golf cart is no longer available</h1><p><a href="${plan.fallback ?? BASE + "/search"}">See similar carts</a>.</p></body></html>`);
+        return;
+      }
     }
     return next();
   } catch {
