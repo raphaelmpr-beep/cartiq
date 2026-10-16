@@ -278,7 +278,7 @@ class SupabaseStorage implements IStorage {
     seating?: number | null,
     powerType?: string | null
   ): Promise<any[]> {
-    const sel = "asking_price,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available";
+    const sel = "asking_price,price_confidence,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available";
 
     const buildQuery = (matchSeating: boolean, matchPower: boolean) => {
       let q = db()
@@ -329,7 +329,7 @@ class SupabaseStorage implements IStorage {
     seating?: number | null,
     powerType?: string | null
   ): Promise<any[]> {
-    const sel = "asking_price,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available";
+    const sel = "asking_price,price_confidence,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available";
 
     const buildQuery = (matchSeating: boolean, matchPower: boolean) => {
       let q = db()

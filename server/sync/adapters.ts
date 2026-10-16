@@ -5,8 +5,8 @@
  *   2. Parse a listing page (via Playwright) into a normalized ListingData object
  */
 
-import { sitemapHeaders } from './http-headers.js';
 import { extractListingPrice, priceFromElementText } from './price-extract.js';
+import { sharedFetcher, fetchSitemapsPolite } from './polite-fetch.js';
 
 export interface ListingData {
   source_url: string;
@@ -87,19 +87,8 @@ export async function getBoteroListingUrls(flGaOnly = true): Promise<string[]> {
     'https://boterocarts.com/glc_listing-sitemap3.xml',
   ];
 
-  const allUrls: string[] = [];
-  for (const sitemapUrl of sitemaps) {
-    try {
-      const res = await fetch(sitemapUrl, {
-        headers: sitemapHeaders(sitemapUrl),
-      });
-      const xml = await res.text();
-      const matches = [...xml.matchAll(/<loc>(https:\/\/boterocarts\.com\/listing\/[^<]+)<\/loc>/g)];
-      allUrls.push(...matches.map(m => m[1].trim()));
-    } catch (e) {
-      console.warn(`Sitemap fetch failed: ${sitemapUrl}`, e);
-    }
-  }
+  // Polite: robots + crawl-delay between sub-sitemaps, time-budgeted.
+  const allUrls = (await fetchSitemapsPolite(sitemaps, { keep: u => /^https:\/\/boterocarts\.com\/listing\//.test(u) })).urls;
 
   if (!flGaOnly) return allUrls;
 
@@ -128,10 +117,8 @@ export async function getBoteroListingUrls(flGaOnly = true): Promise<string[]> {
 export async function getJaxListingUrls(): Promise<string[]> {
   try {
     const jaxUrl = 'https://golfcartsjacksonville.com/auto-listing-sitemap.xml';
-    const res = await fetch(jaxUrl, {
-      headers: sitemapHeaders(jaxUrl),
-      signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
-    });
+    const pr = await sharedFetcher().get(jaxUrl, { kind: 'xml', timeoutMs: 10000 });
+    const res = { status: pr.block ? 403 : pr.status, ok: pr.ok, text: async () => pr.body };
     // SG Captcha returns 202 + HTML challenge — not real XML
     if (res.status === 202 || res.status === 403) {
       console.warn('[JAX] Sitemap blocked by SiteGround SG Captcha (status=' + res.status + '). Use runBrowserSync() instead.');
@@ -173,12 +160,10 @@ export async function getGcrSitemapUrls(
 ): Promise<string[]> {
   const sitemapUrl = `https://${domain}${sitemapPath}`;
   try {
-    const res = await fetch(sitemapUrl, {
-      headers: sitemapHeaders(sitemapUrl),
-      signal: AbortSignal.timeout ? AbortSignal.timeout(12000) : undefined,
-    });
+    // Polite: robots.txt + crawl-delay spacing per host via the shared fetcher.
+    const res = await sharedFetcher().get(sitemapUrl, { kind: 'xml', timeoutMs: 12000 });
     if (!res.ok) return [];
-    const xml = await res.text();
+    const xml = res.body;
 
     // Extract all <loc> URLs
     const allMatches = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)]

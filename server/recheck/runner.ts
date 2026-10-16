@@ -203,7 +203,7 @@ export async function advanceJob(timeBudgetMs = 40_000, db: SupabaseClient = sup
 
 // ── Data-quality report ───────────────────────────────────────────────────────
 export async function fetchAllListingsForQuality(db: SupabaseClient = supabaseAdmin()): Promise<DQListing[]> {
-  const cols = "id,sync_source,status,public_listing,asking_price,sale_price,regular_price,brand,model,year,condition,seating,last_checked_at,source_listing_url,recheck_fail_count";
+  const cols = "id,sync_source,status,public_listing,asking_price,sale_price,regular_price,price_confidence,cartiq_estimated_value,valuation_confidence,brand,model,year,condition,seating,last_checked_at,source_listing_url,recheck_fail_count";
   const out: DQListing[] = [];
   for (let from = 0; from < 100_000; from += 1000) {
     let { data, error } = await db.from("listings").select(cols).eq("status", "active").eq("public_listing", true).order("id").range(from, from + 999);

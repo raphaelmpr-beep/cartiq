@@ -1073,6 +1073,15 @@ ${pageUrls.join("\n")}
       if (data.state && !PILOT_STATES.includes(data.state?.toUpperCase())) {
         pilotWarning = "GolfCartIQ pilot coverage is currently Florida and Georgia. Market estimates outside this area may be limited.";
       }
+      // Deal Checker now prices against real active comps (same brand/model, year±1, condition).
+      let dcComps: any[] = [], dcBrandComps: any[] = [];
+      try {
+        const y = Number(data.year) || null, cond = data.condition || null;
+        if (brand && y && cond) {
+          if (data.model) dcComps = await storage.getCompsForListing(brand, data.model, y, cond, undefined, data.seating ?? null, data.powerType ?? null);
+          if (!dcComps.length) dcBrandComps = await storage.getBrandCompsForListing(brand, y, cond, undefined, data.seating ?? null, data.powerType ?? null);
+        }
+      } catch { /* comps are best-effort; formula fallback */ }
       const pricing = calculateGolfCartWiseValue({
         askingPrice: data.askingPrice,
         regularPrice: data.regularPrice,
@@ -1098,7 +1107,7 @@ ${pageUrls.join("\n")}
         sellerType: data.sellerType,
         state: data.state,
         condition: data.condition,
-      });
+      }, dcComps, dcBrandComps);
 
       const dealCheck = await storage.createDealCheck({
         source_platform: data.sourcePlatform || "other",

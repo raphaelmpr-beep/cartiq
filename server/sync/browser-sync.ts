@@ -25,46 +25,31 @@ import {
   parseJaxListing,
   type ListingData,
 } from './adapters.js';
-import { sitemapHeaders } from './http-headers.js';
-import { BOT_UA, PoliteFetcher, hostIntervalMs, robotsPolicyAllows } from './polite-fetch.js';
+import { BOT_UA, PoliteFetcher, hostIntervalMs, robotsPolicyAllows, fetchSitemapsPolite } from './polite-fetch.js';
+const firstSitemap = (s: string | string[]) => (Array.isArray(s) ? s[0] : s);
 
 /**
  * Plain HTTP sitemap fetch — works in Lambda (no Playwright required).
- * Uses the honest GolfCartIQ-Bot UA via sitemapHeaders(). Falls back to sub-sitemaps
- * if the root returns a sitemap index.
+ * Uses the shared PoliteFetcher: honest GolfCartIQ-Bot UA, robots.txt, and
+ * max(crawl-delay, 10 s) between every sitemap/sub-sitemap on a host, within a
+ * time budget (partial crawls resume on later runs; see fetchSitemapsPolite).
  */
 async function httpFetchSitemapUrls(
-  sitemapUrl: string,
+  sitemapUrl: string | string[],
   pattern: RegExp
-): Promise<{ success: boolean; urls: string[]; error?: string }> {
+): Promise<{ success: boolean; urls: string[]; error?: string; partial?: boolean }> {
   try {
-    const res = await fetch(sitemapUrl, {
-      headers: sitemapHeaders(sitemapUrl),
-      signal: AbortSignal.timeout(12000),
+    const list = Array.isArray(sitemapUrl) ? sitemapUrl : [sitemapUrl];
+    const r = await fetchSitemapsPolite(list, {
+      followIndex: u => /listing|inventory|product|golf/i.test(u),
+      maxSubs: 5,
     });
-    if (!res.ok) return { success: false, urls: [], error: `HTTP ${res.status} ${res.statusText}` };
-    const xml = await res.text();
-    const allLocs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
-    if (!allLocs.length) return { success: false, urls: [], error: 'No <loc> entries found' };
-
-    // If this is a sitemap index, follow listing-related sub-sitemaps
-    if (xml.includes('<sitemap>') || xml.toLowerCase().includes('sitemap-index')) {
-      const subSitemaps = allLocs.filter(u => /listing|inventory|product|golf/i.test(u)).slice(0, 5);
-      const subUrls: string[] = [];
-      for (const sub of subSitemaps) {
-        try {
-          const sr = await fetch(sub, { headers: sitemapHeaders(sub), signal: AbortSignal.timeout(8000) });
-          if (!sr.ok) continue;
-          const sxml = await sr.text();
-          const subLocs = [...sxml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
-          subUrls.push(...subLocs.filter(u => pattern.test(u)));
-        } catch { continue; }
-      }
-      return { success: subUrls.length > 0, urls: subUrls, error: subUrls.length === 0 ? 'No listing URLs in sub-sitemaps' : undefined };
+    const urls = Array.from(new Set(r.urls.filter(u => pattern.test(u))));
+    let error: string | undefined;
+    if (!urls.length) {
+      error = r.block ? `blocked: ${r.block}` : r.fetched.length ? 'No listing URLs matched pattern' : (r.failed.length ? 'No <loc> entries found' : 'deferred (time budget)');
     }
-
-    const listingUrls = allLocs.filter(u => pattern.test(u));
-    return { success: listingUrls.length > 0, urls: listingUrls, error: listingUrls.length === 0 ? 'No listing URLs matched pattern' : undefined };
+    return { success: urls.length > 0, urls, error, partial: r.partial };
   } catch (err: any) {
     return { success: false, urls: [], error: err?.message || String(err) };
   }
@@ -78,7 +63,8 @@ const MAX_CONCURRENCY = 1;
 interface BrowserSyncDealer {
   slug: string;
   name: string;
-  sitemapUrl: string;
+  /** One sitemap URL, or several (e.g. Dealer Spike New + Pre-owned inventory sitemaps). */
+  sitemapUrl: string | string[];
   /** Regex matching individual listing URLs in the sitemap/index page */
   listingUrlPattern: RegExp;
   adapterKey: string;
@@ -121,25 +107,25 @@ const BROWSER_SYNC_DEALERS: Record<string, BrowserSyncDealer> = {
 
   // DealerSpike (12) — inventory listing pages use /inventory/ links
   'advantage-golf-cars-fl':          { slug: 'advantage-golf-cars-fl',          name: 'Advantage Golf Cars',                 sitemapUrl: 'https://www.advantagegolfcars.com/inventory/',       indexPageUrl: 'https://www.advantagegolfcars.com/inventory/',       listingUrlPattern: /advantagegolfcars\.com\/inventory\/.+-\d+/i,        adapterKey: 'dealerspike_generic', locationCity: 'FL',                  locationState: 'FL', urlOnly: true },
-  'affordable-carts-bonita-springs': { slug: 'affordable-carts-bonita-springs', name: 'Affordable Carts — Bonita Springs',    sitemapUrl: 'https://www.affordablecarts.com/inventory/',         indexPageUrl: 'https://www.affordablecarts.com/inventory/',          listingUrlPattern: /affordablecarts\.com\/inventory\/.+-\d+/i,          adapterKey: 'dealerspike_generic', locationCity: 'Bonita Springs',      locationState: 'FL', urlOnly: true },
-  'electric-cart-company-santa-rosa':{ slug: 'electric-cart-company-santa-rosa',name: 'Electric Cart Company — Santa Rosa',   sitemapUrl: 'https://www.electriccartcompany.com/inventory/',     indexPageUrl: 'https://www.electriccartcompany.com/inventory/',      listingUrlPattern: /electriccartcompany\.com\/inventory\/.+-\d+/i,      adapterKey: 'dealerspike_generic', locationCity: 'Santa Rosa Beach',    locationState: 'FL', urlOnly: true },
+  'affordable-carts-bonita-springs': { slug: 'affordable-carts-bonita-springs', name: 'Affordable Carts — Bonita Springs',    sitemapUrl: ['https://www.affordablecarts.com/default.asp?page=xsitemap&s=NewInventory', 'https://www.affordablecarts.com/default.asp?page=xsitemap&s=PreOwnedInventory'],         indexPageUrl: 'https://www.affordablecarts.com/inventory/',          listingUrlPattern: /affordablecarts\.com\/(New|Pre-owned)-Inventory-[^?#]+-\d+$/i,          adapterKey: 'dealerspike_generic', locationCity: 'Bonita Springs',      locationState: 'FL', urlOnly: true },
+  'electric-cart-company-santa-rosa':{ slug: 'electric-cart-company-santa-rosa',name: 'Electric Cart Company — Santa Rosa',   sitemapUrl: ['https://www.electriccartcompany.com/default.asp?page=xsitemap&s=NewInventory', 'https://www.electriccartcompany.com/default.asp?page=xsitemap&s=PreOwnedInventory'],     indexPageUrl: 'https://www.electriccartcompany.com/inventory/',      listingUrlPattern: /electriccartcompany\.com\/(New|Pre-owned)-Inventory-[^?#]+-\d+$/i,      adapterKey: 'dealerspike_generic', locationCity: 'Santa Rosa Beach',    locationState: 'FL', urlOnly: true },
   'g-five-motorsports-plant-city':   { slug: 'g-five-motorsports-plant-city',   name: 'G-Five Motorsports — Plant City',      sitemapUrl: 'https://gfive.com/inventory/',                       indexPageUrl: 'https://gfive.com/inventory/',                        listingUrlPattern: /gfive\.com\/inventory\/.+-\d+/i,                    adapterKey: 'dealerspike_generic', locationCity: 'Plant City',          locationState: 'FL', urlOnly: true },
   'golf-cart-center-rockledge':      { slug: 'golf-cart-center-rockledge',      name: 'Golf Cart Center — Rockledge',         sitemapUrl: 'https://www.golfcartcenters.com/--inventory',        indexPageUrl: 'https://www.golfcartcenters.com/--inventory',         listingUrlPattern: /golfcartcenters\.com\/[^?#]*inventory[^?#]*-\d+/i,  adapterKey: 'dealerspike_generic', locationCity: 'Rockledge',           locationState: 'FL', urlOnly: true },
-  'golf-carts-st-augustine':         { slug: 'golf-carts-st-augustine',         name: 'Golf Carts of St. Augustine',          sitemapUrl: 'https://www.golfcartsofstaugustine.com/inventory/',  indexPageUrl: 'https://www.golfcartsofstaugustine.com/inventory/',   listingUrlPattern: /golfcartsofstaugustine\.com\/inventory\/.+-\d+/i,   adapterKey: 'dealerspike_generic', locationCity: 'St. Augustine',       locationState: 'FL', urlOnly: true },
+  'golf-carts-st-augustine':         { slug: 'golf-carts-st-augustine',         name: 'Golf Carts of St. Augustine',          sitemapUrl: ['https://www.golfcartsofstaugustine.com/default.asp?page=xsitemap&s=NewInventory', 'https://www.golfcartsofstaugustine.com/default.asp?page=xsitemap&s=PreOwnedInventory'],  indexPageUrl: 'https://www.golfcartsofstaugustine.com/inventory/',   listingUrlPattern: /golfcartsofstaugustine\.com\/(New|Pre-owned)-Inventory-[^?#]+-\d+$/i,   adapterKey: 'dealerspike_generic', locationCity: 'St. Augustine',       locationState: 'FL', urlOnly: true },
   'golf-carts-unlimited-melbourne':  { slug: 'golf-carts-unlimited-melbourne',  name: 'Golf Carts Unlimited — Melbourne',     sitemapUrl: 'https://www.golfcarts-unlimited.com/inventory/',     indexPageUrl: 'https://www.golfcarts-unlimited.com/inventory/',      listingUrlPattern: /golfcarts-unlimited\.com\/inventory\/.+-\d+/i,      adapterKey: 'dealerspike_generic', locationCity: 'Melbourne',           locationState: 'FL', urlOnly: true },
   'golf-carts-vero-beach':           { slug: 'golf-carts-vero-beach',           name: 'Golf Carts of Vero Beach',             sitemapUrl: 'https://www.golfcartsofverobeach.com/inventory/',    indexPageUrl: 'https://www.golfcartsofverobeach.com/inventory/',     listingUrlPattern: /golfcartsofverobeach\.com\/inventory\/.+-\d+/i,     adapterKey: 'dealerspike_generic', locationCity: 'Vero Beach',          locationState: 'FL', urlOnly: true },
   'hidden-creek-golf-carts-brooksville': { slug: 'hidden-creek-golf-carts-brooksville', name: 'Hidden Creek Golf Carts — Brooksville', sitemapUrl: 'https://www.hiddencreekgolfcarts.com/inventory/', indexPageUrl: 'https://www.hiddencreekgolfcarts.com/inventory/', listingUrlPattern: /hiddencreekgolfcarts\.com\/inventory\/.+-\d+/i, adapterKey: 'dealerspike_generic', locationCity: 'Brooksville', locationState: 'FL', urlOnly: true },
-  'love-esports-homosassa':          { slug: 'love-esports-homosassa',          name: 'Love E-Sports — Homosassa',            sitemapUrl: 'https://loveesports.com/inventory/',                 indexPageUrl: 'https://loveesports.com/inventory/',                  listingUrlPattern: /loveesports\.com\/inventory\/.+-\d+/i,              adapterKey: 'dealerspike_generic', locationCity: 'Homosassa',           locationState: 'FL', urlOnly: true },
+  'love-esports-homosassa':          { slug: 'love-esports-homosassa',          name: 'Love E-Sports — Homosassa',            sitemapUrl: ['https://www.loveesports.com/default.asp?page=xsitemap&s=NewInventory', 'https://www.loveesports.com/default.asp?page=xsitemap&s=PreOwnedInventory'],                 indexPageUrl: 'https://loveesports.com/inventory/',                  listingUrlPattern: /loveesports\.com\/(New|Pre-owned)-Inventory-[^?#]+-\d+$/i,              adapterKey: 'dealerspike_generic', locationCity: 'Homosassa',           locationState: 'FL', urlOnly: true },
   'paradise-powersports-nsb':        { slug: 'paradise-powersports-nsb',        name: 'Paradise Powersports — New Smyrna Beach', sitemapUrl: 'https://paradisepowersports.com/inventory/',      indexPageUrl: 'https://paradisepowersports.com/inventory/',          listingUrlPattern: /paradisepowersports\.com\/inventory\/.+-\d+/i,      adapterKey: 'dealerspike_generic', locationCity: 'New Smyrna Beach',    locationState: 'FL', urlOnly: true },
   'total-golf-cart-vero-beach':      { slug: 'total-golf-cart-vero-beach',      name: 'Total Golf Cart — Vero Beach',         sitemapUrl: 'https://www.totalgolfcart.com/inventory/',           indexPageUrl: 'https://www.totalgolfcart.com/inventory/',            listingUrlPattern: /totalgolfcart\.com\/inventory\/.+-\d+/i,           adapterKey: 'dealerspike_generic', locationCity: 'Vero Beach',          locationState: 'FL', urlOnly: true },
 
   // Custom platform (7)
-  'revel-golf-cars-jacksonville':    { slug: 'revel-golf-cars-jacksonville',    name: 'Revel Golf Cars — Jacksonville',       sitemapUrl: 'https://www.revelgolfcars.com/inventory/v1/',        indexPageUrl: 'https://www.revelgolfcars.com/inventory/v1/',         listingUrlPattern: /revelgolfcars\.com\/inventory[^?#]*\/(v1\/)?[a-z0-9-]+-?\d+/i, adapterKey: 'custom_generic', locationCity: 'Jacksonville',      locationState: 'FL', urlOnly: true },
+  'revel-golf-cars-jacksonville':    { slug: 'revel-golf-cars-jacksonville',    name: 'Revel Golf Cars — Jacksonville',       sitemapUrl: ['https://www.revelgolfcars.com/default.asp?page=xsitemap&s=NewInventory', 'https://www.revelgolfcars.com/default.asp?page=xsitemap&s=PreOwnedInventory'],        indexPageUrl: 'https://www.revelgolfcars.com/inventory/v1/',         listingUrlPattern: /revelgolfcars\.com\/(New|Pre-owned)-Inventory-[^?#]+-\d+$/i, adapterKey: 'custom_generic', locationCity: 'Jacksonville',      locationState: 'FL', urlOnly: true },
   'ge-vehicles-fort-myers':          { slug: 'ge-vehicles-fort-myers',          name: 'GE Vehicles — Fort Myers',             sitemapUrl: 'https://gevehicles.com/inventory/',                  indexPageUrl: 'https://gevehicles.com/inventory/',                   listingUrlPattern: /gevehicles\.com\/inventory\/[a-z0-9-]+/i,           adapterKey: 'custom_generic',      locationCity: 'Fort Myers',          locationState: 'FL', urlOnly: true },
   'ge-vehicles-jacksonville':        { slug: 'ge-vehicles-jacksonville',        name: 'GE Vehicles — Jacksonville',           sitemapUrl: 'https://gevehicles.com/inventory/',                  indexPageUrl: 'https://gevehicles.com/inventory/',                   listingUrlPattern: /gevehicles\.com\/inventory\/[a-z0-9-]+/i,           adapterKey: 'custom_generic',      locationCity: 'Jacksonville',        locationState: 'FL', urlOnly: true },
   'ge-vehicles-orlando':             { slug: 'ge-vehicles-orlando',             name: 'GE Vehicles — Orlando',                sitemapUrl: 'https://gevehicles.com/inventory/',                  indexPageUrl: 'https://gevehicles.com/inventory/',                   listingUrlPattern: /gevehicles\.com\/inventory\/[a-z0-9-]+/i,           adapterKey: 'custom_generic',      locationCity: 'Orlando',             locationState: 'FL', urlOnly: true },
-  'orlando-golf-cars':               { slug: 'orlando-golf-cars',               name: 'Orlando Golf Cars',                    sitemapUrl: 'https://www.orlandogolfcars.com/inventory/v1/',      indexPageUrl: 'https://www.orlandogolfcars.com/inventory/v1/',       listingUrlPattern: /orlandogolfcars\.com\/inventory[^?#]*\/[a-z0-9-]+/i, adapterKey: 'custom_generic',    locationCity: 'Orlando',             locationState: 'FL', urlOnly: true },
-  'the-golf-cart-company-clermont':  { slug: 'the-golf-cart-company-clermont',  name: 'The Golf Cart Company — Clermont',     sitemapUrl: 'https://www.thegolfcartcompany.com/inventory/v1/',   indexPageUrl: 'https://www.thegolfcartcompany.com/inventory/v1/',    listingUrlPattern: /thegolfcartcompany\.com\/inventory[^?#]*\/[a-z0-9-]+/i, adapterKey: 'custom_generic', locationCity: 'Clermont',         locationState: 'FL', urlOnly: true },
+  'orlando-golf-cars':               { slug: 'orlando-golf-cars',               name: 'Orlando Golf Cars',                    sitemapUrl: ['https://www.orlandogolfcars.com/default.asp?page=xsitemap&s=NewInventory', 'https://www.orlandogolfcars.com/default.asp?page=xsitemap&s=PreOwnedInventory'],      indexPageUrl: 'https://www.orlandogolfcars.com/inventory/v1/',       listingUrlPattern: /orlandogolfcars\.com\/(New|Pre-owned)-Inventory-[^?#]+-\d+$/i, adapterKey: 'custom_generic',    locationCity: 'Orlando',             locationState: 'FL', urlOnly: true },
+  'the-golf-cart-company-clermont':  { slug: 'the-golf-cart-company-clermont',  name: 'The Golf Cart Company — Clermont',     sitemapUrl: ['https://www.thegolfcartcompany.com/default.asp?page=xsitemap&s=NewInventory', 'https://www.thegolfcartcompany.com/default.asp?page=xsitemap&s=PreOwnedInventory'],   indexPageUrl: 'https://www.thegolfcartcompany.com/inventory/v1/',    listingUrlPattern: /thegolfcartcompany\.com\/(New|Pre-owned)-Inventory-[^?#]+-\d+$/i, adapterKey: 'custom_generic', locationCity: 'Clermont',         locationState: 'FL', urlOnly: true },
   'west-coast-golf-cars-sun-city':   { slug: 'west-coast-golf-cars-sun-city',   name: 'West Coast Golf Cars — Sun City',      sitemapUrl: 'http://www.westcoastgolfcars.com/inventory/v1/',     indexPageUrl: 'http://www.westcoastgolfcars.com/inventory/v1/',      listingUrlPattern: /westcoastgolfcars\.com\/inventory[^?#]*\/[a-z0-9-]+/i, adapterKey: 'custom_generic', locationCity: 'Sun City Center',   locationState: 'FL', urlOnly: true },
 
   // GCR WordPress (4 — jax already registered above with full parser)
@@ -149,17 +135,17 @@ const BROWSER_SYNC_DEALERS: Record<string, BrowserSyncDealer> = {
   'gator-golf-cars-delray-beach':    { slug: 'gator-golf-cars-delray-beach',    name: 'Gator Golf Cars — Delray Beach',       sitemapUrl: 'https://gatorgolfcarts.com/make/venom-ev/',          indexPageUrl: 'https://gatorgolfcarts.com/make/venom-ev/',           listingUrlPattern: /gatorgolfcarts\.com\/(product|inventory)\/[a-z0-9-]+/i,                 adapterKey: 'gcr_generic',        locationCity: 'Delray Beach',        locationState: 'FL', urlOnly: true },
 
   // WooCommerce (4)
-  'carts-and-clubs':                 { slug: 'carts-and-clubs',                 name: 'Carts & Clubs',                        sitemapUrl: 'https://cartsandclubs.com/inventory/',               indexPageUrl: 'https://cartsandclubs.com/inventory/',                listingUrlPattern: /cartsandclubs\.com\/product\/[a-z0-9-]+/i,          adapterKey: 'woo_generic',         locationCity: 'Ocala',               locationState: 'FL', urlOnly: true },
+  'carts-and-clubs':                 { slug: 'carts-and-clubs',                 name: 'Carts & Clubs',                        sitemapUrl: 'https://cartsandclubs.com/glc_listing-sitemap.xml',               indexPageUrl: 'https://cartsandclubs.com/inventory/',                listingUrlPattern: /cartsandclubs\.com\/listing\/[a-z0-9-]+-\d+\/?$/i,          adapterKey: 'woo_generic',         locationCity: 'Ocala',               locationState: 'FL', urlOnly: true },
   'cart-world-golf-cars':            { slug: 'cart-world-golf-cars',            name: 'Cart World Golf Cars',                 sitemapUrl: 'https://cartworldgolfcars.com/new/',                 indexPageUrl: 'https://cartworldgolfcars.com/new/',                  listingUrlPattern: /cartworldgolfcars\.com\/product\/[a-z0-9-]+/i,      adapterKey: 'woo_generic',         locationCity: 'Lady Lake',           locationState: 'FL', urlOnly: true },
   'golf-cart-world-ponte-vedra-beach': { slug: 'golf-cart-world-ponte-vedra-beach', name: 'Golf Cart World — Ponte Vedra Beach', sitemapUrl: 'https://golfcartwld.net/shop/',                                 indexPageUrl: 'https://golfcartwld.net/shop/',                       listingUrlPattern: /golfcartwld\.net\/product\/[a-z0-9-]+/i,             adapterKey: 'woo_generic',        locationCity: 'Ponte Vedra Beach',   locationState: 'FL', urlOnly: true },
   'hidden-creek-golf-carts':         { slug: 'hidden-creek-golf-carts',         name: 'Hidden Creek Golf Carts — Wildwood',   sitemapUrl: 'https://www.hiddencreekgolfcarts.com/inventory/',    indexPageUrl: 'https://www.hiddencreekgolfcarts.com/inventory/',     listingUrlPattern: /hiddencreekgolfcarts\.com\/product\/[a-z0-9-]+/i,     adapterKey: 'woo_generic',        locationCity: 'Wildwood',            locationState: 'FL', urlOnly: true },
 
   // Wix (2)
-  'coastal-golf-carts-port-orange':  { slug: 'coastal-golf-carts-port-orange',  name: 'Coastal Golf Carts — Port Orange',     sitemapUrl: 'https://www.coastalgolfcartsfl.com/items',           indexPageUrl: 'https://www.coastalgolfcartsfl.com/items',            listingUrlPattern: /coastalgolfcartsfl\.com\/item\/[a-z0-9-]+/i,        adapterKey: 'wix_generic',         locationCity: 'Port Orange',         locationState: 'FL', urlOnly: true },
+  'coastal-golf-carts-port-orange':  { slug: 'coastal-golf-carts-port-orange',  name: 'Coastal Golf Carts — Port Orange',     sitemapUrl: 'https://www.coastalgolfcartsfl.com/glc_listing-sitemap.xml',           indexPageUrl: 'https://www.coastalgolfcartsfl.com/items',            listingUrlPattern: /coastalgolfcartsfl\.com\/listing\/[a-z0-9-]+-\d+\/?$/i,        adapterKey: 'wix_generic',         locationCity: 'Port Orange',         locationState: 'FL', urlOnly: true },
   'ocala-golf-cart-supercenter':     { slug: 'ocala-golf-cart-supercenter',     name: 'Ocala Golf Cart Supercenter',          sitemapUrl: 'https://www.ocalagolfcart.com/inventory',            indexPageUrl: 'https://www.ocalagolfcart.com/inventory',             listingUrlPattern: /ocalagolfcart\.com\/item\/[a-z0-9-]+/i,             adapterKey: 'wix_generic',         locationCity: 'Ocala',               locationState: 'FL', urlOnly: true },
 
   // Bare WordPress (2)
-  'fast-eddies-golf-carts':          { slug: 'fast-eddies-golf-carts',          name: 'Fast Eddie\'s Golf Carts',             sitemapUrl: 'https://fasteddiesgc.com/',                          indexPageUrl: 'https://fasteddiesgc.com/',                           listingUrlPattern: /fasteddiesgc\.com\/(inventory|listing|product)\/[a-z0-9-]+/i, adapterKey: 'wp_generic',      locationCity: 'The Villages',        locationState: 'FL', urlOnly: true },
+  'fast-eddies-golf-carts':          { slug: 'fast-eddies-golf-carts',          name: 'Fast Eddie\'s Golf Carts',             sitemapUrl: 'https://fasteddiesgc.com/wp-sitemap-posts-products-1.xml',                          indexPageUrl: 'https://fasteddiesgc.com/',                           listingUrlPattern: /fasteddiesgc\.com\/products\/[^\/?#]+\/?$/i, adapterKey: 'wp_generic',      locationCity: 'The Villages',        locationState: 'FL', urlOnly: true },
   'jb-golf-carts':                   { slug: 'jb-golf-carts',                   name: 'JB Golf Carts',                        sitemapUrl: 'https://jbgolfcarts.webbreservations.com/inventory/', indexPageUrl: 'https://jbgolfcarts.webbreservations.com/inventory/', listingUrlPattern: /jbgolfcarts\.webbreservations\.com\/inventory\/[a-z0-9-]+/i, adapterKey: 'wp_generic',        locationCity: 'Lady Lake',           locationState: 'FL', urlOnly: true },
 
   // Miscellaneous singletons
@@ -231,7 +217,7 @@ async function fetchSitemapUrlsViaBrowser(
     let urls: string[] = [];
 
     try {
-      await page.goto(dealer.sitemapUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await page.goto(firstSitemap(dealer.sitemapUrl), { waitUntil: 'domcontentloaded', timeout: 20000 });
       await page.waitForTimeout(1500); // allow JS challenge to resolve
       const content = await page.content();
 
@@ -547,7 +533,7 @@ export async function runBrowserSync(
 
     // Honor robots (Disallow + Crawl-delay, min 10s) between listing pages.
     const pf = new PoliteFetcher();
-    const origin = new URL(dealerCfg.sitemapUrl).origin;
+    const origin = new URL(firstSitemap(dealerCfg.sitemapUrl)).origin;
     const policy = await pf.robots(origin);
     const gapMs = hostIntervalMs(policy);
     let firstPage = true;
