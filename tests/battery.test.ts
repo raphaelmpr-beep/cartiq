@@ -28,3 +28,11 @@ test("filter param sanitised", () => {
   assert.equal(safeChemParam("lithium"), "lithium");
   assert.equal(safeChemParam("x),or(id.gt.0"), null);
 });
+
+test("capacity-known uses kWh bucket even without chemistry", () => {
+  const c = (p: number, k: number | null, ch: string | null = null) => ({ asking_price: p, battery_kwh: k, battery_chemistry: ch });
+  const comps = [c(9000, 5), c(9200, 5), c(9100, 5), c(12000, 8), c(12500, 8), c(12200, 8, "lithium")];
+  assert.equal(matchBatteryComps({ battery_voltage: 48, battery_ah: 105 }, comps).length, 3);
+  assert.equal(matchBatteryComps({ battery_kwh: 8, battery_chemistry: "lithium" }, comps).length, 3);
+  assert.equal(matchBatteryComps({ battery_kwh: 2 }, comps).length, 6);
+});

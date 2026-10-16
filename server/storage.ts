@@ -390,7 +390,7 @@ class SupabaseStorage implements IStorage {
   async getAllListingsForReprice(offset: number, limit: number): Promise<any[]> {
     const { data } = await db()
       .from("listings")
-      .select("id,brand,model,year,condition,asking_price,sale_price,regular_price,power_type,battery_type,battery_ah,battery_age_months,seating,lifted,charger_included,warranty_included,warranty_months,delivery_available,delivery_included,estimated_delivery_cost,seller_type,street_legal_claimed")
+      .select("id,brand,model,year,condition,asking_price,sale_price,regular_price,power_type,battery_type,battery_ah,battery_chemistry,battery_voltage,battery_kwh,battery_age_months,seating,lifted,charger_included,warranty_included,warranty_months,delivery_available,delivery_included,estimated_delivery_cost,seller_type,street_legal_claimed")
       .eq("status", "active")
       .eq("public_listing", true)
       .not("asking_price", "is", null)
