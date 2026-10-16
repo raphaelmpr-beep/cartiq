@@ -1,3 +1,4 @@
+import { effChemistry, matchBatteryComps } from "../shared/battery";
 // GolfCartIQ Pricing Engine — Comp-Based IMV
 // =============================================================================
 // Inspired by CarGurus' Instant Market Value (IMV) approach:
@@ -21,6 +22,8 @@ export interface PricingInput {
   powerType?: string | null;
   batteryType?: string | null;
   batteryAh?: number | null;
+  batteryKwh?: number | null;
+  batteryVoltage?: number | null;
   batteryAgeMonths?: number | null;
   seating?: number | null;
   lifted?: boolean | string | null;
@@ -43,6 +46,10 @@ export interface CompListing {
   year?: number | null;
   power_type?: string | null;
   battery_type?: string | null;
+  battery_chemistry?: string | null;
+  battery_kwh?: number | null;
+  battery_voltage?: number | null;
+  battery_ah?: number | null;
   seating?: number | null;
   lifted?: boolean | null;
   warranty_included?: string | boolean | null;
@@ -252,7 +259,8 @@ export const isGuardedPrice = (reasons: string[]) =>
   reasons.some(r => r === "below_min_plausible" || r === "above_max_plausible" || r.startsWith("outlier_"));
 
 export function computeIMV(input: PricingInput, comps: CompListing[], brandComps?: CompListing[]): IMVResult {
-  const validComps = cleanComps(comps);
+  const subj = { battery_type: input.batteryType, battery_kwh: input.batteryKwh, battery_ah: input.batteryAh, battery_voltage: input.batteryVoltage };
+  const validComps = matchBatteryComps(subj, cleanComps(comps));
 
   // ── Tier 1: ≥3 direct comps — use trimmed median ─────────────────────────
   if (validComps.length >= 3) {
@@ -279,7 +287,7 @@ export function computeIMV(input: PricingInput, comps: CompListing[], brandComps
 
   // ── Tier 2b: Brand-only fallback — same brand, any model, year±1 ─────────
   // Used when no exact brand+model comps exist (e.g., rare model or new brand)
-  const validBrandComps = cleanComps(brandComps ?? []);
+  const validBrandComps = matchBatteryComps(subj, cleanComps(brandComps ?? []));
   if (validBrandComps.length >= 3) {
     const imv = Math.round(median(validBrandComps.map(c => c.asking_price)));
     // Brand-only comps are less precise — confidence capped at medium
@@ -658,7 +666,9 @@ function listingToInput(listing: Record<string, any>): PricingInput {
     brand:                 listing.brand,
     model:                 listing.model,
     powerType:             listing.power_type,
-    batteryType:           listing.battery_type,
+    batteryType:           effChemistry(listing) ?? listing.battery_type,
+    batteryKwh:            listing.battery_kwh ?? null,
+    batteryVoltage:        listing.battery_voltage ?? null,
     batteryAh:             listing.battery_ah,
     batteryAgeMonths:      listing.battery_age_months,
     seating:               listing.seating,

@@ -93,7 +93,7 @@ export function ListingCard({ listing, compact, priority = false }: ListingCardP
 
         {/* Specs row */}
         <div className="flex flex-wrap gap-1.5">
-          <BatteryRiskBadge batteryType={listing.batteryType} batteryAh={listing.batteryAh} />
+          <BatteryRiskBadge batteryType={listing.batteryChemistry ?? listing.batteryType} batteryAh={listing.batteryAh} />
           {listing.seating && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs text-muted-foreground">
               <Users className="h-3 w-3" />{listing.seating}-Seat
