@@ -55,6 +55,7 @@ import { getMetaConnectorStatus } from "./connectors/metaMarketplace";
 import { getRetailConnectorStatus } from "./connectors/retailSource";
 import { supabaseAdmin } from "./supabase-admin";
 import { registerRecheckRoutes } from "./recheck/routes";
+import { isGolfCartListing } from "../shared/listing-lifecycle";
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 if (!ADMIN_PASSWORD) {
@@ -1143,7 +1144,8 @@ ${pageUrls.join("\n")}
         cartiq_estimated_value: pricing.cartiqEstimatedValue,
         total_delivered_cost: pricing.totalDeliveredCost >= 0 ? pricing.totalDeliveredCost : undefined,
         deal_delta: pricing.dealDelta,
-        deal_rating: pricing.dealRating,
+        // Non-golf-cart items (e-bikes) never get a deal rating.
+        deal_rating: isGolfCartListing(data as any) ? pricing.dealRating : "unknown",
         buyer_score: pricing.buyerScore,
         battery_risk: pricing.batteryRisk,
         charger_warning: pricing.chargerWarning ?? undefined,
@@ -1399,7 +1401,7 @@ ${pageUrls.join("\n")}
             // CHECK constraint and abort the row.
             const patch: Record<string, any> = {
               cartiq_estimated_value: pricing.cartiq_estimated_value,
-              deal_rating:            pricing.deal_rating,
+              deal_rating:            isGolfCartListing(listing as any) ? pricing.deal_rating : "unknown",
               deal_delta:             pricing.deal_delta,
               buyer_score:            pricing.buyer_score,
               valuation_confidence:   pricing.valuation_confidence,

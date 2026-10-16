@@ -1,4 +1,5 @@
 import { safeChemParam } from "../shared/battery";
+import { isGolfCartListing } from "../shared/listing-lifecycle";
 /**
  * CartIQ Storage — Supabase/Postgres backend
  * All methods are async. Routes call await storage.method().
@@ -178,6 +179,8 @@ class SupabaseStorage implements IStorage {
       if (batch.length < PAGE_SIZE) break; // no more rows
       offset += PAGE_SIZE;
     }
+    // Public lists never include e-bikes or other non-golf-cart items (P0 2026-10-16).
+    if (renderable) all = all.filter(l => isGolfCartListing(l as any));
     return all.slice(0, hardLimit);
   }
 
@@ -199,7 +202,7 @@ class SupabaseStorage implements IStorage {
       .order("updated_at", { ascending: false })
       .limit(pool);
     if (error) throw new Error(error.message);
-    const candidates = (data ?? []) as Listing[];
+    const candidates = ((data ?? []) as Listing[]).filter(l => isGolfCartListing(l as any));
 
     // Weighted Fisher-Yates: great_deal entries are duplicated once so they
     // appear roughly 2× as often, then we deduplicate after the shuffle.

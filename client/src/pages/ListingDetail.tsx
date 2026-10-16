@@ -17,6 +17,9 @@ import { normalizeWarranty } from "@shared/warranty";
 import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText } from "@/lib/utils";
 import type { Listing, Dealer } from "@/lib/types";
 import { apiRequest } from "@/lib/queryClient";
+import { resolveGoneMode } from "@shared/listing-lifecycle";
+
+const GONE_MODE = resolveGoneMode(import.meta.env.VITE_LISTING_GONE_MODE as string | undefined);
 
 // We run the pricing engine client-side so questions/redFlags are available
 function usePricingResult(listing?: Listing) {
@@ -67,10 +70,10 @@ export default function ListingDetail() {
   // link. Sitemap already excludes these; the tag is defense-in-depth.
   useEffect(() => {
     if (!listing) return;
-    const INDEXABLE_STATUSES = new Set(["active"]);
-    const isIndexable =
-      INDEXABLE_STATUSES.has(String(listing.status ?? "active")) &&
-      listing.publicListing !== false;
+    // Sold/unavailable pages stay indexable by default (Director condition 2);
+    // noindex only when VITE_LISTING_GONE_MODE=noindex (SRE/Raphael decision).
+    const isActive = String(listing.status ?? "active") === "active" && listing.publicListing !== false;
+    const isIndexable = isActive || GONE_MODE === "sold_page";
     setSEO({
       title: listing.title,
       description: `${listing.year ?? ""} ${listing.brand ?? ""} ${listing.model ?? ""} for sale in ${listing.city ?? ""}, ${listing.state ?? ""}. Asking ${listing.askingPrice ? "$" + listing.askingPrice.toLocaleString() : "price TBD"} — GolfCartIQ GolfCartIQ Deal Rating: ${listing.dealRating ?? "unknown"}.`,
@@ -185,6 +188,11 @@ export default function ListingDetail() {
         <Link href="/search" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4">
             <ArrowLeft className="h-4 w-4" /> Back to Search
           </Link>
+
+        {/* Sold / unavailable: page stays live with similar carts (Director condition 2). */}
+        {(String(listing.status ?? "active") !== "active" || listing.publicListing === false) && (
+          <SoldBanner listing={listing} />
+        )}
 
         {/* Image Carousel */}
         {(() => {
@@ -506,6 +514,34 @@ export default function ListingDetail() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Shown when the dealer page confirmed sold/404 (or the listing left a complete feed). */
+function SoldBanner({ listing }: { listing: Listing }) {
+  const qs = new URLSearchParams({ limit: "6" });
+  if (listing.brand) qs.set("brand", String(listing.brand));
+  if (listing.state) qs.set("state", String(listing.state));
+  const { data: similar } = useQuery<Listing[]>({ queryKey: [`/api/listings?${qs.toString()}`], retry: false });
+  const items = (similar ?? []).filter(l => l.id !== listing.id).slice(0, 6);
+  return (
+    <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4" data-testid="banner-listing-sold">
+      <p className="font-semibold text-amber-900">This golf cart is no longer available from the dealer.</p>
+      <p className="text-sm text-amber-800">Price and details are shown as last confirmed. Similar carts for sale:</p>
+      {items.length > 0 && (
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map(l => (
+            <li key={l.id}>
+              <Link href={`/listing/${l.slug ?? l.id}`} className="block rounded-lg border bg-white p-2 text-sm hover:border-primary" data-testid={`link-similar-${l.id}`}>
+                <span className="font-medium">{l.title}</span>
+                <span className="block text-muted-foreground">{formatPrice(l.salePrice ?? l.askingPrice ?? l.regularPrice)} · {[l.city, l.state].filter(Boolean).join(", ")}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Link href="/search" className="mt-3 inline-block text-sm underline">Browse all active listings</Link>
     </div>
   );
 }
