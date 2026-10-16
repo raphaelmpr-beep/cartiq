@@ -39,6 +39,7 @@ export interface PricingInput {
 
 export interface CompListing {
   asking_price: number;
+  price_confidence?: string | null;
   year?: number | null;
   power_type?: string | null;
   battery_type?: string | null;
@@ -204,16 +205,59 @@ function featureAdjustments(input: PricingInput): number {
 // comps: array of active listings with same brand+model, year±1, same condition
 // brandComps: brand-only fallback comps (different model, same brand+year+condition)
 // =============================================================================
+// =============================================================================
+// Real-comp hygiene (price step 4): only plausible, sourced prices count as comps,
+// and statistical outliers (Tukey fences) are dropped before taking the median.
+// =============================================================================
+export const COMP_MIN_PRICE = 1500;
+export const COMP_MAX_PRICE = 100_000;
+export function cleanComps<T extends CompListing>(comps: T[]): T[] {
+  const ok = comps.filter(c =>
+    typeof c.asking_price === "number" &&
+    c.asking_price >= COMP_MIN_PRICE && c.asking_price <= COMP_MAX_PRICE &&
+    c.price_confidence !== "unavailable");
+  if (ok.length < 4) return ok;
+  const p = ok.map(c => c.asking_price).sort((a, b) => a - b);
+  const q = (f: number) => { const i = (p.length - 1) * f; const lo = Math.floor(i); return p[lo] + (p[Math.ceil(i)] - p[lo]) * (i - lo); };
+  const q1 = q(0.25), q3 = q(0.75), iqr = q3 - q1;
+  const lo = q1 - 1.5 * iqr, hi = q3 + 1.5 * iqr;
+  return ok.filter(c => c.asking_price >= lo && c.asking_price <= hi);
+}
+
+// Price step 3: needs-review flag (computed, admin-facing; nothing new is stored).
+export const OUTLIER_LOW = 0.5;   // price < 50% of comp market value
+export const OUTLIER_HIGH = 1.8;  // price > 180% of comp market value
+export function priceReview(l: {
+  asking_price?: number | null; sale_price?: number | null; price_confidence?: string | null;
+  cartiq_estimated_value?: number | null; valuation_confidence?: string | null;
+}, imv?: { imv: number; compTier: number } | null): { needsReview: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  const price = l.sale_price ?? l.asking_price ?? null;
+  if (price == null || price <= 0) reasons.push("no_price");
+  else {
+    if (price < COMP_MIN_PRICE) reasons.push("below_min_plausible");
+    if (price > COMP_MAX_PRICE) reasons.push("above_max_plausible");
+    if (l.price_confidence && l.price_confidence !== "confirmed") reasons.push(`price_${l.price_confidence}`);
+    const mv = imv ? imv.imv : (l.cartiq_estimated_value ?? 0);
+    const compBacked = imv ? imv.compTier === 1 : l.valuation_confidence === "high";
+    if (mv > 0 && compBacked) {
+      if (price < mv * OUTLIER_LOW) reasons.push("outlier_low_vs_comps");
+      if (price > mv * OUTLIER_HIGH) reasons.push("outlier_high_vs_comps");
+    }
+  }
+  return { needsReview: reasons.length > 0, reasons };
+}
+/** Outlier guard: never show a deal badge on an implausible or outlier price. */
+export const isGuardedPrice = (reasons: string[]) =>
+  reasons.some(r => r === "below_min_plausible" || r === "above_max_plausible" || r.startsWith("outlier_"));
+
 export function computeIMV(input: PricingInput, comps: CompListing[], brandComps?: CompListing[]): IMVResult {
-  const validComps = comps.filter(c => c.asking_price > 500 && c.asking_price < 100000);
+  const validComps = cleanComps(comps);
 
   // ── Tier 1: ≥3 direct comps — use trimmed median ─────────────────────────
   if (validComps.length >= 3) {
-    const prices = validComps.map(c => c.asking_price).sort((a, b) => a - b);
-    // Trim top/bottom 10% outliers (CarGurus-style)
-    const trim = Math.floor(prices.length * 0.10);
-    const trimmed = prices.slice(trim, prices.length - trim || undefined);
-    const imv = Math.round(median(trimmed));
+    // Outliers already removed by cleanComps (Tukey fences); median of real comps.
+    const imv = Math.round(median(validComps.map(c => c.asking_price)));
     return {
       imv,
       priceConfidence: validComps.length >= 8 ? "high" : "medium",
@@ -235,12 +279,9 @@ export function computeIMV(input: PricingInput, comps: CompListing[], brandComps
 
   // ── Tier 2b: Brand-only fallback — same brand, any model, year±1 ─────────
   // Used when no exact brand+model comps exist (e.g., rare model or new brand)
-  const validBrandComps = (brandComps ?? []).filter(c => c.asking_price > 500 && c.asking_price < 100000);
+  const validBrandComps = cleanComps(brandComps ?? []);
   if (validBrandComps.length >= 3) {
-    const prices = validBrandComps.map(c => c.asking_price).sort((a, b) => a - b);
-    const trim = Math.floor(prices.length * 0.10);
-    const trimmed = prices.slice(trim, prices.length - trim || undefined);
-    const imv = Math.round(median(trimmed));
+    const imv = Math.round(median(validBrandComps.map(c => c.asking_price)));
     // Brand-only comps are less precise — confidence capped at medium
     return {
       imv,
@@ -399,7 +440,8 @@ export function enrichListing(
     };
   }
 
-  const { imv, priceConfidence, compTier } = computeIMV(input, comps, brandComps);
+  const imvRes = computeIMV(input, comps, brandComps);
+  const { imv, priceConfidence, compTier } = imvRes;
 
   // Delivery cost for TDC
   const offersDelivery = listing.delivery_available === true || listing.delivery_included === true;
@@ -409,7 +451,11 @@ export function enrichListing(
       ?? listing.delivery_included ? 0 : 350;
   }
 
-  const { dealRating, dealDelta, tdc } = computeDealRating(effectivePrice, imv, deliveryCost);
+  const rated = computeDealRating(effectivePrice, imv, deliveryCost);
+  const { dealDelta, tdc } = rated;
+  // Outlier guard: implausible / far-off-comps prices get no deal badge.
+  const review = priceReview({ asking_price: input.askingPrice, sale_price: input.salePrice, price_confidence: null }, imvRes);
+  const dealRating = isGuardedPrice(review.reasons) ? "unknown" : rated.dealRating;
   const buyerScore = computeWiseScore(input, dealRating);
 
   const valConfidence: string =
@@ -433,7 +479,7 @@ export function enrichListing(
 // calculateGolfCartWiseValue — Legacy single-listing API (Deal Checker)
 // Now uses the same IMV engine but with no comp data (pure formula fallback)
 // =============================================================================
-export function calculateGolfCartWiseValue(input: PricingInput): PricingResult {
+export function calculateGolfCartWiseValue(input: PricingInput, comps: CompListing[] = [], brandComps: CompListing[] = []): PricingResult {
   const redFlags: string[] = [];
   const questionsToAsk: string[] = [];
 
@@ -452,9 +498,15 @@ export function calculateGolfCartWiseValue(input: PricingInput): PricingResult {
   }
   const totalDeliveredCost = effectivePrice + estimatedDeliveryCost;
 
-  // IMV — no comps available in Deal Checker, use formula
-  const { imv: cartiqMarketValue, priceConfidence } = computeIMV(input, []);
-  const { dealRating, dealDelta } = computeDealRating(effectivePrice, cartiqMarketValue, estimatedDeliveryCost);
+  // IMV — anchored on real active comps when the caller supplies them (formula only as fallback)
+  const imvRes = computeIMV(input, comps, brandComps);
+  const { imv: cartiqMarketValue, priceConfidence } = imvRes;
+  const rated = computeDealRating(effectivePrice, cartiqMarketValue, estimatedDeliveryCost);
+  const { dealDelta } = rated;
+  const review = priceReview({ asking_price: input.askingPrice ?? null, sale_price: input.salePrice ?? null }, imvRes);
+  const dealRating = isGuardedPrice(review.reasons) ? "unknown" : rated.dealRating;
+  if (review.reasons.includes("below_min_plausible")) redFlags.push("This price looks like a down payment or monthly payment, not the cart's full price. Confirm the total price.");
+  if (review.reasons.includes("outlier_low_vs_comps")) redFlags.push("Price is far below comparable listings. Confirm it is the full cash price and the cart is as described.");
   const dealDeltaPercent = cartiqMarketValue > 0 ? dealDelta / cartiqMarketValue : 0;
   const buyerScore = computeWiseScore(input, dealRating);
 

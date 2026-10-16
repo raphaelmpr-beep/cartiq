@@ -181,3 +181,75 @@ export function politeFetch(url: string, o?: Parameters<PoliteFetcher["get"]>[1]
   if (!_default) _default = new PoliteFetcher();
   return _default.get(url, o);
 }
+
+// ── Polite multi-sitemap crawl (crawl-delay between sub-sitemaps, time-budgeted) ──
+/**
+ * Fetch a list of sitemaps (optionally following sitemap indexes) with the shared
+ * PoliteFetcher, so robots.txt and max(crawl-delay, 10 s) spacing per host apply
+ * between every sub-sitemap. Stops before the time budget would be exceeded and
+ * returns `partial: true` + `deferred` (never sleeps past the deadline), so a
+ * Vercel function stays under its limit. Resume across cron runs is stateless:
+ * the start offset rotates by 10-minute slot (`rotateKey`), so successive runs
+ * begin at different sub-sitemaps and together cover all of them. Callers MUST
+ * NOT auto-archive from a partial crawl.
+ */
+export interface SitemapCrawlResult {
+  urls: string[]; fetched: string[]; deferred: string[]; failed: string[];
+  block?: BlockKind; partial: boolean;
+}
+export const SITEMAP_BUDGET_MS = 20_000;
+export function rotate<T>(xs: T[], k: number): T[] {
+  if (!xs.length) return xs; const n = ((k % xs.length) + xs.length) % xs.length;
+  return xs.slice(n).concat(xs.slice(0, n));
+}
+const LOC_RE = /<loc>\s*([^<\s]+)\s*<\/loc>/g;
+export function sitemapLocs(xml: string): string[] {
+  return Array.from(xml.matchAll(LOC_RE)).map(m => m[1].trim().replace(/&amp;/g, "&"));
+}
+export const isSitemapIndex = (xml: string) => /<sitemapindex[\s>]/i.test(xml) || (xml.includes("<sitemap>") && !xml.includes("<url>"));
+
+let _sitemapFetcher: PoliteFetcher | null = null;
+/** Process-wide fetcher so host spacing also holds across callers in one invocation. */
+export function sharedFetcher(): PoliteFetcher { if (!_sitemapFetcher) _sitemapFetcher = new PoliteFetcher(); return _sitemapFetcher; }
+
+export async function fetchSitemapsPolite(sitemaps: string[], o: {
+  fetcher?: PoliteFetcher; budgetMs?: number; now?: () => number; rotateKey?: number;
+  followIndex?: (sub: string) => boolean; maxSubs?: number; keep?: (u: string) => boolean;
+} = {}): Promise<SitemapCrawlResult> {
+  const pf = o.fetcher ?? sharedFetcher();
+  const now = o.now ?? Date.now;
+  const deadline = now() + (o.budgetMs ?? SITEMAP_BUDGET_MS);
+  const key = o.rotateKey ?? Math.floor(Date.now() / 600_000);
+  const queue = rotate(Array.from(new Set(sitemaps)), key);
+  const seen = new Set<string>(); const urls: string[] = [];
+  const r: SitemapCrawlResult = { urls, fetched: [], deferred: [], failed: [], partial: false };
+  let subsAdded = 0;
+  while (queue.length) {
+    const sm = queue.shift()!;
+    if (seen.has(sm)) continue; seen.add(sm);
+    let host = ""; try { host = new URL(sm).host; } catch { r.failed.push(sm); continue; }
+    const blk = pf.hostBlock(host);
+    if (blk) { r.block = blk; r.deferred.push(sm, ...queue.filter(q => !seen.has(q))); r.partial = true; break; }
+    // Never start a request we would have to wait past the deadline for.
+    if (Math.max(now(), pf.nextAllowedAt(host)) + 1_000 > deadline) {
+      r.deferred.push(sm, ...queue.filter(q => !seen.has(q))); r.partial = true; break;
+    }
+    const res = await pf.get(sm, { kind: "xml", timeoutMs: Math.max(3_000, Math.min(12_000, deadline - now())) });
+    if (res.block === "robots_disallow") { r.failed.push(sm); continue; }
+    if (res.block) { r.block = res.block; r.failed.push(sm); r.partial = true; r.deferred.push(...queue.filter(q => !seen.has(q))); break; }
+    if (!res.ok) { r.failed.push(sm); r.partial = true; continue; }
+    r.fetched.push(sm);
+    const locs = sitemapLocs(res.body);
+    if (isSitemapIndex(res.body)) {
+      const subs = locs.filter(u => (o.followIndex ?? (() => true))(u));
+      const room = (o.maxSubs ?? 10) - subsAdded;
+      const pick = rotate(subs, key).slice(0, Math.max(0, room));
+      subsAdded += pick.length;
+      if (subs.length > pick.length) r.partial = true;
+      queue.unshift(...pick);
+      continue;
+    }
+    for (const u of locs) if (!o.keep || o.keep(u)) urls.push(u);
+  }
+  return r;
+}

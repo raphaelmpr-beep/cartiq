@@ -10,7 +10,15 @@
  * Full Playwright-based parsing is handled by the weekly cron (run-pipeline.ts) which runs
  * in the pplx.app environment where Playwright IS available.
  */
-import { BOT_UA } from './polite-fetch.js';
+import { BOT_UA, fetchSitemapsPolite, sharedFetcher } from './polite-fetch.js';
+
+/** Set when the current dealer's sitemap crawl stopped early (time budget / block). Auto-archive is skipped. */
+let crawlPartial = false;
+async function politeSitemaps(urls: string[], keep?: (u: string) => boolean, followIndex?: (u: string) => boolean): Promise<string[]> {
+  const r = await fetchSitemapsPolite(urls, { keep, followIndex, maxSubs: 6 });
+  if (r.partial) crawlPartial = true;
+  return r.urls;
+}
 
 import { priceFromFeed } from './price-extract.js';
 import { isAutoArchiveExcluded } from '../recheck/core.js';
@@ -20,7 +28,6 @@ import {
   isNavPage,
   cleanHtmlWhitespace,
 } from './adapters.js';
-import { sitemapHeaders } from './http-headers.js';
 import {
   ECO_SLUG, ECO_ADAPTER, discoverEcoInventory, ecoPendingRows,
 } from './eco-golf-carts.js';
@@ -75,16 +82,7 @@ async function fetchBoteroSitemaps(): Promise<BoteroFetchResult> {
     'https://boterocarts.com/glc_listing-sitemap2.xml',
     'https://boterocarts.com/glc_listing-sitemap3.xml',
   ];
-  const allUrls: string[] = [];
-  for (const sm of sitemaps) {
-    try {
-      const res = await fetch(sm, { headers: sitemapHeaders(sm), signal: AbortSignal.timeout(10000) });
-      if (!res.ok) continue;
-      const xml = await res.text();
-      const matches = [...xml.matchAll(/<loc>(https:\/\/boterocarts\.com\/listing\/[^<]+)<\/loc>/g)];
-      allUrls.push(...matches.map(m => m[1].trim()));
-    } catch { /* skip failed sitemaps */ }
-  }
+  const allUrls = await politeSitemaps(sitemaps, u => /^https:\/\/boterocarts\.com\/listing\//.test(u));
 
   const records: BoteroRecord[] = [];
   const untaggedUrls: string[] = [];
@@ -107,35 +105,14 @@ async function getBoteroSitemapUrls(flGaOnly = true): Promise<string[]> {
 }
 
 async function getJaxSitemapUrls(): Promise<string[]> {
-  try {
-    const jaxSitemap = 'https://golfcartsjacksonville.com/auto-listing-sitemap.xml';
-    const res = await fetch(jaxSitemap, {
-      headers: sitemapHeaders(jaxSitemap), signal: AbortSignal.timeout(10000)
-    });
-    const xml = await res.text();
-    const matches = [...xml.matchAll(/<loc>(https:\/\/golfcartsjacksonville\.com\/listing\/[^<]+)<\/loc>/g)];
-    return matches.map(m => m[1].trim());
-  } catch { return []; }
+  return politeSitemaps(['https://golfcartsjacksonville.com/auto-listing-sitemap.xml'],
+    u => /^https:\/\/golfcartsjacksonville\.com\/listing\//.test(u));
 }
 
 // The Villages Golf Cars — 6 paginated product sitemaps, requires browser-like UA
 async function getVillagesGolfCarsSitemapUrls(): Promise<string[]> {
-  const UA = BOT_UA;
-  const urls: string[] = [];
-  const suffixes = ['', '2', '3', '4', '5', '6'];
-  for (const suffix of suffixes) {
-    try {
-      const res = await fetch(
-        `https://www.thevillagesgolfcars.com/product-sitemap${suffix}.xml`,
-        { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(10000) }
-      );
-      if (!res.ok) break;
-      const xml = await res.text();
-      const matches = [...xml.matchAll(/<loc>(https:\/\/www\.thevillagesgolfcars\.com\/product\/[^<]+)<\/loc>/g)];
-      urls.push(...matches.map(m => m[1].trim()));
-    } catch { break; }
-  }
-  return urls;
+  const sitemaps = ['', '2', '3', '4', '5', '6'].map(x => `https://www.thevillagesgolfcars.com/product-sitemap${x}.xml`);
+  return politeSitemaps(sitemaps, u => /^https:\/\/www\.thevillagesgolfcars\.com\/product\//.test(u));
 }
 
 // Quick title parser for slug-based metadata (no page fetch needed)
@@ -203,28 +180,16 @@ function tagAdvantageUrl(url: string): { dealer_slug: string; city: string; stat
 async function getAdvantageFetchResult(): Promise<{ records: AdvantageRecord[]; rawUrlCount: number; untaggedUrls: string[]; fetchErrors: string[] }> {
   const allUrls: string[] = [];
   const fetchErrors: string[] = [];
-  for (const sitemapUrl of ADVANTAGE_SITEMAPS) {
-    // Dealer Spike's WAF intermittently 403s under load — one retry with backoff.
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        if (attempt > 0) await new Promise(r => setTimeout(r, 2500));
-        const res = await fetch(sitemapUrl, {
-          headers: sitemapHeaders(sitemapUrl),
-          signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
-        });
-        if (res.status === 403 && attempt === 0) continue; // retry once on 403
-        if (!res.ok) { fetchErrors.push(`${sitemapUrl} → HTTP ${res.status}`); break; }
-        const xml = await res.text();
-        const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)]
-          .map(m => m[1].trim().replace(/&amp;/g, '&'))
-          .filter(u => u.startsWith('http') && /Inventory-\d{4}-/i.test(u));
-        allUrls.push(...locs);
-        break;
-      } catch (e: any) {
-        if (attempt === 1) fetchErrors.push(`${sitemapUrl} → ${e?.message || e}`);
-      }
-    }
+  // Polite: robots + crawl-delay between the two sitemaps; a 403/challenge is a block, never retried.
+  {
+    const r = await fetchSitemapsPolite(ADVANTAGE_SITEMAPS, { keep: u => u.startsWith('http') && /Inventory-\d{4}-/i.test(u) });
+    if (r.partial) crawlPartial = true;
+    allUrls.push(...r.urls);
+    if (r.block) fetchErrors.push(`blocked: ${r.block}`);
+    r.failed.forEach(f => fetchErrors.push(`${f} → failed`));
+    r.deferred.forEach(f => fetchErrors.push(`${f} → deferred (time budget)`));
   }
+
   const records: AdvantageRecord[] = [];
   const untaggedUrls: string[] = [];
   for (const url of allUrls) {
@@ -695,12 +660,11 @@ async function autoDetectSitemapUrls(
     for (const path of SITEMAP_PATHS) {
       try {
         const sitemapUrl = `https://${domain}${path}`;
-        const res = await fetch(sitemapUrl, {
-          headers: sitemapHeaders(sitemapUrl),
-          signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
-        });
+        // Polite: robots + crawl-delay spacing per host (shared fetcher).
+        const res = await sharedFetcher().get(sitemapUrl, { kind: 'xml', timeoutMs: 8000 });
+        if (res.block) break; // host blocked/paused: stop probing this domain
         if (!res.ok) continue;
-        const xml = await res.text();
+        const xml = res.body;
         const allLocs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
         if (!allLocs.length) continue;
 
@@ -711,9 +675,9 @@ async function autoDetectSitemapUrls(
           ).slice(0, 3);
           for (const sub of subSitemaps) {
             try {
-              const sr = await fetch(sub, { headers: sitemapHeaders(sub), signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined });
+              const sr = await sharedFetcher().get(sub, { kind: 'xml', timeoutMs: 8000 });
               if (!sr.ok) continue;
-              const sxml = await sr.text();
+              const sxml = sr.body;
               const subLocs = [...sxml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
               const cartLocs = subLocs.filter(u => !isNavPage(u));
               if (cartLocs.length > 5) {
@@ -781,6 +745,7 @@ async function runDiscoverSitemap(
   const slug     = dealer.slug;
   const adapterKey = dealer.adapter_key;
   const strategy   = dealer.discovery_strategy;
+  crawlPartial = false;
 
   // Eco's sitemap contains sold history. Never fall through to URL-only discovery.
   if (slug === ECO_SLUG || adapterKey === ECO_ADAPTER) {
@@ -1292,8 +1257,14 @@ async function runDiscoverSitemap(
   }
 
   // Auto-archive: mark active listings that are no longer in the dealer sitemap
-  const archiveResult = await autoArchiveRemovedListings(slug, sitemapUrls, dry_run);
-  archiveResult.summary.forEach(s => result.summary.push(s));
+  // Never archive from a partial crawl (time budget hit / host blocked): absent URLs
+  // may simply not have been fetched yet. A later full run will reconcile.
+  if (crawlPartial) {
+    result.summary.push(`[${slug}] Auto-archive skipped: partial sitemap crawl (will resume next run)`);
+  } else {
+    const archiveResult = await autoArchiveRemovedListings(slug, sitemapUrls, dry_run);
+    archiveResult.summary.forEach(s => result.summary.push(s));
+  }
 }
 
 // ─── Text cleaner: strip HTML whitespace artifacts ─────────────────────────

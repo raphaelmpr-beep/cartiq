@@ -122,6 +122,7 @@ export interface DQListing {
   asking_price: number | null; sale_price: number | null; regular_price: number | null;
   brand: string | null; model: string | null; year: number | null; condition: string | null; seating: number | null;
   last_checked_at: string | null; source_listing_url: string | null; recheck_fail_count?: number | null;
+  price_confidence?: string | null; cartiq_estimated_value?: number | null; valuation_confidence?: string | null;
 }
 export const listingPrice = (l: DQListing) => l.sale_price ?? l.asking_price ?? l.regular_price ?? null;
 

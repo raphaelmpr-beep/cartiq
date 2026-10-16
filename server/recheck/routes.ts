@@ -4,6 +4,7 @@ import { timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "../supabase-admin";
 import { runRecheck, advanceJob, buildQualityReport, fetchAllListingsForQuality } from "./runner";
 import { computeQuality, dealerHealth, outlierIds, listingPrice } from "./core";
+import { priceReview } from "../pricing";
 
 /** Vercel Cron sends `Authorization: Bearer $CRON_SECRET`. Fail closed if unset. */
 export const requireCronSecret: RequestHandler = (req, res, next) => {
@@ -90,10 +91,28 @@ export function registerRecheckRoutes(app: Express, requireAdmin: RequestHandler
         if (!listingPrice(l)) flags.push("missing_price");
         if (outs.has(l.id)) flags.push("price_outlier");
         if (l.source_listing_url && (urls.get(l.source_listing_url) ?? 0) > 1) flags.push("duplicate_url");
+        const rv = priceReview(l as any);
+        if (rv.needsReview) flags.push("price_needs_review");
         return { id: l.id, title: [l.year, l.brand, l.model].filter(Boolean).join(" ") || `#${l.id}`, price: listingPrice(l),
-          condition: l.condition, last_checked_at: l.last_checked_at, age_days: age, source_url: l.source_listing_url, flags };
+          condition: l.condition, last_checked_at: l.last_checked_at, age_days: age, source_url: l.source_listing_url, flags,
+          price_review_reasons: priceReview(l as any).reasons };
       });
       res.json({ dealer: req.params.slug, items });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Price step 3: admin queue of active listings whose price needs human review.
+  app.get("/api/admin/price-review", requireAdmin, async (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      const all = await fetchAllListingsForQuality();
+      const items = all.map(l => ({ l, rv: priceReview(l as any) })).filter(x => x.rv.needsReview).map(({ l, rv }) => ({
+        id: l.id, dealer: l.sync_source, title: [l.year, l.brand, l.model].filter(Boolean).join(" ") || `#${l.id}`,
+        price: listingPrice(l), market_value: (l as any).cartiq_estimated_value ?? null, reasons: rv.reasons, source_url: l.source_listing_url,
+      }));
+      const by_reason: Record<string, number> = {};
+      for (const it of items) for (const r of it.reasons) by_reason[r] = (by_reason[r] ?? 0) + 1;
+      res.json({ total_active: all.length, needs_review: items.length, by_reason, items });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
