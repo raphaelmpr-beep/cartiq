@@ -1,3 +1,4 @@
+import { safeChemParam } from "../shared/battery";
 /**
  * CartIQ Storage — Supabase/Postgres backend
  * All methods are async. Routes call await storage.method().
@@ -102,6 +103,21 @@ function check<T>(result: { data: T; error: any }): T {
   return result.data;
 }
 
+// New battery columns (20261016c) may not exist yet: detect once, fall back to legacy.
+const batteryCols: { ok: boolean | null } = { ok: null };
+const BASE_COMP_SEL = "asking_price,price_confidence,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available,battery_ah";
+function compSelect() { return batteryCols.ok === false ? BASE_COMP_SEL : BASE_COMP_SEL + ",battery_chemistry,battery_kwh,battery_voltage"; }
+export function isMissingColumn(err: any): boolean {
+  const m = `${err?.code ?? ""} ${err?.message ?? ""}`;
+  return /42703|PGRST204|does not exist|Could not find the/i.test(m) && /battery_(chemistry|kwh|voltage)/i.test(m);
+}
+async function withBatteryFallback<R extends { error: any }>(run: () => PromiseLike<R>): Promise<R> {
+  const r = await run();
+  if (r.error && batteryCols.ok !== false && isMissingColumn(r.error)) { batteryCols.ok = false; return await run(); }
+  if (!r.error && batteryCols.ok === null) batteryCols.ok = true;
+  return r;
+}
+
 // ─── SupabaseStorage ──────────────────────────────────────────────────────────
 class SupabaseStorage implements IStorage {
 
@@ -135,7 +151,12 @@ class SupabaseStorage implements IStorage {
       if (filters.state)       q = q.eq("state", filters.state);
       if (filters.brand)       q = q.ilike("brand", filters.brand as string);
       if (filters.sellerType)  q = q.eq("seller_type", filters.sellerType);
-      if (filters.batteryType) q = q.eq("battery_type", filters.batteryType);
+      if (filters.batteryType) {
+        const bt = safeChemParam(filters.batteryType);
+        if (!bt) q = q.eq("battery_type", "__none__");
+        else if (batteryCols.ok !== false) q = q.or(`battery_chemistry.eq.${bt},and(battery_chemistry.is.null,battery_type.eq.${bt})`);
+        else q = q.eq("battery_type", bt);
+      }
       if (filters.dealRating)  q = q.eq("deal_rating", filters.dealRating);
       if (normalizeWarranty(filters.warrantyIncluded) === "yes") q = q.filter("warranty_included", "imatch", WARRANTY_YES_PATTERN);
       if (filters.minPrice)    q = q.gte("asking_price", filters.minPrice);
@@ -150,7 +171,7 @@ class SupabaseStorage implements IStorage {
     let offset = 0;
     while (all.length < hardLimit) {
       const to = Math.min(offset + PAGE_SIZE - 1, hardLimit - 1);
-      const { data, error } = await buildQuery(offset, to);
+      const { data, error } = await withBatteryFallback(() => buildQuery(offset, to));
       if (error) throw new Error(error.message);
       const batch = (data ?? []) as Listing[];
       all = all.concat(batch);
@@ -278,12 +299,12 @@ class SupabaseStorage implements IStorage {
     seating?: number | null,
     powerType?: string | null
   ): Promise<any[]> {
-    const sel = "asking_price,price_confidence,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available";
+    const sel = compSelect();
 
     const buildQuery = (matchSeating: boolean, matchPower: boolean) => {
       let q = db()
         .from("listings")
-        .select(sel)
+        .select(compSelect())
         .eq("status", "active")
         .eq("public_listing", true)
         .eq("brand", brand)
@@ -308,15 +329,15 @@ class SupabaseStorage implements IStorage {
     };
 
     // Tier A: exact seating bucket + exact power type
-    const { data: tierA } = await buildQuery(true, true);
+    const { data: tierA } = await withBatteryFallback(() => buildQuery(true, true));
     if ((tierA ?? []).length >= 3) return (tierA ?? []) as any[];
 
     // Tier B: exact seating bucket, any power type
-    const { data: tierB } = await buildQuery(true, false);
+    const { data: tierB } = await withBatteryFallback(() => buildQuery(true, false));
     if ((tierB ?? []).length >= 3) return (tierB ?? []) as any[];
 
     // Tier C: any seating, any power (original behaviour — widest net)
-    const { data: tierC } = await buildQuery(false, false);
+    const { data: tierC } = await withBatteryFallback(() => buildQuery(false, false));
     return (tierC ?? []) as any[];
   }
 
@@ -329,12 +350,12 @@ class SupabaseStorage implements IStorage {
     seating?: number | null,
     powerType?: string | null
   ): Promise<any[]> {
-    const sel = "asking_price,price_confidence,year,power_type,battery_type,seating,lifted,warranty_included,charger_included,delivery_available";
+    const sel = compSelect();
 
     const buildQuery = (matchSeating: boolean, matchPower: boolean) => {
       let q = db()
         .from("listings")
-        .select(sel)
+        .select(compSelect())
         .eq("status", "active")
         .eq("public_listing", true)
         .eq("brand", brand)
@@ -355,13 +376,13 @@ class SupabaseStorage implements IStorage {
       return q;
     };
 
-    const { data: tierA } = await buildQuery(true, true);
+    const { data: tierA } = await withBatteryFallback(() => buildQuery(true, true));
     if ((tierA ?? []).length >= 3) return (tierA ?? []) as any[];
 
-    const { data: tierB } = await buildQuery(true, false);
+    const { data: tierB } = await withBatteryFallback(() => buildQuery(true, false));
     if ((tierB ?? []).length >= 3) return (tierB ?? []) as any[];
 
-    const { data: tierC } = await buildQuery(false, false);
+    const { data: tierC } = await withBatteryFallback(() => buildQuery(false, false));
     return (tierC ?? []) as any[];
   }
 
