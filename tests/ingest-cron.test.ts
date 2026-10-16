@@ -1,7 +1,8 @@
 // Ingest cron + stall alert. No network, no DB: all deps are fakes.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateStall, runIngestCron, STALL_DAYS, type IngestDeps } from "../script/dealer-sync/ingest-cron";
+import { readFileSync } from "node:fs";
+import { evaluateStall, runIngestCron, STALL_DAYS, DEFAULT_PENDING_MAX_AGE_HOURS, pendingMaxAgeHours, type IngestDeps } from "../script/dealer-sync/ingest-cron";
 import { sendOwnerAlert } from "../script/dealer-sync/owner-alert";
 import { INGEST_OWNER } from "../script/dealer-sync/owner";
 import vercel from "../vercel.json" with { type: "json" };
@@ -62,7 +63,7 @@ test("no timestamp found (or read error) alerts", async () => {
 test("email path: skips without config, posts to Resend with owner address, never logs key", async () => {
   assert.equal((await sendOwnerAlert({ subject: "x", text: "y" }, {})).skipped !== undefined, true);
   let seen: any;
-  const r = await sendOwnerAlert({ subject: "x", text: "y" }, { RESEND_API_KEY: "k", OWNER_ALERT_EMAIL: "o@example.com" },
+  const r = await sendOwnerAlert({ subject: "x", text: "y" }, { GCQ_RESEND_API_KEY: "k", OWNER_ALERT_EMAIL: "o@example.com" },
     async (url, init) => { seen = { url, init }; return { ok: true, status: 200 }; });
   assert.equal(r.sent, true); assert.equal(seen.url, "https://api.resend.com/emails");
   assert.deepEqual(JSON.parse(seen.init.body).to, ["o@example.com"]);
@@ -70,4 +71,56 @@ test("email path: skips without config, posts to Resend with owner address, neve
 });
 test("vercel.json registers the cron on /api/cron/ingest", () => {
   assert.ok((vercel as any).crons.some((c: any) => c.path === "/api/cron/ingest"));
+});
+
+test("Resend: uses GCQ_RESEND_API_KEY only (TAW's RESEND_API_KEY ignored) and returns message id", async () => {
+  let calls = 0;
+  const f = async () => { calls++; return { ok: true, status: 200, json: async () => ({ id: "re_123" }) }; };
+  const skip = await sendOwnerAlert({ subject: "x", text: "y" }, { RESEND_API_KEY: "taw", OWNER_ALERT_EMAIL: "o@example.com" }, f);
+  assert.equal(skip.sent, false); assert.equal(calls, 0); assert.match(skip.skipped!, /GCQ_RESEND_API_KEY/);
+  const r = await sendOwnerAlert({ subject: "x", text: "y" }, { GCQ_RESEND_API_KEY: "k", OWNER_ALERT_EMAIL: "o@example.com" }, f);
+  assert.equal(r.messageId, "re_123");
+  const bad = await sendOwnerAlert({ subject: "x", text: "y" }, { GCQ_RESEND_API_KEY: "k", OWNER_ALERT_EMAIL: "o@example.com" },
+    async () => ({ ok: false, status: 500, json: async () => ({ id: "nope" }) }));
+  assert.equal(bad.sent, false); assert.equal(bad.messageId, null);
+});
+test("run log records alert_message_id; null when no alert or send failed", async () => {
+  const a = deps({ latestNewListingAt: async () => daysAgo(9), sendAlert: async () => ({ sent: true, messageId: "re_9" }) });
+  const r = await runIngestCron("Bearer s", a.d);
+  assert.ok(r.status === "RAN"); assert.deepEqual(r.runLog, { run_ok: true, error_summary: null, alert_sent: true, alert_message_id: "re_9" });
+  const b = deps();
+  const r2 = await runIngestCron("Bearer s", b.d);
+  assert.ok(r2.status === "RAN"); assert.equal(r2.runLog.alert_sent, false); assert.equal(r2.runLog.alert_message_id, null);
+  const c = deps({ latestNewListingAt: async () => daysAgo(9), sendAlert: async () => ({ sent: true }) });
+  const r3 = await runIngestCron("Bearer s", c.d);
+  assert.ok(r3.status === "RAN"); assert.equal(r3.runLog.alert_sent && r3.runLog.alert_message_id === null, true); // SRE monitor case
+});
+test("oldest-pending alert: names Raphael, threshold default 72h and configurable", async () => {
+  assert.equal(pendingMaxAgeHours({}), DEFAULT_PENDING_MAX_AGE_HOURS);
+  assert.equal(DEFAULT_PENDING_MAX_AGE_HOURS, 72);
+  assert.equal(pendingMaxAgeHours({ PENDING_MAX_AGE_HOURS: "24" }), 24);
+  assert.equal(pendingMaxAgeHours({ PENDING_MAX_AGE_HOURS: "junk" }), 72);
+  assert.equal(evaluateStall({ now: NOW, lastNewListingAt: daysAgo(1), runOk: true, oldestPendingAt: daysAgo(2) }).alert, false);
+  const a = deps({ oldestPendingAt: async () => daysAgo(4) });
+  await runIngestCron("Bearer s", a.d);
+  assert.equal(a.calls.alerts.length, 1); assert.match(a.calls.alerts[0], /oldest pending_imports.*96\.0 h \(> 72 h\); reviewer: Raphael Martinez/);
+  const b = deps({ oldestPendingAt: async () => daysAgo(2) }, { PENDING_MAX_AGE_HOURS: "24" });
+  await runIngestCron("Bearer s", b.d); assert.match(b.calls.alerts[0], /> 24 h/);
+  const c = deps({ oldestPendingAt: async () => { throw new Error("db"); } });
+  await runIngestCron("Bearer s", c.d); assert.equal(c.calls.alerts.length, 0);
+});
+test("disabled scheduler never reads pending queue", async () => {
+  let n = 0; const { d } = deps({ oldestPendingAt: async () => { n++; return daysAgo(30); } });
+  d.env = { CRON_SECRET: "s" };
+  assert.equal((await runIngestCron("Bearer s", d)).status, "DISABLED"); assert.equal(n, 0);
+});
+test("SQL draft: message id column, revokes, index, check, UNKNOWN partial index", () => {
+  const sql = readFileSync(new URL("../supabase/drafts/ingest_cron_runs.DRAFT.sql", import.meta.url), "utf8");
+  assert.match(sql, /alert_message_id text/);
+  assert.match(sql, /revoke all on public\.ingest_cron_runs from anon, authenticated;/);
+  assert.match(sql, /revoke all on sequence public\.ingest_cron_runs_id_seq from anon, authenticated;/);
+  assert.match(sql, /\(started_at desc\)/);
+  assert.match(sql, /check \(finished_at is null or finished_at >= started_at\)/);
+  assert.match(sql, /pending_imports \(found_at\) where status = 'pending'/);
+  assert.match(sql, /UNKNOWN/); assert.match(sql, /NOT APPLIED/);
 });

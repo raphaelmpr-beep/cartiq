@@ -1604,6 +1604,14 @@ ${pageUrls.join("\n")}
         const ts = [(p.data?.[0] as any)?.found_at, (l.data?.[0] as any)?.created_at].filter(Boolean).map((t) => new Date(t).getTime());
         return ts.length ? new Date(Math.max(...ts)) : null;
       },
+      oldestPendingAt: async () => {
+        const { createClient } = await import("@supabase/supabase-js");
+        const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_KEY!);
+        // Read-only. Column/status names (found_at, status='pending') are UNKNOWN until the Database Engineer confirms.
+        const r = await db.from("pending_imports").select("found_at").eq("status", "pending").order("found_at", { ascending: true }).limit(1);
+        const t = (r.data?.[0] as any)?.found_at;
+        return t ? new Date(t) : null;
+      },
       sendAlert: (m) => sendOwnerAlert(m),
     });
     if (result.status === "UNAUTHORIZED") return res.status(401).json({ error: "Unauthorized" });
