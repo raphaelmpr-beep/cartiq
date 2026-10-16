@@ -4,7 +4,9 @@
     {
       "src": "dist/vercel-handler.cjs",
       "use": "@vercel/node",
-      "config": { "maxLambdaSize": "50mb" }
+      "config": {
+        "maxLambdaSize": "50mb"
+      }
     },
     {
       "src": "dist/public/assets/**",
@@ -24,24 +26,68 @@
     }
   ],
   "routes": [
-    { "src": "/api/(.*)",              "dest": "dist/vercel-handler.cjs" },
-    { "src": "/sitemap.xml",           "dest": "dist/vercel-handler.cjs" },
-    { "src": "/sitemap-pages.xml",     "dest": "dist/vercel-handler.cjs" },
-    { "src": "/sitemap-city-pages.xml","dest": "dist/vercel-handler.cjs" },
-    { "src": "/sitemap-dealers.xml",   "dest": "dist/vercel-handler.cjs" },
-    { "src": "/sitemap-listings.xml",  "dest": "dist/vercel-handler.cjs" },
-    { "src": "/sitemap-listings-([0-9]+)\\.xml", "dest": "dist/vercel-handler.cjs" },
-    { "src": "/robots.txt",            "dest": "dist/vercel-handler.cjs" },
-    { "src": "/llms.txt",              "dest": "dist/vercel-handler.cjs" },
-    { "src": "/assets/(.*)", "dest": "dist/public/assets/$1" },
-    { "src": "/favicon.png", "dest": "dist/public/favicon.png" },
-    { "src": "/og-image.png","dest": "dist/public/og-image.png" },
-    { "src": "/fonts/(.*)", "dest": "dist/public/fonts/$1" },
-    { "src": "/(.*)",        "dest": "dist/vercel-handler.cjs" }
+    {
+      "src": "/api/(.*)",
+      "dest": "dist/vercel-handler.cjs"
+    },
+    {
+      "src": "/sitemap.xml",
+      "dest": "dist/vercel-handler.cjs"
+    },
+    {
+      "src": "/sitemap-pages.xml",
+      "dest": "dist/vercel-handler.cjs"
+    },
+    {
+      "src": "/sitemap-city-pages.xml",
+      "dest": "dist/vercel-handler.cjs"
+    },
+    {
+      "src": "/sitemap-dealers.xml",
+      "dest": "dist/vercel-handler.cjs"
+    },
+    {
+      "src": "/sitemap-listings.xml",
+      "dest": "dist/vercel-handler.cjs"
+    },
+    {
+      "src": "/sitemap-listings-([0-9]+)\\.xml",
+      "dest": "dist/vercel-handler.cjs"
+    },
+    {
+      "src": "/robots.txt",
+      "dest": "dist/vercel-handler.cjs"
+    },
+    {
+      "src": "/llms.txt",
+      "dest": "dist/vercel-handler.cjs"
+    },
+    {
+      "src": "/assets/(.*)",
+      "dest": "dist/public/assets/$1"
+    },
+    {
+      "src": "/favicon.png",
+      "dest": "dist/public/favicon.png"
+    },
+    {
+      "src": "/og-image.png",
+      "dest": "dist/public/og-image.png"
+    },
+    {
+      "src": "/fonts/(.*)",
+      "dest": "dist/public/fonts/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "dist/vercel-handler.cjs"
+    }
   ],
   "crons": [
-    { "path": "/api/cron/recheck",      "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/data-quality", "schedule": "15 7 * * *" }
+    {
+      "path": "/api/cron/ingest",
+      "schedule": "0 11 * * *"
+    }
   ],
   "env": {
     "NODE_ENV": "production",
