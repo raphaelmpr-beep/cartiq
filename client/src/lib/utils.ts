@@ -53,6 +53,7 @@ export function batteryTypeLabel(bt?: string | null): string {
   switch (bt) {
     case "lithium": return "Lithium";
     case "lead_acid": return "Lead-Acid";
+    case "agm": return "AGM (lead-acid)";
     case "gas": return "Gas";
     default: return "";
   }

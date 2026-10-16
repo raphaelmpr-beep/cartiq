@@ -43,6 +43,9 @@ export function syncLogStatus(it: Pick<RecheckItem, "action" | "priceUpdate">): 
   return "error";
 }
 
+import { extractListingAttrs } from "../sync/attr-extract";
+import { buildAttrUpdate, applyAttrUpdate } from "../sync/attr-apply";
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSummary> {
@@ -132,6 +135,10 @@ export async function runRecheck(opts: RecheckOptions = {}): Promise<RecheckSumm
         synced_at: now,
       });
       if (lErr) console.warn(`[recheck] sync_log insert failed for listing ${r.id}: ${lErr.message}`);
+      // Page-stated battery/warranty facts (main listing block only). Separate, tolerant write.
+      if (result.status === "alive" && html) {
+        try { await applyAttrUpdate(db, r.id, buildAttrUpdate(extractListingAttrs(html), url, now)); } catch { /* never fail the re-check */ }
+      }
     }
     return res.block && res.block !== "robots_disallow" ? { ...item, block: res.block, retryAfterMs: res.retryAfterMs } : item;
   }
