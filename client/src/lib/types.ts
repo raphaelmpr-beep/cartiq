@@ -39,6 +39,13 @@ export interface Listing {
   powerType?: string;
   batteryType?: BatteryType;
   batteryAh?: number;
+  batteryChemistry?: "lithium" | "lead_acid" | "agm" | null;
+  batteryVoltage?: number | null;
+  batteryKwh?: number | null;
+  batteryBrand?: string | null;
+  warrantySource?: string | null;
+  warrantySourceUrl?: string | null;
+  warrantySourceQuote?: string | null;
   batteryAgeMonths?: number;
   seating?: number;
   lifted?: boolean;
@@ -87,6 +94,8 @@ export interface Dealer {
   defaultWarrantyIncluded?: boolean;
   defaultWarrantyMonths?: number;
   defaultWarrantyNotes?: string;
+  warrantyPageUrl?: string | null;
+  warrantyProgramQuote?: string | null;
   notes?: string;
 }
 

@@ -139,6 +139,8 @@ export default function ListingDetail() {
     if (listing.seating)     specs.push(`${listing.seating}-passenger`);
     if (listing.batteryType && listing.batteryType !== "unknown") {
       specs.push(batteryTypeLabel(listing.batteryType));
+    } else if (listing.batteryChemistry) {
+      specs.push(batteryTypeLabel(listing.batteryChemistry as any));
     } else if (listing.powerType && listing.powerType !== "unknown") {
       specs.push(listing.powerType);
     }
@@ -265,8 +267,9 @@ export default function ListingDetail() {
               <CardContent className="space-y-3 text-sm">
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    ["Battery Type", batteryTypeLabel(listing.batteryType)],
-                    ["Battery Size", listing.batteryAh ? `${listing.batteryAh}Ah` : "Unknown"],
+                    ["Battery Type", batteryTypeLabel((listing.batteryType && listing.batteryType !== "unknown" ? listing.batteryType : listing.batteryChemistry || listing.batteryType) as any)],
+                    ["Battery Size", listing.batteryAh ? `${listing.batteryVoltage ? `${listing.batteryVoltage}V ` : ""}${listing.batteryAh}Ah${listing.batteryKwh ? ` (${listing.batteryKwh} kWh)` : ""}` : listing.batteryKwh ? `${listing.batteryKwh} kWh` : "Unknown"],
+                    ...(listing.batteryBrand ? [["Battery Brand", listing.batteryBrand]] : []),
                     ["Battery Age", listing.batteryAgeMonths ? `${listing.batteryAgeMonths} months` : "Unknown"],
                     ["Power Type", listing.powerType || "Unknown"],
                     ["Seating", listing.seating ? `${listing.seating} passengers` : "Unknown"],
@@ -303,6 +306,13 @@ export default function ListingDetail() {
               <CardHeader><CardTitle className="text-base">Warranty</CardTitle></CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <WarrantyDetails {...listing} />
+                {listing.warrantySource === "listing_page" && listing.warrantySourceQuote && (
+                  <div className="pt-2 border-t text-xs text-muted-foreground" data-testid="unit-warranty-quote">
+                    <p className="font-medium text-foreground">From the dealer's listing page</p>
+                    <blockquote className="border-l-2 pl-2 italic break-words">"{listing.warrantySourceQuote}"</blockquote>
+                    {listing.warrantySourceUrl && <a className="underline" href={listing.warrantySourceUrl} target="_blank" rel="nofollow noopener noreferrer">Source</a>}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -356,6 +366,14 @@ export default function ListingDetail() {
                       <p className="text-muted-foreground">Dealer-wide coverage not confirmed. Check the unit-specific terms above.</p>
                     )}
                     {dealer.defaultWarrantyNotes && <p className="text-muted-foreground text-xs break-words mt-2">{dealer.defaultWarrantyNotes}</p>}
+                    {dealer.warrantyProgramQuote && dealer.warrantyPageUrl && (
+                      <div className="mt-2 text-xs text-muted-foreground" data-testid="dealer-warranty-program">
+                        <p className="font-medium text-foreground">Dealer warranty program</p>
+                        <blockquote className="border-l-2 pl-2 italic break-words">"{dealer.warrantyProgramQuote}"</blockquote>
+                        <a className="underline" href={dealer.warrantyPageUrl} target="_blank" rel="nofollow noopener noreferrer">Source: dealer website</a>
+                        <p className="mt-1">Program wording quoted from the dealer's site. It does not confirm this cart is covered.</p>
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground mt-2">Dealer policy does not automatically apply to every cart.</p>
                   </div>
                 </CardContent>
