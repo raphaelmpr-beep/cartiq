@@ -17,7 +17,7 @@ import { normalizeWarranty } from "@shared/warranty";
 import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText } from "@/lib/utils";
 import type { Listing, Dealer } from "@/lib/types";
 import { apiRequest } from "@/lib/queryClient";
-import { resolveGoneMode, clientNoindex, showSoldBanner } from "@shared/listing-lifecycle";
+import { resolveGoneMode, clientNoindex, showSoldBanner, showDealClaims, showLeadActions, similarCarts, SIMILAR_MIN } from "@shared/listing-lifecycle";
 
 const GONE_MODE = resolveGoneMode(import.meta.env.VITE_LISTING_GONE_MODE as string | undefined);
 
@@ -203,7 +203,7 @@ export default function ListingDetail() {
               <ImageCarousel images={allImages} alt={listing.title} aspectClass="aspect-[16/7]" />
               {/* Overlay badges */}
               <div className="absolute top-3 left-3 flex gap-2 z-20">
-                <DealBadge rating={listing.dealRating} />
+                {showDealClaims(listing) && <DealBadge rating={listing.dealRating} />}
                 <SourceBadge sellerType={listing.sellerType} sourceType={listing.sourceType} retailerName={listing.retailerName} />
               </div>
               <div className="absolute top-3 right-3 flex gap-1.5 z-20">
@@ -246,10 +246,12 @@ export default function ListingDetail() {
                 {(!listing.salePrice || listing.sellerType !== "retail") && (
                   <div className="text-2xl font-bold">{formatPrice(effectivePrice)}</div>
                 )}
+                {showDealClaims(listing) && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">GolfCartIQ Value</span>
                   <span className="font-semibold">{formatPrice(listing.cartiqEstimatedValue)}</span>
                 </div>
+                )}
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Delivery Cost</span>
                   <DeliveryCostBadge deliveryIncluded={listing.deliveryIncluded} deliveryCost={listing.estimatedDeliveryCost} deliveryAvailable={listing.deliveryAvailable} />
@@ -260,7 +262,9 @@ export default function ListingDetail() {
                     <span className="font-bold">{formatPrice(listing.totalDeliveredCost)}</span>
                   </div>
                 )}
+                {showDealClaims(listing) && (
                 <div className={`text-base font-bold ${dealDeltaColor(listing.dealDelta)}`}>{dealDeltaText(listing.dealDelta)}</div>
+                )}
                 {listing.sellerType === "retail" && listing.lastVerifiedAt && (
                   <p className="text-xs text-muted-foreground">Price/availability last verified: {listing.lastVerifiedAt}</p>
                 )}
@@ -442,7 +446,7 @@ export default function ListingDetail() {
 
           {/* Sidebar */}
           <div className="space-y-5">
-            <MarketCompareCard listing={listing} />
+            {showDealClaims(listing) && <MarketCompareCard listing={listing} />}
             <WiseScoreBadge score={listing.buyerScore} className="text-lg" />
             <a href="/how-it-works" className="block text-xs text-green-700 hover:underline text-right -mt-3">
               How is this score calculated? →
@@ -461,6 +465,7 @@ export default function ListingDetail() {
                 </span>
               </div>
 
+              {showLeadActions(listing) ? (<>
               {listing.sellerPhone && (
                 <a
                   href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}
@@ -506,6 +511,11 @@ export default function ListingDetail() {
                 ) : (
                   <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Contact Seller</Button>
                 )}
+              </div>
+              </>) : (
+                <p className="text-sm text-muted-foreground" data-testid="text-no-longer-available">No longer available from this seller.</p>
+              )}
+              <div className="space-y-2 pt-1">
                 <Link href="/deal-checker"><Button variant="outline" className="w-full" data-testid="btn-check-similar">Check Similar Deals</Button></Link>
               </div>
             </div>
@@ -522,12 +532,16 @@ function SoldBanner({ listing }: { listing: Listing }) {
   if (listing.brand) qs.set("brand", String(listing.brand));
   if (listing.state) qs.set("state", String(listing.state));
   const { data: similar } = useQuery<Listing[]>({ queryKey: [`/api/listings?${qs.toString()}`], retry: false });
-  const items = (similar ?? []).filter(l => l.id !== listing.id).slice(0, 6);
+  // AC4: live (active+public) golf carts only, never this unit or an e-bike.
+  const items = similarCarts(listing, similar ?? [], 6);
   return (
     <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4" data-testid="banner-listing-sold">
       <p className="font-semibold text-amber-900">This golf cart is no longer available from the dealer.</p>
       <p className="text-sm text-amber-800">Price and details are shown as last confirmed. Similar carts for sale:</p>
-      {items.length > 0 && (
+      {items.length < SIMILAR_MIN && (
+        <Link href={listing.brand ? `/search?brand=${encodeURIComponent(String(listing.brand))}` : "/search"} className="mt-2 inline-block text-sm underline" data-testid="link-similar-fallback">See more {listing.brand ?? "golf"} carts for sale</Link>
+      )}
+      {items.length >= SIMILAR_MIN && (
         <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {items.map(l => (
             <li key={l.id}>

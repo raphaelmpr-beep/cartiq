@@ -77,7 +77,9 @@ const fakeFetch = (map: Record<string, { status: number; url?: string; body?: st
   return { status: hit.status, ok: hit.status < 400, url: hit.url ?? u, headers: new Headers((hit as any).headers ?? {}), text: async () => hit.body ?? '' } as any;
 }) as any;
 
-test('runner: dry run makes no writes; live run writes transitions + sync_log', async () => {
+test('runner: dry run makes no writes; live run writes transitions + sync_log (LIVE_FLAG_ACTION=auto_hide)', async () => {
+  const prevFlag = process.env.LIVE_FLAG_ACTION; process.env.LIVE_FLAG_ACTION = 'auto_hide';
+  try {
   const rows = [
     { id: 1, sync_source: 'a', source_listing_url: 'https://a.com/cart/1', recheck_fail_count: 0 },
     { id: 2, sync_source: 'a', source_listing_url: 'https://a.com/cart/2', recheck_fail_count: 1 },
@@ -95,6 +97,17 @@ test('runner: dry run makes no writes; live run writes transitions + sync_log', 
   assert.equal(upd(2).status, 'archived'); assert.equal(upd(2).public_listing, false);
   assert.equal(upd(3).recheck_fail_count, 1); assert.equal(upd(3).status, undefined); assert.equal(upd(3).last_checked_at, undefined);
   assert.equal(w2.filter(x => x.table === 'sync_log').length, 3);
+  } finally { if (prevFlag === undefined) delete process.env.LIVE_FLAG_ACTION; else process.env.LIVE_FLAG_ACTION = prevFlag; }
+});
+test('runner: default LIVE_FLAG_ACTION=queue_review never hides a confirmed-dead listing', async () => {
+  delete process.env.LIVE_FLAG_ACTION;
+  const rows = [{ id: 2, sync_source: 'a', source_listing_url: 'https://a.com/cart/2', recheck_fail_count: 1 }];
+  const f = fakeFetch({ 'https://a.com/cart/2': { status: 404 } });
+  const w: any[] = [];
+  const s = await runRecheck({ dryRun: false, db: fakeDb(rows, w), fetchImpl: f, timeBudgetMs: 60000, sleepImpl: async () => {} });
+  assert.equal(s.archived, 0); assert.equal(s.needs_review, 1);
+  const u = w.find(x => x.op === 'update' && x.id === 2).v;
+  assert.equal(u.status, undefined); assert.equal(u.public_listing, undefined);
 });
 test('runner: robots disallow skips fetch', async () => {
   const rows = [{ id: 9, sync_source: 'c', source_listing_url: 'https://c.com/listing/9', recheck_fail_count: 0 }];

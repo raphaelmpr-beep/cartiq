@@ -88,3 +88,35 @@ export function isGolfCartListing(l: { title?: string | null; brand?: string | n
   if (l.brand && NON_CART_MODEL_RE.test(l.brand.trim()) && NON_CART_DENAGO_MODELS.test(String(l.model ?? l.title ?? ""))) return false;
   return true;
 }
+
+// ─── Gone-listing UI guards (Inspector AC, PR #49). User-visible only; apply in EVERY gone mode. ───
+type LiveLike = LifecycleLike & { public_listing?: boolean | null; id?: number | string | null; title?: string | null; brand?: string | null; model?: string | null; seats?: number | null; state?: string | null; city?: string | null };
+/** Active+public, accepting camelCase (client) or snake_case (server rows). */
+export function isLiveListing(l: LiveLike): boolean {
+  const pub = l.publicListing ?? l.public_listing;
+  return String(l.status ?? "active") === "active" && pub !== false;
+}
+/** Deal badge, "Great/Good Deal", "$X Below Market", GolfCartIQ Value: live listings only, any mode. */
+export function showDealClaims(l: LiveLike): boolean { return isLiveListing(l); }
+/** Contact/Call/Quote/email/unit-page lead actions: live listings only, any mode. */
+export function showLeadActions(l: LiveLike): boolean { return isLiveListing(l); }
+/** Public lists (search, hot deals, similar): live golf carts only. */
+export function filterLivePublic<T extends LiveLike>(rows: T[]): T[] {
+  return rows.filter(r => isLiveListing(r) && isGolfCartListing(r));
+}
+/** Similar carts for a listing: live, non-self, golf carts; same brand/seats and same state ranked first. */
+export function similarCarts<T extends LiveLike>(current: LiveLike, pool: T[], max = 6): T[] {
+  const norm = (s: unknown) => String(s ?? "").trim().toLowerCase();
+  const score = (r: T) =>
+    (norm(r.brand) && norm(r.brand) === norm(current.brand) ? 2 : 0) +
+    (r.seats != null && r.seats === current.seats ? 1 : 0) +
+    (norm(r.state) && norm(r.state) === norm(current.state) ? 2 : 0);
+  return filterLivePublic(pool)
+    .filter(r => r.id == null || String(r.id) !== String(current.id))
+    .map((r, i) => ({ r, i, s: score(r) }))
+    .sort((a, b) => b.s - a.s || a.i - b.i)
+    .slice(0, max)
+    .map(x => x.r);
+}
+/** AC4: fewer than 3 matches -> show a city/brand link instead of the block. */
+export const SIMILAR_MIN = 3;
