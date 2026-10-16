@@ -16,16 +16,23 @@ export function kwhBucket(k: number | null): string | null {
   if (!k) return null;
   return k < 4 ? "<4" : k <= 6 ? "4-6" : ">6";
 }
-// Group comps by battery only when the subject's battery is known and enough like-for-like comps exist.
+// Battery-aware comps (only when enough like comps exist, else previous behaviour):
+//   capacity known (kWh, or V×Ah) -> same kWh bucket (and same chemistry if known)
+//   chemistry only (e.g. "lithium") -> same chemistry
+//   unknown -> all comps
 export function matchBatteryComps<T extends Record<string, any>>(subject: Record<string, any>, comps: T[], min = 3): T[] {
+  if (comps.length < min) return comps;
   const chem = effChemistry(subject);
-  if (!chem || comps.length < min) return comps;
-  const same = comps.filter(c => effChemistry(c) === chem);
-  if (same.length < min) return comps;
   const b = kwhBucket(effKwh(subject));
-  if (!b) return same;
-  const sameK = same.filter(c => kwhBucket(effKwh(c)) === b);
-  return sameK.length >= min ? sameK : same;
+  if (b) {
+    const sameK = comps.filter(c => kwhBucket(effKwh(c)) === b && (!chem || !effChemistry(c) || effChemistry(c) === chem));
+    if (sameK.length >= min) return sameK;
+  }
+  if (chem) {
+    const same = comps.filter(c => effChemistry(c) === chem);
+    if (same.length >= min) return same;
+  }
+  return comps;
 }
 export function safeChemParam(v: unknown): string | null {
   const s = String(v ?? "").toLowerCase();
