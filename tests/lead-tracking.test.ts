@@ -8,7 +8,8 @@ import {
   LEAD_CONSENT_TEXT, LEAD_SUCCESS_TEXT, LEAD_MIN_FILL_MS,
 } from "../shared/leadTracking";
 import { registerLeadRoutes } from "../server/leads/routes";
-import { aggregateMonthly, monthBounds, type LeadsStore } from "../server/leads/store";
+import { aggregateMonthly, monthBounds, memoryRateLimits, windowStart, type LeadsStore } from "../server/leads/store";
+import { volumeAlert } from "../shared/leadTracking";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
 const T0 = 1_760_000_000_000;
@@ -84,13 +85,17 @@ test("consent and success copy (Inspector requirements)", () => {
 
 function memStore() {
   const events: any[] = [], leads: any[] = [];
+  const fail = { event: false, lead: false };
   const store: LeadsStore = {
-    async getPublicListing(id) { return id === 404 ? null : { listingId: id, dealerId: 9 }; },
-    async insertEvent(e) { events.push(e); },
-    async insertLead(l) { leads.push(l); },
+    async getPublicListing(id) { return id === 404 ? null : { listingId: id, dealerId: id === 12 ? null : 9 }; },
+    async insertEvent(e) { if (fail.event) throw new Error("db down"); events.push(e); },
+    async insertLead(l) { if (fail.lead) throw new Error("db down"); leads.push(l); },
+    hitRateLimit: memoryRateLimits(),
+    async cleanup() { return { leads: 1, events: 2, rate_limits: 3 }; },
+    async dailyEventCounts() { return Array.from({ length: 15 }, (_, i) => ({ day: `2026-10-${String(i + 1).padStart(2, "0")}`, events: i === 14 ? 1000 : 100 })); },
     async monthlyReport(m) { return aggregateMonthly(m, events.map((e) => ({ event_type: e.eventType, dealer_id: e.dealerId })), leads.map((l) => ({ dealer_id: l.dealerId })), new Map([[9, "D9"]])); },
   };
-  return { store, events, leads };
+  return { store, events, leads, fail };
 }
 
 async function withApp(enabled: boolean, fn: (base: string, m: ReturnType<typeof memStore>, clock: { t: number }) => Promise<void>) {
@@ -99,7 +104,9 @@ async function withApp(enabled: boolean, fn: (base: string, m: ReturnType<typeof
   const m = memStore();
   const clock = { t: T0 };
   const admin = (req: any, res: any, next: any) => (req.headers["x-admin-token"] === "pw" ? next() : res.status(401).end());
-  const registered = registerLeadRoutes(app, admin, { enabled, store: () => m.store, now: () => clock.t, ipSalt: "s" });
+  const logs: string[] = [];
+  const registered = registerLeadRoutes(app, admin, { enabled, store: () => m.store, now: () => clock.t, ipSalt: "s", cronSecret: "cs", log: (msg) => logs.push(msg) });
+  (m as any).logs = logs;
   assert.equal(registered, enabled);
   app.use((_req, res) => res.status(404).send("fallthrough"));
   const srv = app.listen(0);
@@ -188,7 +195,16 @@ test("draft SQL: RLS on, no policies, grants revoked, report columns", () => {
     assert.match(ddl, new RegExp(`alter table public\\.${t}\\s+enable row level security`));
     assert.match(ddl, new RegExp(`revoke all on table public\\.${t}\\s+from public, anon, authenticated`));
   }
-  assert.doesNotMatch(ddl, /create policy|grant /i);
+  assert.match(ddl, /alter table public\.lead_rate_limits enable row level security/);
+  assert.match(ddl, /revoke all on table public\.lead_rate_limits from public, anon, authenticated/);
+  assert.doesNotMatch(ddl, /create policy/i);
+  assert.doesNotMatch(ddl, /grant [^;]* to [^;]*(anon|authenticated|public)/i);
+  for (const f of ["20261018_lead_tracking_draft.sql", "20261018_lead_retention_draft.sql", "20261018_listing_events_volume.sql"]) {
+    const sql = readFileSync(new URL(`../db/drafts/${f}`, import.meta.url), "utf8");
+    const fns = Array.from(sql.matchAll(/create or replace function public\.(\w+)/g)).map((x) => x[1]);
+    assert.ok(fns.length > 0, f);
+    for (const fn of fns) assert.match(sql, new RegExp(`revoke execute on function public\\.${fn}\\([^)]*\\) from public, anon, authenticated`), `${f}:${fn}`);
+  }
   const rpt = readFileSync(new URL("../db/drafts/20261018_dealer_monthly_report.sql", import.meta.url), "utf8");
   for (const c of ["month", "dealer_id", "dealer_name", "views", "outbound_clicks", "leads"]) assert.match(rpt, new RegExp(`as ${c}\\b`));
 });
@@ -198,4 +214,55 @@ test("client: ListingDetail gates on build-time flag only", () => {
   assert.match(src, /if \(__LEAD_TRACKING_ENABLED__\) useLeadTracking\(listing\);/);
   assert.match(src, /__LEAD_TRACKING_ENABLED__ \? \(\s*<LeadContactButton/);
   assert.match(src, /data-testid="btn-contact-seller"><Phone className="h-4 w-4" \/> Contact Seller<\/Button>/);
+  assert.match(src, /__LEAD_TRACKING_ENABLED__ \? \(\s*<>\s*<a href=\{`tel:/);
+});
+
+test("quote: listing without a dealer is blocked with a clear message", async () => {
+  await withApp(true, async (base, m) => {
+    const r = await post(base + "/api/leads/quote", goodLead({ listingId: 12 }), UA, "4.4.4.4");
+    assert.equal(r.status, 422);
+    assert.equal((await r.json()).error, "contact_unavailable");
+    assert.equal(m.leads.length, 0);
+  });
+});
+
+test("write failures: event dropped+logged (still 204), lead returns 500 not success", async () => {
+  await withApp(true, async (base, m) => {
+    m.fail.event = true; m.fail.lead = true;
+    const r = await post(base + "/api/leads/event", { eventType: "listing_view", listingId: 5, sessionId: "abcdef123456" });
+    assert.equal(r.status, 204);
+    await tick();
+    assert.ok((m as any).logs.includes("event write dropped"));
+    const q = await post(base + "/api/leads/quote", goodLead(), UA, "4.4.4.5");
+    assert.equal(q.status, 500);
+    assert.deepEqual(await q.json(), { error: "server_error" });
+    assert.ok((m as any).logs.includes("lead write failed"));
+    assert.equal(m.leads.length, 0);
+  });
+});
+
+test("retention cron: cron secret or admin only; volume monitor admin-only", async () => {
+  await withApp(true, async (base) => {
+    const c = (h: Record<string, string>) => fetch(base + "/api/cron/lead-retention", { method: "POST", headers: h });
+    assert.equal((await c({})).status, 401);
+    assert.equal((await c({ authorization: "Bearer wrong" })).status, 401);
+    assert.deepEqual(await (await c({ authorization: "Bearer cs" })).json(), { ok: true, deleted: { leads: 1, events: 2, rate_limits: 3 } });
+    assert.equal((await c({ "x-admin-token": "pw" })).status, 200);
+    assert.equal((await fetch(base + "/api/admin/leads/event-volume")).status, 401);
+    const v = await (await fetch(base + "/api/admin/leads/event-volume", { headers: { "x-admin-token": "pw" } })).json();
+    assert.equal(v.alert, true);
+    assert.equal(v.baseline, 100);
+  });
+  await withApp(false, async (base) => {
+    assert.equal((await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer cs" } })).status, 404);
+  });
+});
+
+test("volumeAlert + windowStart", () => {
+  const days = (xs: number[]) => xs.map((events, i) => ({ day: `2026-10-${String(i + 1).padStart(2, "0")}`, events }));
+  assert.equal(volumeAlert(days([100, 100, 100])).reason, "insufficient_history");
+  assert.equal(volumeAlert(days([100, 100, 100, 100, 100, 100, 100, 299])).alert, false);
+  assert.equal(volumeAlert(days([100, 100, 100, 100, 100, 100, 100, 301])).alert, true);
+  assert.equal(volumeAlert(days([5, 5, 5, 5, 5, 5, 5, 40])).alert, false); // baseline floor 50
+  assert.equal(windowStart(Date.UTC(2026, 9, 18, 21, 17, 30), 10 * 60_000), "2026-10-18T21:10:00.000Z");
 });

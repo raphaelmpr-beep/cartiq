@@ -1,33 +1,38 @@
 -- 20261018_dealer_monthly_report.sql
 -- DRAFT, READ-ONLY query. Per-dealer monthly views, outbound clicks and leads.
--- $1 = month start (date, e.g. '2026-10-01'). Run as service_role (tables are locked down).
--- "outbound_clicks" = contact_click + outbound_click (contact button, tel: link, dealer site link).
+-- $1 = month start (date, e.g. '2026-10-01'). $1 MUST be bound as a parameter by the
+-- server route (GET /api/admin/leads/monthly-report validates ?month=YYYY-MM); never
+-- string-concatenate it. Run as service_role (tables are locked down).
+-- outbound_clicks = contact_click + outbound_click (contact button, tel: link, dealer site link).
 -- Views are already deduped at write time (one per session per listing per 30 min).
+-- Leads with status 'spam' are excluded.
 with bounds as (
-  select date_trunc('month', $1::date)::timestamptz as m_start,
+  select date_trunc('month', $1::date)::timestamptz                      as m_start,
          (date_trunc('month', $1::date) + interval '1 month')::timestamptz as m_end
 ),
-ev as (
+facts as (
   select e.dealer_id,
-         count(*) filter (where e.event_type = 'listing_view')                        as views,
-         count(*) filter (where e.event_type in ('contact_click', 'outbound_click'))  as outbound_clicks
+         (e.event_type = 'listing_view')::int                           as views,
+         (e.event_type in ('contact_click', 'outbound_click'))::int     as outbound_clicks,
+         0                                                              as leads
   from public.listing_events e, bounds b
   where e.created_at >= b.m_start and e.created_at < b.m_end
-  group by e.dealer_id
-),
-ld as (
-  select l.dealer_id, count(*) filter (where l.status <> 'spam') as leads
+  union all
+  select l.dealer_id, 0, 0, 1
   from public.listing_leads l, bounds b
-  where l.created_at >= b.m_start and l.created_at < b.m_end
-  group by l.dealer_id
+  where l.created_at >= b.m_start and l.created_at < b.m_end and l.status <> 'spam'
+),
+agg as (
+  select dealer_id, sum(views)::int as views, sum(outbound_clicks)::int as outbound_clicks, sum(leads)::int as leads
+  from facts
+  group by dealer_id
 )
 select to_char((select m_start from bounds), 'YYYY-MM') as month,
-       coalesce(ev.dealer_id, ld.dealer_id)             as dealer_id,
+       a.dealer_id                                      as dealer_id,
        d.name                                           as dealer_name,
-       coalesce(ev.views, 0)::int                       as views,
-       coalesce(ev.outbound_clicks, 0)::int             as outbound_clicks,
-       coalesce(ld.leads, 0)::int                       as leads
-from ev
-full outer join ld on ld.dealer_id is not distinct from ev.dealer_id
-left join public.dealers d on d.id = coalesce(ev.dealer_id, ld.dealer_id)
-order by leads desc, outbound_clicks desc, views desc, dealer_id nulls last;
+       a.views                                          as views,
+       a.outbound_clicks                                as outbound_clicks,
+       a.leads                                          as leads
+from agg a
+left join public.dealers d on d.id = a.dealer_id
+order by a.leads desc, a.outbound_clicks desc, a.views desc, a.dealer_id nulls last;

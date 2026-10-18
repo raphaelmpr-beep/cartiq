@@ -63,6 +63,11 @@ test("fixture app: no Supabase client constructed, no outbound network", async (
       assert.equal(fx.leads[0].dealerId, 9001);
       await fetch(base + "/api/__fixture/rate-limit?on=1");
       assert.equal((await post("/api/leads/quote", { ...lead, startedAt: Date.now() - 5000 }, "8.8.4.4")).status, 429);
+      assert.equal((await post("/api/leads/quote", { ...lead, listingId: 990002, startedAt: Date.now() - 5000 }, "9.9.1.1")).status, 429); // forced
+      await fetch(base + "/api/__fixture/rate-limit?on=0");
+      const nd = await post("/api/leads/quote", { ...lead, listingId: 990002, startedAt: Date.now() - 5000 }, "9.9.1.2");
+      assert.equal(nd.status, 422);
+      assert.equal((await nd.json()).error, "contact_unavailable");
       assert.equal((await fetch(base + "/api/anything-else")).status, 404);
       assert.ok(logs.some((l) => String(l[0]).includes("blocked (min-fill)")));
     } finally { srv.close(); }

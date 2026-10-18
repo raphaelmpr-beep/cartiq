@@ -3,7 +3,7 @@
 import express, { type Express } from "express";
 import { readFileSync } from "node:fs";
 import { registerLeadRoutes } from "../leads/routes";
-import { aggregateMonthly, type LeadsStore } from "../leads/store";
+import { aggregateMonthly, memoryRateLimits, type LeadsStore } from "../leads/store";
 
 type Fx = { dealers: any[]; listings: any[] };
 
@@ -27,6 +27,9 @@ export function createFixtureApp(opts: { log?: (...a: unknown[]) => void; fixtur
       return aggregateMonthly(m, events.map((e) => ({ event_type: e.eventType, dealer_id: e.dealerId })),
         leads.map((l) => ({ dealer_id: l.dealerId })), new Map(fx.dealers.map((d) => [d.id, d.name])));
     },
+    hitRateLimit: memoryRateLimits(),
+    async cleanup() { log("cleanup (fixture no-op)"); return { leads: 0, events: 0, rate_limits: 0 }; },
+    async dailyEventCounts() { return []; },
   };
 
   const app: Express = express();

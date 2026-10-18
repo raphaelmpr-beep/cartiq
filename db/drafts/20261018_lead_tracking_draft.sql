@@ -50,15 +50,48 @@ create table if not exists public.listing_leads (
 );
 create index if not exists idx_listing_leads_dealer_month on public.listing_leads (dealer_id, created_at);
 create index if not exists idx_listing_leads_status       on public.listing_leads (status, created_at);
+create index if not exists idx_listing_leads_created      on public.listing_leads (created_at);   -- retention cleanup
+create index if not exists idx_listing_events_created     on public.listing_events (created_at);  -- retention + volume monitor
+
+-- 3. Rate limits (replaces in-memory limits; shared across serverless instances).
+--    key = hashed IP, "hash:listing_id" or listing_id depending on scope. No raw IPs.
+create table if not exists public.lead_rate_limits (
+  scope        text        not null check (scope in ('ev_ip', 'lead_ip', 'lead_ip_listing', 'lead_listing')),
+  key          text        not null check (char_length(key) <= 80),
+  window_start timestamptz not null,
+  count        integer     not null default 1,
+  primary key (scope, key, window_start)
+);
+create index if not exists idx_lead_rate_limits_window on public.lead_rate_limits (window_start);  -- cleanup
+
+-- Atomic hit: insert-or-increment in one statement; returns true while count <= limit.
+create or replace function public.lead_rate_limit_hit(p_scope text, p_key text, p_window_start timestamptz, p_limit integer)
+returns boolean
+language sql
+volatile
+security invoker
+set search_path = public, pg_temp
+as $$
+  insert into public.lead_rate_limits as r (scope, key, window_start, count)
+  values (p_scope, p_key, p_window_start, 1)
+  on conflict (scope, key, window_start) do update set count = r.count + 1
+  returning r.count <= p_limit;
+$$;
 
 alter table public.listing_events enable row level security;
 alter table public.listing_leads  enable row level security;
+alter table public.lead_rate_limits enable row level security;
 -- No policies on purpose.
 
 revoke all on table public.listing_events from public, anon, authenticated;
 revoke all on table public.listing_leads  from public, anon, authenticated;
+revoke all on table public.lead_rate_limits from public, anon, authenticated;
+revoke execute on function public.lead_rate_limit_hit(text, text, timestamptz, integer) from public, anon, authenticated;
+grant  execute on function public.lead_rate_limit_hit(text, text, timestamptz, integer) to service_role;
 
 commit;
 
 -- Rollback (also draft):
--- begin; drop table if exists public.listing_leads; drop table if exists public.listing_events; commit;
+-- begin; drop function if exists public.lead_rate_limit_hit(text, text, timestamptz, integer);
+--   drop table if exists public.lead_rate_limits; drop table if exists public.listing_leads;
+--   drop table if exists public.listing_events; commit;

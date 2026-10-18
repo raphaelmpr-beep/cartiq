@@ -128,3 +128,24 @@ export function validateLead(body: unknown, now = Date.now()): LeadCheck {
 // ── Monthly report ─────────────────────────────────────────────────────────
 export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 export interface DealerMonthRow { month: string; dealer_id: number | null; dealer_name: string | null; views: number; outbound_clicks: number; leads: number; }
+
+// ── Retention + volume monitor ─────────────────────────────────────────────
+export const LEAD_RETENTION_MONTHS = 12;
+export const EVENT_RETENTION_DAYS = 90;
+
+export interface DayCount { day: string; events: number; }
+/**
+ * Alert when the latest complete day exceeds 3x the trailing baseline (median of
+ * the up-to-14 prior days). Median resists one earlier spike. Needs >= 7 days of
+ * history and a baseline of at least 50/day to avoid alerting on tiny numbers.
+ */
+export function volumeAlert(days: DayCount[], factor = 3, minBaseline = 50) {
+  const sorted = [...days].sort((a, b) => a.day.localeCompare(b.day));
+  const latest = sorted[sorted.length - 1];
+  const prior = sorted.slice(-15, -1).map((d) => d.events).sort((a, b) => a - b);
+  if (!latest || prior.length < 7) return { alert: false, reason: "insufficient_history", latest: latest ?? null, baseline: null as number | null };
+  const mid = Math.floor(prior.length / 2);
+  const baseline = prior.length % 2 ? prior[mid] : (prior[mid - 1] + prior[mid]) / 2;
+  const alert = latest.events > factor * Math.max(baseline, minBaseline);
+  return { alert, reason: alert ? `latest ${latest.events} > ${factor}x baseline ${baseline}` : "ok", latest, baseline };
+}

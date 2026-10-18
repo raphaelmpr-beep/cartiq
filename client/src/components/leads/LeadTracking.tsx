@@ -70,18 +70,31 @@ export function useLeadTracking(listing: L) {
 }
 
 /**
- * Replaces the existing no-op "Contact Seller" button (same look, same testid)
- * when the flag is on: fires contact_click and opens the quote form, loaded lazily.
+ * Flag on only. variant "contact": replaces the existing no-op "Contact Seller"
+ * button (same look, same testid). variant "quote": an outline "Check availability
+ * / Get a quote" button shown under Call Seller. Both fire contact_click and lazy-load
+ * the form. Listings without a dealer get a "contact unavailable" note, no form.
  */
-export function LeadContactButton({ listingId, dealerId, title }: { listingId: number; dealerId?: number; title?: string }) {
+export function LeadContactButton({ listingId, dealerId, title, variant = "contact" }: { listingId: number; dealerId?: number; title?: string; variant?: "contact" | "quote" }) {
   const [Form, setForm] = useState<ComponentType<{ listingId: number; title?: string; onClose: () => void }> | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
   const open = () => {
     sendLeadEvent("contact_click", listingId, dealerId);
+    if (!dealerId) { setUnavailable(true); return; }
     import("./LeadQuoteForm").then((m) => setForm(() => m.default)).catch(() => {});
   };
   return (
     <>
-      <Button className="w-full gap-2" data-testid="btn-contact-seller" onClick={open}><Phone className="h-4 w-4" /> Contact Seller</Button>
+      {variant === "quote" ? (
+        dealerId ? <Button variant="outline" className="w-full" data-testid="btn-get-quote" onClick={open}>Check availability / Get a quote</Button> : null
+      ) : (
+        <Button className="w-full gap-2" data-testid="btn-contact-seller" onClick={open}><Phone className="h-4 w-4" /> Contact Seller</Button>
+      )}
+      {unavailable && (
+        <p className="text-sm text-muted-foreground" role="status" data-testid="lead-contact-unavailable">
+          Contact isn't available for this listing yet. There's no dealer on file for it.
+        </p>
+      )}
       {Form && <Form listingId={listingId} title={title} onClose={() => setForm(null)} />}
     </>
   );

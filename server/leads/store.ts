@@ -2,7 +2,8 @@
 // service_role client; a memory store is used by tests. Nothing here runs
 // unless LEAD_TRACKING_ENABLED is on.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { LeadEventType, LeadInput, DealerMonthRow } from "@shared/leadTracking";
+import type { LeadEventType, LeadInput, DealerMonthRow, DayCount } from "@shared/leadTracking";
+import { RateLimiter } from "@shared/leadTracking";
 
 export interface ListingRef { listingId: number; dealerId: number | null; }
 export interface LeadsStore {
@@ -11,6 +12,25 @@ export interface LeadsStore {
   insertEvent(e: { eventType: LeadEventType; listingId: number; dealerId: number | null; sessionId: string }): Promise<void>;
   insertLead(l: LeadInput & { dealerId: number | null; consentText: string; ipHash: string | null }): Promise<void>;
   monthlyReport(month: string): Promise<DealerMonthRow[]>;
+  /** Atomic counter in lead_rate_limits. true = allowed. */
+  hitRateLimit(scope: string, key: string, windowMs: number, limit: number, now: number): Promise<boolean>;
+  /** Retention: leads 12 months, events 90 days, expired rate-limit rows. */
+  cleanup(): Promise<{ leads: number; events: number; rate_limits: number }>;
+  /** Last `days` complete UTC days of listing_events counts (oldest first). */
+  dailyEventCounts(days: number, now: number): Promise<DayCount[]>;
+}
+
+export const windowStart = (now: number, windowMs: number) => new Date(Math.floor(now / windowMs) * windowMs).toISOString();
+
+/** In-memory limiter with the same interface (fixture mode + tests only). */
+export function memoryRateLimits() {
+  const limiters = new Map<string, RateLimiter>();
+  return (scope: string, key: string, windowMs: number, limit: number, now: number) => {
+    const id = `${scope}|${windowMs}|${limit}`;
+    let l = limiters.get(id);
+    if (!l) { l = new RateLimiter(limit, windowMs); limiters.set(id, l); }
+    return Promise.resolve(l.allow(key, now));
+  };
 }
 
 export function monthBounds(month: string): { start: string; end: string } {
@@ -91,6 +111,24 @@ export function supabaseLeadsStore(sb: SupabaseClient): LeadsStore {
         for (const d of data ?? []) names.set(d.id as number, d.name as string);
       }
       return aggregateMonthly(month, events, leads, names);
+    },
+    async hitRateLimit(scope, key, windowMs, limit, now) {
+      const { data, error } = await sb.rpc("lead_rate_limit_hit", {
+        p_scope: scope, p_key: key, p_window_start: windowStart(now, windowMs), p_limit: limit,
+      });
+      if (error) throw new Error(error.message);
+      return data === true;
+    },
+    async cleanup() {
+      const { data, error } = await sb.rpc("lead_tracking_cleanup");
+      if (error) throw new Error(error.message);
+      const r = (Array.isArray(data) ? data[0] : data) ?? {};
+      return { leads: Number(r.leads_deleted ?? 0), events: Number(r.events_deleted ?? 0), rate_limits: Number(r.rate_limits_deleted ?? 0) };
+    },
+    async dailyEventCounts(days, now) {
+      const { data, error } = await sb.rpc("listing_events_daily_counts", { p_days: days, p_until: new Date(now).toISOString() });
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as any[]).map((r) => ({ day: String(r.day), events: Number(r.events) }));
     },
   };
 }
