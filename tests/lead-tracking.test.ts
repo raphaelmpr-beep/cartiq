@@ -355,3 +355,20 @@ test("notifier: structured LEAD_VOLUME_ALERT line only", async () => {
   assert.equal(lines.length, 1);
   assert.match(lines[0], /^LEAD_VOLUME_ALERT \{"type":"LEAD_VOLUME_ALERT"/);
 });
+
+test("UI: contact control hidden for no-dealer, paused, failed or pending status", async () => {
+  const { contactButtonMode, LeadContactButton } = await import("../client/src/components/leads/LeadTracking");
+  for (const variant of ["contact", "quote"] as const) {
+    assert.equal(contactButtonMode({ live: true, dealerId: undefined, variant }), "hidden");   // no dealer
+    assert.equal(contactButtonMode({ live: true, dealerId: null, variant }), "hidden");
+    assert.equal(contactButtonMode({ live: false, dealerId: 9001, variant }), "hidden");      // paused / status failed / pending
+    assert.equal(contactButtonMode({ live: true, dealerId: 9001, variant }), variant);
+  }
+  // First render (before the status check resolves) emits no markup: no dead button flash.
+  const React = await import("react");
+  const { renderToString } = await import("react-dom/server");
+  for (const variant of ["contact", "quote"] as const) {
+    assert.equal(renderToString(React.createElement(LeadContactButton, { listingId: 1, dealerId: 9001, variant })), "");
+    assert.equal(renderToString(React.createElement(LeadContactButton, { listingId: 1, variant })), "");
+  }
+});

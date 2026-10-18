@@ -90,33 +90,37 @@ export function useLeadTracking(listing: L) {
 }
 
 /**
+ * What the flag-on contact control renders. Shown ONLY when lead tracking is live
+ * (status check said enabled) AND the listing has a dealer. Otherwise hidden:
+ * no dead button, no "unavailable" dead end. Status still loading = hidden.
+ */
+export function contactButtonMode(o: { live: boolean; dealerId?: number | null; variant: "contact" | "quote" }): "hidden" | "contact" | "quote" {
+  if (!o.live || !o.dealerId) return "hidden";
+  return o.variant;
+}
+
+/**
  * Flag on only. variant "contact": replaces the existing no-op "Contact Seller"
  * button (same look, same testid). variant "quote": an outline "Check availability
  * / Get a quote" button shown under Call Seller. Both fire contact_click and lazy-load
- * the form. Listings without a dealer get a "contact unavailable" note, no form.
+ * the form. The server's 422 contact_unavailable stays as a backstop.
  */
 export function LeadContactButton({ listingId, dealerId, title, variant = "contact" }: { listingId: number; dealerId?: number; title?: string; variant?: "contact" | "quote" }) {
   const [Form, setForm] = useState<ComponentType<{ listingId: number; title?: string; onClose: () => void }> | null>(null);
-  const [unavailable, setUnavailable] = useState(false);
   const [live, setLive] = useState(false);
   useEffect(() => { let on = true; leadTrackingLive().then((v) => { if (on) setLive(v); }); return () => { on = false; }; }, []);
+  const mode = contactButtonMode({ live, dealerId, variant });
+  if (mode === "hidden") return null;
   const open = () => {
-    if (!live) return; // paused / off: behave like today's no-op button
     sendLeadEvent("contact_click", listingId, dealerId);
-    if (!dealerId) { setUnavailable(true); return; }
     import("./LeadQuoteForm").then((m) => setForm(() => m.default)).catch(() => {});
   };
   return (
     <>
-      {variant === "quote" ? (
-        dealerId && live ? <Button variant="outline" className="w-full" data-testid="btn-get-quote" onClick={open}>Check availability / Get a quote</Button> : null
+      {mode === "quote" ? (
+        <Button variant="outline" className="w-full" data-testid="btn-get-quote" onClick={open}>Check availability / Get a quote</Button>
       ) : (
         <Button className="w-full gap-2" data-testid="btn-contact-seller" onClick={open}><Phone className="h-4 w-4" /> Contact Seller</Button>
-      )}
-      {unavailable && (
-        <p className="text-sm text-muted-foreground" role="status" data-testid="lead-contact-unavailable">
-          Contact isn't available for this listing yet. There's no dealer on file for it.
-        </p>
       )}
       {Form && <Form listingId={listingId} title={title} onClose={() => setForm(null)} />}
     </>
