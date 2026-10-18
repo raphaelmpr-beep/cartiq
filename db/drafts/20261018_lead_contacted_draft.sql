@@ -42,5 +42,6 @@ commit;
 -- begin; drop index if exists public.idx_listing_leads_uncontacted;
 --   alter table public.listing_leads drop constraint if exists listing_leads_forwarded_after_contacted;
 --   alter table public.listing_leads drop constraint if exists listing_leads_status_check;
+--   update public.listing_leads set status='reviewed' where status='contacted';
 --   alter table public.listing_leads add constraint listing_leads_status_check check (status in ('new','reviewed','forwarded','spam','closed'));
 --   alter table public.listing_leads drop column if exists contacted_at; commit;

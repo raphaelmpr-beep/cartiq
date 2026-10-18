@@ -3,7 +3,6 @@
 // unless LEAD_TRACKING_ENABLED is on.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LeadEventType, LeadInput, DealerMonthRow, DayCount } from "@shared/leadTracking";
-import { RateLimiter } from "@shared/leadTracking";
 
 export interface AdminLeadRow {
   id: number; created_at: string; listing_id: number; listing_title: string | null; listing_slug: string | null;
@@ -67,6 +66,8 @@ export interface LeadsStore {
   monthlyReport(month: string): Promise<DealerMonthRow[]>;
   /** Atomic counter in lead_rate_limits. true = allowed. */
   hitRateLimit(scope: string, key: string, windowMs: number, limit: number, now: number): Promise<boolean>;
+  /** Current count for the window (no increment). Throws if unreadable (caller fails closed). */
+  peekRateLimit(scope: string, key: string, windowMs: number, now: number): Promise<number>;
   /** Retention: leads 12 months, events 90 days, expired rate-limit rows. */
   cleanup(): Promise<{ leads: number; events: number; rate_limits: number }>;
   /** Last `days` complete UTC days of listing_events counts (oldest first). */
@@ -90,15 +91,20 @@ export function memoryPaused() {
 
 export const windowStart = (now: number, windowMs: number) => new Date(Math.floor(now / windowMs) * windowMs).toISOString();
 
-/** In-memory limiter with the same interface (fixture mode + tests only). */
+/** In-memory fixed-window counters with the same semantics as lead_rate_limit_hit
+ *  (fixture mode + tests only). The returned hit function also carries .peek. */
 export function memoryRateLimits() {
-  const limiters = new Map<string, RateLimiter>();
-  return (scope: string, key: string, windowMs: number, limit: number, now: number) => {
-    const id = `${scope}|${windowMs}|${limit}`;
-    let l = limiters.get(id);
-    if (!l) { l = new RateLimiter(limit, windowMs); limiters.set(id, l); }
-    return Promise.resolve(l.allow(key, now));
+  const counts = new Map<string, number>();
+  const k = (scope: string, key: string, windowMs: number, now: number) => `${scope}|${key}|${windowStart(now, windowMs)}`;
+  const hit = (scope: string, key: string, windowMs: number, limit: number, now: number) => {
+    if (counts.size > 50_000) counts.clear();
+    const id = k(scope, key, windowMs, now);
+    const n = (counts.get(id) ?? 0) + 1;
+    counts.set(id, n);
+    return Promise.resolve(n <= limit);
   };
+  const peek = (scope: string, key: string, windowMs: number, now: number) => Promise.resolve(counts.get(k(scope, key, windowMs, now)) ?? 0);
+  return Object.assign(hit, { peek });
 }
 
 export function monthBounds(month: string): { start: string; end: string } {
@@ -230,6 +236,12 @@ export function supabaseLeadsStore(sb: SupabaseClient): LeadsStore {
       });
       if (error) throw new Error(error.message);
       return data === true;
+    },
+    async peekRateLimit(scope, key, windowMs, now) {
+      const { data, error } = await sb.from("lead_rate_limits").select("count")
+        .eq("scope", scope).eq("key", key).eq("window_start", windowStart(now, windowMs)).maybeSingle();
+      if (error) throw new Error(error.message);
+      return Number((data as any)?.count ?? 0);
     },
     async cleanup() {
       const { data, error } = await sb.rpc("lead_tracking_cleanup");

@@ -102,6 +102,7 @@ function memStore(nowFn: () => number = Date.now) {
   const ml = memoryLeads([], nowFn);
   const leads = ml.rows;
   const paused = memoryPaused();
+  const rl = memoryRateLimits();
   const store: LeadsStore = {
     async getPublicListing(id) { return id === 404 ? null : { listingId: id, dealerId: id === 12 ? null : 9 }; },
     async insertEvent(e) { if (fail.event) throw new Error("db down"); events.push(e); },
@@ -109,7 +110,7 @@ function memStore(nowFn: () => number = Date.now) {
     listLeads: (p, n) => ml.listLeads(p, n),
     markContacted: (id, at) => ml.markContacted(id, at),
     async insertLead(l) { if (fail.lead) throw new Error("db down"); return ml.insertLead(l); },
-    hitRateLimit: memoryRateLimits(),
+    hitRateLimit: rl, peekRateLimit: rl.peek,
     getPaused: paused.getPaused, setPaused: paused.setPaused, clearPaused: paused.clearPaused,
     async cleanup() { return { leads: 1, events: 2, rate_limits: 3 }; },
     async dailyEventCounts() { return Array.from({ length: 15 }, (_, i) => ({ day: `2026-10-${String(i + 1).padStart(2, "0")}`, events: i === 14 ? 1000 : 100 })); },
@@ -638,4 +639,134 @@ test("Admin page: Leads tab only behind the build flag (ternary folds away when 
   assert.match(src, /\{__LEAD_TRACKING_ENABLED__ \? \(\s*<>\s*<TabsTrigger value="settings"[^\n]*\n\s*<TabsTrigger value="leads"/);
   assert.match(src, /<TabsContent value="leads">\s*<AdminLeads adminToken=\{adminToken\} \/>/);
   assert.equal((src.match(/value="leads"/g) ?? []).length, 2);
+});
+
+// ─── Admin sign-in guard (lead admin routes only; Director FINAL ruling) ─────────────
+import { makeAdminGuard, ADMIN_FAIL, MIN_ADMIN_PASSWORD_LEN } from "../server/leads/admin-guard";
+import { execFileSync } from "node:child_process";
+
+// Mirrors server/routes.ts wiring: plain requireAdmin for main routes (verify, price refresh),
+// guard.wrapLead(requireAdmin) for registerLeadRoutes. flagOn=false → no guard at all.
+async function withGuardApp(o: { pw: string; flagOn?: boolean; limiterFails?: boolean },
+  fn: (base: string, logs: string[]) => Promise<void>) {
+  const flagOn = o.flagOn ?? true;
+  const app = express();
+  app.use(express.json());
+  const m = memStore(() => T0);
+  const requireAdmin = (req: any, res: any, next: any) =>
+    (req.headers["x-admin-token"] === o.pw ? next() : res.status(401).json({ error: "Unauthorized" }));
+  const logs: string[] = [];
+  const failing = { peekRateLimit: async () => { throw new Error("db down"); }, hitRateLimit: async () => { throw new Error("db down"); } };
+  const leadAdmin = flagOn
+    ? makeAdminGuard({ adminPassword: o.pw, limiter: () => (o.limiterFails ? failing : m.store) as any, salt: () => SALT, now: () => T0,
+        logError: (l) => logs.push(l), logWarn: (l) => logs.push(l) }).wrapLead(requireAdmin)
+    : requireAdmin;
+  app.get("/api/admin/verify", requireAdmin, (_q, r) => { r.json({ ok: true }); });
+  app.post("/api/admin/daily-price-refresh", async (req, res) => {
+    const token = req.headers["x-admin-token"] as string;
+    if (token !== o.pw) return res.status(401).json({ error: "Unauthorized" });
+    res.json({ ok: true });
+  });
+  registerLeadRoutes(app, leadAdmin, { enabled: flagOn, store: () => m.store, now: () => T0, ipSalt: SALT, cronSecret: CRON, log: (l) => logs.push(l), pausedCacheMs: 0 });
+  const srv = app.listen(0);
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try { await fn(base, logs); } finally { srv.close(); }
+}
+const GOOD = "a-random-admin-password-32chars!";
+const tok = (t: string, ip = "4.4.4.4") => ({ headers: { "x-admin-token": t, "x-forwarded-for": ip } });
+
+test("admin guard: short ADMIN_PASSWORD → 503 on lead routes + LEAD_CONFIG_ERROR without the value", async () => {
+  assert.equal(MIN_ADMIN_PASSWORD_LEN, 16);
+  const short = "twelve-chars"; // 12
+  await withGuardApp({ pw: short }, async (base, logs) => {
+    for (const p of ["/api/admin/leads", "/api/admin/leads/event-volume", "/api/admin/leads/paused"]) {
+      assert.equal((await fetch(base + p, tok(short))).status, 503, p);
+    }
+    assert.equal((await fetch(base + "/api/cron/lead-retention", { method: "POST", ...tok(short) })).status, 503);
+    // CRON_SECRET bearer path is not the admin-token path → unaffected
+    assert.notEqual((await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: `Bearer ${CRON}` } })).status, 503);
+    assert.equal(logs.filter((l) => l.startsWith("LEAD_CONFIG_ERROR")).length, 1); // rate-limited
+    assert.ok(!logs.join("\n").includes(short));
+  });
+});
+
+test("admin guard: flag on + 12-char password → verify and daily-price-refresh unchanged (200 w/ correct token, unlimited 401s)", async () => {
+  const short = "twelve-chars";
+  await withGuardApp({ pw: short }, async (base) => {
+    assert.equal((await fetch(base + "/api/admin/verify", tok(short))).status, 200);
+    assert.equal((await fetch(base + "/api/admin/daily-price-refresh", { method: "POST", ...tok(short) })).status, 200);
+    for (let i = 0; i < 15; i++) {
+      assert.equal((await fetch(base + "/api/admin/verify", tok("bad"))).status, 401);
+      assert.equal((await fetch(base + "/api/admin/daily-price-refresh", { method: "POST", ...tok("bad") })).status, 401);
+    }
+    assert.equal((await fetch(base + "/api/admin/verify", tok(short))).status, 200);
+    assert.equal((await fetch(base + "/api/admin/daily-price-refresh", { method: "POST", ...tok(short) })).status, 200);
+  });
+});
+
+test("admin guard: 11 bad tries on lead routes → 429 before compare; good token works under the cap; token never logged", async () => {
+  await withGuardApp({ pw: GOOD }, async (base, logs) => {
+    const statuses: number[] = [];
+    for (let i = 0; i < ADMIN_FAIL.limit + 1; i++) statuses.push((await fetch(base + "/api/admin/leads", tok(`wrong-guess-${i}`))).status);
+    assert.deepEqual(statuses, [...Array(10).fill(401), 429]);
+    assert.equal((await fetch(base + "/api/admin/leads", tok(GOOD))).status, 429); // capped IP: rejected before compare
+    assert.equal((await fetch(base + "/api/admin/leads", tok(GOOD, "5.5.5.5"))).status, 200); // other IP fine
+    for (let i = 0; i < 9; i++) await fetch(base + "/api/admin/leads", tok("x", "6.6.6.6"));
+    assert.equal((await fetch(base + "/api/admin/leads", tok(GOOD, "6.6.6.6"))).status, 200); // 9 fails: under cap
+    assert.equal((await fetch(base + "/api/admin/leads", tok(GOOD, "6.6.6.6"))).status, 200); // successes never count
+    // main routes unaffected for the capped IP
+    assert.equal((await fetch(base + "/api/admin/verify", tok(GOOD))).status, 200);
+    const fails = logs.filter((l) => l.startsWith("ADMIN_AUTH_FAIL"));
+    assert.equal(fails.length, 10 + 9);
+    const j = JSON.parse(fails[0].slice("ADMIN_AUTH_FAIL ".length));
+    assert.deepEqual(Object.keys(j).sort(), ["ip_hash", "route"]);
+    const all = logs.join("\n");
+    assert.ok(!all.includes(GOOD) && !all.includes("wrong-guess") && !all.includes("4.4.4.4"));
+  });
+});
+
+test("admin guard: limiter failure → 503 on lead routes (fail closed); main routes unaffected", async () => {
+  await withGuardApp({ pw: GOOD, limiterFails: true }, async (base, logs) => {
+    assert.equal((await fetch(base + "/api/admin/leads", tok(GOOD))).status, 503);
+    assert.equal((await fetch(base + "/api/admin/leads/paused/clear", { method: "POST", ...tok(GOOD) })).status, 503);
+    assert.ok(logs.some((l) => l.startsWith("ADMIN_GUARD_ERROR")));
+    assert.equal((await fetch(base + "/api/admin/verify", tok(GOOD))).status, 200);
+    assert.equal((await fetch(base + "/api/admin/daily-price-refresh", { method: "POST", ...tok(GOOD) })).status, 200);
+  });
+});
+
+test("admin guard: flag off → no cap, no minimum anywhere", async () => {
+  await withGuardApp({ pw: "short", flagOn: false }, async (base) => {
+    for (let i = 0; i < 15; i++) assert.equal((await fetch(base + "/api/admin/verify", tok("bad"))).status, 401);
+    assert.equal((await fetch(base + "/api/admin/verify", tok("short"))).status, 200);
+    assert.equal((await fetch(base + "/api/admin/leads", tok("short"))).status, 404); // lead routes not registered
+  });
+});
+
+test("routes.ts: verify, daily-price-refresh and requireAdmin are byte-identical to main d58633e", () => {
+  const cur = readFileSync(new URL("../server/routes.ts", import.meta.url), "utf8");
+  let main: string;
+  try { main = execFileSync("git", ["show", "d58633e:server/routes.ts"], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"], cwd: new URL("..", import.meta.url).pathname }); }
+  catch { return; } // no git history available: skip
+  // Pure additions vs main (no main line removed/changed), and none touch verify/price refresh.
+  const diff = execFileSync("git", ["--no-pager", "diff", "--no-ext-diff", "-U0", "d58633e", "--", "server/routes.ts"], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"], cwd: new URL("..", import.meta.url).pathname });
+  const removed = diff.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
+  assert.deepEqual(removed, []);
+  const added = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).join("\n");
+  const addedCode = added.split("\n").filter((l) => !/^\+\s*\/\//.test(l)).join("\n");
+  assert.ok(!/verify|daily-price-refresh/.test(addedCode));
+  for (const start of ['app.get("/api/admin/verify"', 'app.post("/api/admin/daily-price-refresh"', "function requireAdmin("]) assert.ok(cur.includes(start) && main.includes(start));
+  assert.equal((cur.match(/requireAdmin\b/g) ?? []).length - (main.match(/requireAdmin\b/g) ?? []).length, 3); // only the lead wiring adds uses
+  assert.match(cur, /wrapLead\(requireAdmin\)/);
+});
+
+test("fixture admin password meets the 16-char minimum", async () => {
+  const { FIXTURE_ADMIN_PASSWORD } = await import("../server/fixture/app");
+  assert.ok(FIXTURE_ADMIN_PASSWORD.length >= MIN_ADMIN_PASSWORD_LEN);
+});
+
+test("lead form copy: no wording implying the dealer receives the details", () => {
+  const src = readFileSync(new URL("../client/src/components/leads/LeadQuoteForm.tsx", import.meta.url), "utf8");
+  assert.ok(src.includes(">How should we reach you?<"));
+  assert.ok(!/dealer reach you/i.test(src));
 });

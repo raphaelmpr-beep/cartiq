@@ -93,7 +93,7 @@ export default function LeadQuoteForm({ listingId, title, onClose }: { listingId
               <ErrText k="name" />
             </div>
             <fieldset aria-describedby={fe.contact ? id("contact-err") : id("contact-hint")} style={{ border: 0, padding: 0, margin: 0 }}>
-              <legend style={LABEL}>How should the dealer reach you?</legend>
+              <legend style={LABEL}>How should we reach you?</legend>
               <p id={id("contact-hint")} className="text-sm" style={{ marginBottom: 4 }}>Email, phone, or both.</p>
               <label htmlFor={id("email")} style={LABEL}>Email</label>
               <Input id={id("email")} type="email" value={f.email} onChange={set("email")} maxLength={254} autoComplete="email" style={TAP} {...a11y("email", "contact")} />

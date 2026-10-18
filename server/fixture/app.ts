@@ -4,6 +4,7 @@ import express, { type Express } from "express";
 import { readFileSync } from "node:fs";
 import { registerLeadRoutes } from "../leads/routes";
 import { makeRequireAdmin } from "../leads/admin-auth";
+import { makeAdminGuard } from "../leads/admin-guard";
 
 /** Fixed dev admin password for fixture mode only (never used by the real server). */
 export const FIXTURE_ADMIN_PASSWORD = "gcq-fixture-admin";
@@ -27,6 +28,7 @@ export function createFixtureApp(opts: { log?: (...a: unknown[]) => void; fixtur
   const leads = memLeads.rows;
   const state = { forceRateLimit: false, saltMissing: false };
   const pausedSw = memoryPaused();
+  const rl = memoryRateLimits();
   const store: LeadsStore = {
     async getPublicListing(id) {
       const l = fx.listings.find((x) => x.id === id && x.publicListing && x.status === "active");
@@ -44,7 +46,7 @@ export function createFixtureApp(opts: { log?: (...a: unknown[]) => void; fixtur
       return aggregateMonthly(m, events.map((e) => ({ event_type: e.eventType, dealer_id: e.dealerId })),
         leads.map((l) => ({ dealer_id: l.dealerId })), new Map(fx.dealers.map((d) => [d.id, d.name])));
     },
-    hitRateLimit: memoryRateLimits(),
+    hitRateLimit: rl, peekRateLimit: rl.peek,
     async cleanup() { log("cleanup (fixture no-op)"); return { leads: 0, events: 0, rate_limits: 0 }; },
     async dailyEventCounts() { return []; },
     listLeads: (p, n) => memLeads.listLeads(p, n),
@@ -81,7 +83,9 @@ export function createFixtureApp(opts: { log?: (...a: unknown[]) => void; fixtur
     res.json({ saltMissing: state.saltMissing });
   });
   app.get("/api/__fixture/store", (_req, res) => res.json({ events, leads: leads.length, forceRateLimit: state.forceRateLimit }));
-  const admin = makeRequireAdmin(FIXTURE_ADMIN_PASSWORD);
+  // Same wiring as server/routes.ts with the flag on: guard (in-memory limiter) wraps requireAdmin.
+  const admin = makeAdminGuard({ adminPassword: FIXTURE_ADMIN_PASSWORD, limiter: () => store, salt: () => "gcq-fixture-dev-salt-not-a-secret" })
+    .wrapLead(makeRequireAdmin(FIXTURE_ADMIN_PASSWORD));
   // Existing Admin page sign-in check (same contract as the real /api/admin/verify).
   app.get("/api/admin/verify", admin, (_req, res) => res.json({ ok: true }));
   registerLeadRoutes(app, admin, {
