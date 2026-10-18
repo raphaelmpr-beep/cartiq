@@ -81,10 +81,19 @@ test("honeypot and min fill time are silent", () => {
   assert.deepEqual([f.ok, (f as any).silent], [false, true]);
 });
 
-test("consent and success copy (Inspector requirements)", () => {
-  assert.match(LEAD_CONSENT_TEXT, /dealer selling this cart/);
-  assert.match(LEAD_CONSENT_TEXT, /GolfCartIQ/);
-  assert.match(LEAD_SUCCESS_TEXT, /No dealer has been contacted automatically/);
+test("consent and success copy (Raphael scope change, exact text)", async () => {
+  assert.equal(LEAD_CONSENT_TEXT, "GolfCartIQ will contact you about this cart and may connect you with the dealer.");
+  assert.equal(LEAD_SUCCESS_TEXT, "Thanks, GolfCartIQ will reply within 1 business day.");
+  const { LEAD_FORM_TITLE, LEAD_FORM_FOLLOWUP } = await import("../shared/leadTracking");
+  assert.equal(LEAD_FORM_TITLE, "Check availability / Get a quote");
+  assert.match(LEAD_FORM_FOLLOWUP, /GolfCartIQ will follow up/);
+  const form = readFileSync(new URL("../client/src/components/leads/LeadQuoteForm.tsx", import.meta.url), "utf8");
+  assert.match(form, /<DialogTitle>\{LEAD_FORM_TITLE\}<\/DialogTitle>/);
+  assert.match(form, /data-testid="lead-followup">\{LEAD_FORM_FOLLOWUP\}/);
+  for (const f of ["shared/leadTracking.ts", "client/src/components/leads/LeadQuoteForm.tsx", "client/src/components/leads/LeadTracking.tsx"]) {
+    const src = readFileSync(new URL(`../${f}`, import.meta.url), "utf8");
+    assert.doesNotMatch(src, /dealer selling this cart|No dealer has been contacted|contact_unavailable/, f);
+  }
 });
 
 function memStore(nowFn: () => number = Date.now) {
@@ -97,6 +106,8 @@ function memStore(nowFn: () => number = Date.now) {
     async getPublicListing(id) { return id === 404 ? null : { listingId: id, dealerId: id === 12 ? null : 9 }; },
     async insertEvent(e) { if (fail.event) throw new Error("db down"); events.push(e); },
     findDuplicateLead: (q) => ml.findDuplicateLead(q),
+    listLeads: (p, n) => ml.listLeads(p, n),
+    markContacted: (id, at) => ml.markContacted(id, at),
     async insertLead(l) { if (fail.lead) throw new Error("db down"); return ml.insertLead(l); },
     hitRateLimit: memoryRateLimits(),
     getPaused: paused.getPaused, setPaused: paused.setPaused, clearPaused: paused.clearPaused,
@@ -229,12 +240,12 @@ test("client: ListingDetail gates on build-time flag only", () => {
   assert.match(src, /__LEAD_TRACKING_ENABLED__ \? \(\s*<>\s*<a href=\{`tel:/);
 });
 
-test("quote: listing without a dealer is blocked with a clear message", async () => {
+test("quote: listing without a dealer is accepted and stored with null dealer_id", async () => {
   await withApp(true, async (base, m) => {
     const r = await post(base + "/api/leads/quote", goodLead({ listingId: 12 }), UA, "4.4.4.4");
-    assert.equal(r.status, 422);
-    assert.equal((await r.json()).error, "contact_unavailable");
-    assert.equal(m.leads.length, 0);
+    assert.equal(r.status, 200);
+    assert.equal(m.leads.length, 1);
+    assert.equal(m.leads[0].dealerId, null);
   });
 });
 
@@ -364,14 +375,16 @@ test("notifier: structured LEAD_VOLUME_ALERT line only", async () => {
   assert.match(lines[0], /^LEAD_VOLUME_ALERT \{"type":"LEAD_VOLUME_ALERT"/);
 });
 
-test("UI: contact control hidden for no-dealer, paused, failed or pending status", async () => {
+test("UI: controls shown on every listing when live (incl. no dealer); hidden when paused/failed/pending", async () => {
   const { contactButtonMode, LeadContactButton } = await import("../client/src/components/leads/LeadTracking");
   for (const variant of ["contact", "quote"] as const) {
-    assert.equal(contactButtonMode({ live: true, dealerId: undefined, variant }), "hidden");   // no dealer
-    assert.equal(contactButtonMode({ live: true, dealerId: null, variant }), "hidden");
-    assert.equal(contactButtonMode({ live: false, dealerId: 9001, variant }), "hidden");      // paused / status failed / pending
-    assert.equal(contactButtonMode({ live: true, dealerId: 9001, variant }), variant);
+    assert.equal(contactButtonMode({ live: true, variant }), variant);     // dealer or no dealer
+    assert.equal(contactButtonMode({ live: false, variant }), "hidden");   // paused / salt missing / status failed / pending
   }
+  const tr = readFileSync(new URL("../client/src/components/leads/LeadTracking.tsx", import.meta.url), "utf8");
+  assert.match(tr, /data-testid="btn-contact-seller" onClick=\{open\}>\{LEAD_FORM_TITLE\}<\/Button>/);
+  assert.match(tr, /data-testid="btn-get-quote" onClick=\{open\}>\{LEAD_FORM_TITLE\}<\/Button>/);
+  assert.doesNotMatch(tr, /Contact Seller<\/Button>/);
   // First render (before the status check resolves) emits no markup: no dead button flash.
   const React = await import("react");
   const { renderToString } = await import("react-dom/server");
@@ -556,4 +569,73 @@ test("44px targets: dialog Close hit area (scoped style) and flag-on Call Seller
   assert.match(flagOn, /style=\{\{ minHeight: 44 \}\} data-testid="btn-contact-seller"><Phone className="h-4 w-4" \/> Call Seller/);
   assert.equal((src.match(/Check Similar Deals/g) ?? []).length, 1);
   assert.doesNotMatch(src, /minHeight: 44 \}\}[^\n]*Check Similar/);
+});
+
+test("admin leads list: newest first, 50/page, admin-only, null dealer shown", async () => {
+  await withApp(true, async (base, m, clock) => {
+    for (let i = 0; i < 52; i++) { clock.t += 1000; await post(base + "/api/leads/quote", goodLead({ listingId: i === 51 ? 12 : 300 + i, startedAt: clock.t - 10_000 }), UA, `5.0.${i}.1`); }
+    assert.equal(m.leads.length, 52);
+    assert.equal((await fetch(base + "/api/admin/leads")).status, 401);
+    const p1 = await (await fetch(base + "/api/admin/leads", { headers: { "x-admin-token": "pw" } })).json();
+    assert.deepEqual([p1.page, p1.pageSize, p1.total, p1.rows.length], [1, 50, 52, 50]);
+    assert.equal(p1.rows[0].listing_id, 12);       // newest first
+    assert.equal(p1.rows[0].dealer_id, null);
+    for (const k of ["id", "created_at", "listing_id", "listing_title", "dealer_id", "dealer_name", "name", "email", "phone", "zip", "message", "status", "contacted_at"]) assert.ok(k in p1.rows[0], k);
+    const p2 = await (await fetch(base + "/api/admin/leads?page=2", { headers: { "x-admin-token": "pw" } })).json();
+    assert.equal(p2.rows.length, 2);
+    assert.ok(p1.rows[49].created_at >= p2.rows[0].created_at);
+  });
+  await withApp(false, async (base) => {
+    assert.equal((await fetch(base + "/api/admin/leads", { headers: { "x-admin-token": "pw" } })).status, 404);
+    assert.equal((await fetch(base + "/api/admin/leads/1/contacted", { method: "POST", headers: { "x-admin-token": "pw" } })).status, 404);
+  });
+});
+
+test("mark contacted: admin-only, sets contacted_at + status, keeps first time, 404 unknown", async () => {
+  await withApp(true, async (base, m, clock) => {
+    await post(base + "/api/leads/quote", goodLead(), UA, "5.1.0.1");
+    const id = m.leads[0].id;
+    assert.equal((await fetch(base + `/api/admin/leads/${id}/contacted`, { method: "POST" })).status, 401);
+    const r = await (await fetch(base + `/api/admin/leads/${id}/contacted`, { method: "POST", headers: { "x-admin-token": "pw" } })).json();
+    assert.equal(r.lead.status, "contacted");
+    assert.equal(r.lead.contacted_at, new Date(T0).toISOString());
+    clock.t += 3600_000;
+    const r2 = await (await fetch(base + `/api/admin/leads/${id}/contacted`, { method: "POST", headers: { "x-admin-token": "pw" } })).json();
+    assert.equal(r2.lead.contacted_at, new Date(T0).toISOString()); // first time kept
+    assert.equal((await fetch(base + "/api/admin/leads/999/contacted", { method: "POST", headers: { "x-admin-token": "pw" } })).status, 404);
+    assert.equal((await fetch(base + "/api/admin/leads/1abc/contacted", { method: "POST", headers: { "x-admin-token": "pw" } })).status, 400);
+  });
+});
+
+test("admin token in the query string is refused (header only)", async () => {
+  const { makeRequireAdmin, rejectQueryTokens } = await import("../server/leads/admin-auth");
+  await withApp(true, async (base) => {
+    for (const q of ["token=pw", "x-admin-token=pw", "admin_token=pw", "password=pw"]) {
+      assert.equal((await fetch(base + `/api/admin/leads?${q}`)).status, 400, q);
+      assert.equal((await fetch(base + `/api/admin/leads?${q}`, { headers: { "x-admin-token": "pw" } })).status, 400, q);
+      assert.equal((await fetch(base + `/api/admin/leads/1/contacted?${q}`, { method: "POST" })).status, 400, q);
+    }
+  });
+  // fixture/test requireAdmin mirrors production: header only, timing-safe, wrong length rejected
+  const app = express();
+  app.get("/x", rejectQueryTokens, makeRequireAdmin("correct-horse-battery"), (_q, r) => { r.json({ ok: true }); });
+  const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try {
+    assert.equal((await fetch(base + "/x?token=correct-horse-battery")).status, 400);
+    assert.equal((await fetch(base + "/x", { headers: { "x-admin-token": "wrong" } })).status, 401);
+    assert.equal((await fetch(base + "/x", { headers: { "x-admin-token": "correct-horse-battery" } })).status, 200);
+  } finally { srv.close(); }
+  // production requireAdmin (server/routes.ts) reads only the header
+  const routes = readFileSync(new URL("../server/routes.ts", import.meta.url), "utf8");
+  const fn = routes.slice(routes.indexOf("function requireAdmin("), routes.indexOf("registerRecheckRoutes(app, requireAdmin);"));
+  assert.match(fn, /req\.headers\["x-admin-token"\]/);
+  assert.match(fn, /timingSafeEqual/);
+  assert.doesNotMatch(fn, /req\.query/);
+});
+
+test("Admin page: Leads tab only behind the build flag (ternary folds away when off)", () => {
+  const src = readFileSync(new URL("../client/src/pages/Admin.tsx", import.meta.url), "utf8");
+  assert.match(src, /\{__LEAD_TRACKING_ENABLED__ \? \(\s*<>\s*<TabsTrigger value="settings"[^\n]*\n\s*<TabsTrigger value="leads"/);
+  assert.match(src, /<TabsContent value="leads">\s*<AdminLeads adminToken=\{adminToken\} \/>/);
+  assert.equal((src.match(/value="leads"/g) ?? []).length, 2);
 });

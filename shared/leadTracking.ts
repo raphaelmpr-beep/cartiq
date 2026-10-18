@@ -76,9 +76,11 @@ export class RateLimiter {
 export const LEAD_MIN_FILL_MS = 3_000;
 export const LEAD_MAX_FILL_MS = 2 * 60 * 60_000;
 export const LEAD_CONSENT_TEXT =
-  "By submitting, you agree that GolfCartIQ stores these details and may share them with the dealer selling this cart so they can reply. No dealer is contacted automatically yet.";
+  "GolfCartIQ will contact you about this cart and may connect you with the dealer.";
 export const LEAD_SUCCESS_TEXT =
-  "Thanks, we've saved your request. No dealer has been contacted automatically yet: the GolfCartIQ team reviews requests and passes them on to the dealer.";
+  "Thanks, GolfCartIQ will reply within 1 business day.";
+export const LEAD_FORM_TITLE = "Check availability / Get a quote";
+export const LEAD_FORM_FOLLOWUP = "GolfCartIQ will follow up with you about this cart.";
 
 export interface LeadInput {
   listingId: number; name: string; email: string | null; phone: string | null;

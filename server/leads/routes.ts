@@ -9,6 +9,7 @@ import {
 } from "@shared/leadTracking";
 import type { LeadsStore } from "./store";
 import { logNotifier, type Notifier } from "./notifier";
+import { rejectQueryTokens } from "./admin-auth";
 
 export interface LeadRouteOptions {
   enabled?: boolean;
@@ -26,6 +27,8 @@ export interface LeadRouteOptions {
   /** Fixture mode only: add `fixtureBlocked` to silent-block responses. */
   exposeBlockReason?: boolean;
   onBlocked?: (reason: string) => void;
+  /** Fixture mode only: simulate a missing LEAD_IP_SALT without a restart. */
+  simulateSaltMissing?: () => boolean;
 }
 
 /** Rate-limit rules. Counters live in Postgres (lead_rate_limits) via the store. */
@@ -38,6 +41,7 @@ export const LIMITS = {
 } as const;
 
 export const MIN_SECRET_LEN = 16;
+export const LEADS_PAGE_SIZE = 50;
 
 export function clientIp(req: Request): string {
   const xff = req.headers["x-forwarded-for"];
@@ -58,8 +62,9 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   // closed, like the pause switch). No random fallback: a per-instance salt would break
   // cross-instance duplicate detection and make hashes unstable. Values are never logged.
   const rawSalt = opts.ipSalt ?? process.env.LEAD_IP_SALT;
-  const saltOk = typeof rawSalt === "string" && rawSalt.length >= MIN_SECRET_LEN;
-  const salt = saltOk ? rawSalt! : "";
+  const saltConfigured = typeof rawSalt === "string" && rawSalt.length >= MIN_SECRET_LEN;
+  const salt = saltConfigured ? rawSalt! : "";
+  const saltOk = () => saltConfigured && !opts.simulateSaltMissing?.();
   const hashIp = (ip: string) => createHash("sha256").update(salt + ip).digest("hex").slice(0, 32);
   // CRON_SECRET: missing/short = the bearer path is disabled (admin token still works).
   const rawCron = opts.cronSecret ?? process.env.CRON_SECRET;
@@ -90,7 +95,7 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   // lead_tracking_paused row reads paused=false. A failed read fails CLOSED (off).
   let gate: { active: boolean; at: number } | null = null;
   async function isActive(): Promise<boolean> {
-    if (!saltOk) { configError("LEAD_IP_SALT missing or shorter than 16 chars"); return false; }
+    if (!saltOk()) { configError("LEAD_IP_SALT missing or shorter than 16 chars"); return false; }
     if (gate && now() - gate.at < pausedCacheMs) return gate.active;
     let active = false;
     try {
@@ -167,9 +172,7 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
       const store = getStore();
       const ref = await store.getPublicListing(lead.listingId);
       if (!ref) return res.status(404).json({ error: "listing_unavailable" });
-      if (ref.dealerId == null) {
-        return res.status(422).json({ error: "contact_unavailable", message: "Contact isn't available for this listing." });
-      }
+      // Leads go to GolfCartIQ (not dealers); listings without a dealer are accepted (dealer_id null).
       // Duplicate (double submit / resend): return the original success, don't store
       // again and don't count it against the rate limits.
       const cHash = contactHash(lead.email, lead.phone);
@@ -193,8 +196,31 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
     }
   });
 
+  // Admin: leads list (newest first, 50/page) and mark-contacted. Existing admin auth
+  // (x-admin-token header); tokens in the URL are refused.
+  app.get("/api/admin/leads", rejectQueryTokens, requireAdmin, async (req, res) => {
+    noindex(res);
+    res.setHeader("Cache-Control", "no-store");
+    const page = Math.max(1, Math.min(10_000, Number.parseInt(String(req.query.page ?? "1"), 10) || 1));
+    try {
+      const { rows, total } = await getStore().listLeads(page, LEADS_PAGE_SIZE);
+      res.json({ page, pageSize: LEADS_PAGE_SIZE, total, rows });
+    } catch { res.status(500).json({ error: "list_failed" }); }
+  });
+  app.post("/api/admin/leads/:id/contacted", rejectQueryTokens, requireAdmin, async (req, res) => {
+    noindex(res);
+    const rawId = String(req.params.id);
+    const id = Number.parseInt(rawId, 10);
+    if (!Number.isInteger(id) || id <= 0 || String(id) !== rawId) return res.status(400).json({ error: "bad_id" });
+    try {
+      const r = await getStore().markContacted(id, new Date(now()).toISOString());
+      if (!r) return res.status(404).json({ error: "not_found" });
+      res.json({ ok: true, lead: r });
+    } catch { res.status(500).json({ error: "update_failed" }); }
+  });
+
   // Admin-only monthly report stub. ?month=YYYY-MM (default: current UTC month).
-  app.get("/api/admin/leads/monthly-report", requireAdmin, async (req, res) => {
+  app.get("/api/admin/leads/monthly-report", rejectQueryTokens, requireAdmin, async (req, res) => {
     noindex(res);
     const d = new Date(now());
     const month = typeof req.query.month === "string" ? req.query.month
@@ -208,7 +234,7 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   });
 
   // Admin-only volume monitor (for SRE): daily listing_events counts + 3x alert.
-  app.get("/api/admin/leads/event-volume", requireAdmin, async (_req, res) => {
+  app.get("/api/admin/leads/event-volume", rejectQueryTokens, requireAdmin, async (_req, res) => {
     noindex(res);
     try {
       const days = await getStore().dailyEventCounts(15, now());
@@ -230,7 +256,7 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   // and log LEAD_VOLUME_ALERT. Runs even while paused. Each run logs LEAD_CRON_RUN.
   app.post("/api/cron/lead-retention", cronAuth, async (_req, res) => {
     noindex(res);
-    if (!saltOk) {
+    if (!saltOk()) {
       configError("LEAD_IP_SALT missing or shorter than 16 chars");
       console.log(`LEAD_CRON_RUN ${JSON.stringify({ at: new Date(now()).toISOString(), ok: false, configError: true })}`);
       return res.status(503).json({ ok: false, error: "config_error" });
@@ -256,11 +282,11 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   });
 
   // Admin: read / clear the pause switch.
-  app.get("/api/admin/leads/paused", requireAdmin, async (_req, res) => {
+  app.get("/api/admin/leads/paused", rejectQueryTokens, requireAdmin, async (_req, res) => {
     noindex(res);
     try { res.json(await getStore().getPaused()); } catch { res.status(500).json({ error: "read_failed" }); }
   });
-  app.post("/api/admin/leads/paused/clear", requireAdmin, async (_req, res) => {
+  app.post("/api/admin/leads/paused/clear", rejectQueryTokens, requireAdmin, async (_req, res) => {
     noindex(res);
     try { await getStore().clearPaused(); gate = null; console.log("[leads] lead_tracking_paused cleared by admin"); res.json({ ok: true }); }
     catch { res.status(500).json({ error: "clear_failed" }); }

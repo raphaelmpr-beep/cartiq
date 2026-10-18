@@ -2,9 +2,8 @@
 // true; otherwise ListingDetail's references are constant-folded away and this
 // module (and the lazily loaded form chunk) is not in the bundle.
 import { useEffect, useState, type ComponentType } from "react";
-import { Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { LeadEventType } from "@shared/leadTracking";
+import { LEAD_FORM_TITLE, type LeadEventType } from "@shared/leadTracking";
 
 const SESSION_KEY = "gcq_lt_sid";
 
@@ -91,25 +90,25 @@ export function useLeadTracking(listing: L) {
 
 /**
  * What the flag-on contact control renders. Shown ONLY when lead tracking is live
- * (status check said enabled) AND the listing has a dealer. Otherwise hidden:
- * no dead button, no "unavailable" dead end. Status still loading = hidden.
+ * (status check said enabled: env flag on, LEAD_IP_SALT ok, not paused). Otherwise
+ * hidden: no dead button. Status still loading = hidden. Listings without a dealer
+ * get the form too (leads go to GolfCartIQ, not to dealers).
  */
-export function contactButtonMode(o: { live: boolean; dealerId?: number | null; variant: "contact" | "quote" }): "hidden" | "contact" | "quote" {
-  if (!o.live || !o.dealerId) return "hidden";
-  return o.variant;
+export function contactButtonMode(o: { live: boolean; variant: "contact" | "quote" }): "hidden" | "contact" | "quote" {
+  return o.live ? o.variant : "hidden";
 }
 
 /**
  * Flag on only. variant "contact": replaces the existing no-op "Contact Seller"
  * button (same look, same testid). variant "quote": an outline "Check availability
  * / Get a quote" button shown under Call Seller. Both fire contact_click and lazy-load
- * the form. The server's 422 contact_unavailable stays as a backstop.
+ * the form. Both read "Check availability / Get a quote".
  */
 export function LeadContactButton({ listingId, dealerId, title, variant = "contact" }: { listingId: number; dealerId?: number; title?: string; variant?: "contact" | "quote" }) {
   const [Form, setForm] = useState<ComponentType<{ listingId: number; title?: string; onClose: () => void }> | null>(null);
   const [live, setLive] = useState(false);
   useEffect(() => { let on = true; leadTrackingLive().then((v) => { if (on) setLive(v); }); return () => { on = false; }; }, []);
-  const mode = contactButtonMode({ live, dealerId, variant });
+  const mode = contactButtonMode({ live, variant });
   if (mode === "hidden") return null;
   const open = () => {
     sendLeadEvent("contact_click", listingId, dealerId);
@@ -118,9 +117,9 @@ export function LeadContactButton({ listingId, dealerId, title, variant = "conta
   return (
     <>
       {mode === "quote" ? (
-        <Button variant="outline" className="w-full" style={{ minHeight: 44 }} data-testid="btn-get-quote" onClick={open}>Check availability / Get a quote</Button>
+        <Button variant="outline" className="w-full" style={{ minHeight: 44 }} data-testid="btn-get-quote" onClick={open}>{LEAD_FORM_TITLE}</Button>
       ) : (
-        <Button className="w-full gap-2" style={{ minHeight: 44 }} data-testid="btn-contact-seller" onClick={open}><Phone className="h-4 w-4" /> Contact Seller</Button>
+        <Button className="w-full gap-2" style={{ minHeight: 44 }} data-testid="btn-contact-seller" onClick={open}>{LEAD_FORM_TITLE}</Button>
       )}
       {Form && <Form listingId={listingId} title={title} onClose={() => setForm(null)} />}
     </>

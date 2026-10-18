@@ -67,8 +67,23 @@ test("fixture app: no Supabase client constructed, no outbound network", async (
       assert.equal((await post("/api/leads/quote", { ...lead, listingId: 990002, startedAt: Date.now() - 5000 }, "9.9.1.1")).status, 429); // forced
       await fetch(base + "/api/__fixture/rate-limit?on=0");
       const nd = await post("/api/leads/quote", { ...lead, listingId: 990002, startedAt: Date.now() - 5000 }, "9.9.1.2");
-      assert.equal(nd.status, 422);
-      assert.equal((await nd.json()).error, "contact_unavailable");
+      assert.equal(nd.status, 200);
+      assert.equal(fx.leads.at(-1)!.dealerId, null); // no-dealer lead stored
+      // salt-missing toggle: same fail-closed path as a missing LEAD_IP_SALT
+      await fetch(base + "/api/__fixture/salt-missing?on=1");
+      assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, false);
+      const before = fx.leads.length;
+      assert.equal((await post("/api/leads/quote", { ...lead, startedAt: Date.now() - 5000 }, "9.9.1.3")).status, 503);
+      assert.equal(fx.leads.length, before);
+      await fetch(base + "/api/__fixture/salt-missing?on=0");
+      assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, true);
+      // fixture admin: header-only dev password
+      const { FIXTURE_ADMIN_PASSWORD } = await import("../server/fixture/app");
+      assert.equal((await fetch(base + "/api/admin/leads")).status, 401);
+      assert.equal((await fetch(base + "/api/admin/leads?token=" + FIXTURE_ADMIN_PASSWORD)).status, 400);
+      const list = await (await fetch(base + "/api/admin/leads", { headers: { "x-admin-token": FIXTURE_ADMIN_PASSWORD } })).json();
+      assert.equal(list.rows[0].dealer_name, null);
+      assert.equal(list.rows[0].listing_title, "FIXTURE 2021 EZGO Valor Private Seller");
       assert.equal((await fetch(base + "/api/anything-else")).status, 404);
       assert.ok(logs.some((l) => String(l[0]).includes("blocked (min-fill)")));
     } finally { srv.close(); }

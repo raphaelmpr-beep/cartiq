@@ -5,14 +5,39 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LeadEventType, LeadInput, DealerMonthRow, DayCount } from "@shared/leadTracking";
 import { RateLimiter } from "@shared/leadTracking";
 
+export interface AdminLeadRow {
+  id: number; created_at: string; listing_id: number; listing_title: string | null; listing_slug: string | null;
+  dealer_id: number | null; dealer_name: string | null; name: string; email: string | null; phone: string | null;
+  zip: string; message: string | null; status: string; contacted_at: string | null; forwarded_at: string | null;
+}
+
 export type LeadRow = LeadInput & {
   dealerId: number | null; consentText: string; ipHash: string | null; contactHash: string; dedupeBucket: number;
 };
 
 /** Memory lead table with the same uniqueness rules as the draft SQL (fixture + tests). */
-export function memoryLeads(rows: (LeadRow & { created_at: string })[] = [], nowFn = Date.now) {
+type MemLead = LeadRow & { id: number; created_at: string; status: string; contacted_at: string | null; forwarded_at: string | null };
+export function memoryLeads(rows: MemLead[] = [], nowFn = Date.now,
+  lookup: (listingId: number) => { title?: string; slug?: string; dealerName?: string } = () => ({})) {
+  let nextId = 1;
+  const toAdmin = (r: MemLead): AdminLeadRow => {
+    const x = lookup(r.listingId);
+    return { id: r.id, created_at: r.created_at, listing_id: r.listingId, listing_title: x.title ?? null, listing_slug: x.slug ?? null,
+      dealer_id: r.dealerId, dealer_name: r.dealerId == null ? null : x.dealerName ?? null, name: r.name, email: r.email, phone: r.phone,
+      zip: r.zip, message: r.message, status: r.status, contacted_at: r.contacted_at, forwarded_at: r.forwarded_at };
+  };
   return {
     rows,
+    async listLeads(page: number, pageSize: number) {
+      const sorted = [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+      return { rows: sorted.slice((page - 1) * pageSize, page * pageSize).map(toAdmin), total: rows.length };
+    },
+    async markContacted(id: number, at: string) {
+      const r = rows.find((x) => x.id === id);
+      if (!r) return null;
+      r.contacted_at ??= at; r.status = r.status === "forwarded" ? r.status : "contacted";
+      return toAdmin(r);
+    },
     async findDuplicateLead(q: { listingId: number; idempotencyKey: string; contactHash: string; since: string }) {
       return rows.some((r) => r.idempotencyKey === q.idempotencyKey ||
         (r.listingId === q.listingId && r.contactHash === q.contactHash && r.created_at >= q.since));
@@ -20,7 +45,7 @@ export function memoryLeads(rows: (LeadRow & { created_at: string })[] = [], now
     async insertLead(l: LeadRow) {
       if (rows.some((r) => r.idempotencyKey === l.idempotencyKey ||
         (r.listingId === l.listingId && r.contactHash === l.contactHash && r.dedupeBucket === l.dedupeBucket))) return { duplicate: true };
-      rows.push({ ...l, created_at: new Date(nowFn()).toISOString() });
+      rows.push({ ...l, id: nextId++, created_at: new Date(nowFn()).toISOString(), status: "new", contacted_at: null, forwarded_at: null });
       return { duplicate: false };
     },
   };
@@ -35,6 +60,10 @@ export interface LeadsStore {
   findDuplicateLead(q: { listingId: number; idempotencyKey: string; contactHash: string; since: string }): Promise<boolean>;
   /** Inserts; returns {duplicate:true} when a unique constraint (key or listing+contact+bucket) already holds it. */
   insertLead(l: LeadRow): Promise<{ duplicate: boolean }>;
+  /** Admin list, newest first. */
+  listLeads(page: number, pageSize: number): Promise<{ rows: AdminLeadRow[]; total: number }>;
+  /** Sets contacted_at (if unset) + status 'contacted'. null if no such lead. */
+  markContacted(id: number, at: string): Promise<AdminLeadRow | null>;
   monthlyReport(month: string): Promise<DealerMonthRow[]>;
   /** Atomic counter in lead_rate_limits. true = allowed. */
   hitRateLimit(scope: string, key: string, windowMs: number, limit: number, now: number): Promise<boolean>;
@@ -148,6 +177,38 @@ export function supabaseLeadsStore(sb: SupabaseClient): LeadsStore {
       if (error && (error as any).code === "23505") return { duplicate: true }; // lost the race: already stored
       if (error) throw new Error(error.message);
       return { duplicate: false };
+    },
+    async listLeads(page, pageSize) {
+      const from = (page - 1) * pageSize;
+      const { data, error, count } = await sb.from("listing_leads")
+        .select("id, created_at, listing_id, dealer_id, name, email, phone, zip, message, status, contacted_at, forwarded_at, listings(title, slug), dealers(name)", { count: "exact" })
+        .order("created_at", { ascending: false }).order("id", { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw new Error(error.message);
+      const rows = ((data ?? []) as any[]).map((r) => ({
+        id: r.id, created_at: r.created_at, listing_id: r.listing_id, listing_title: r.listings?.title ?? null, listing_slug: r.listings?.slug ?? null,
+        dealer_id: r.dealer_id, dealer_name: r.dealers?.name ?? null, name: r.name, email: r.email, phone: r.phone, zip: r.zip,
+        message: r.message, status: r.status, contacted_at: r.contacted_at, forwarded_at: r.forwarded_at,
+      }));
+      return { rows, total: count ?? rows.length };
+    },
+    async markContacted(id, at) {
+      // Keep the first contacted_at; don't downgrade a forwarded lead's status.
+      const { data: cur, error: e1 } = await sb.from("listing_leads").select("id, status, contacted_at").eq("id", id).maybeSingle();
+      if (e1) throw new Error(e1.message);
+      if (!cur) return null;
+      const patch: Record<string, unknown> = { contacted_at: cur.contacted_at ?? at };
+      if (cur.status !== "forwarded") patch.status = "contacted";
+      const { error: e2 } = await sb.from("listing_leads").update(patch).eq("id", id);
+      if (e2) throw new Error(e2.message);
+      const { data, error } = await sb.from("listing_leads")
+        .select("id, created_at, listing_id, dealer_id, name, email, phone, zip, message, status, contacted_at, forwarded_at, listings(title, slug), dealers(name)")
+        .eq("id", id).maybeSingle();
+      if (error) throw new Error(error.message);
+      const r: any = data;
+      return r ? { id: r.id, created_at: r.created_at, listing_id: r.listing_id, listing_title: r.listings?.title ?? null, listing_slug: r.listings?.slug ?? null,
+        dealer_id: r.dealer_id, dealer_name: r.dealers?.name ?? null, name: r.name, email: r.email, phone: r.phone, zip: r.zip,
+        message: r.message, status: r.status, contacted_at: r.contacted_at, forwarded_at: r.forwarded_at } : null;
     },
     async monthlyReport(month) {
       const { start, end } = monthBounds(month);

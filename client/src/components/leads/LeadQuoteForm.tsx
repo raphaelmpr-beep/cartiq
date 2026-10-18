@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { LEAD_CONSENT_TEXT, LEAD_SUCCESS_TEXT, checkLeadForm, serverErrorField, type LeadField } from "@shared/leadTracking";
+import { LEAD_CONSENT_TEXT, LEAD_SUCCESS_TEXT, LEAD_FORM_TITLE, LEAD_FORM_FOLLOWUP, checkLeadForm, serverErrorField, type LeadField } from "@shared/leadTracking";
 
 const TAP = { minHeight: 44 } as const;
 const LABEL = { display: "block", fontSize: 14, fontWeight: 500, marginBottom: 4 } as const;
@@ -53,7 +53,6 @@ export default function LeadQuoteForm({ listingId, title, onClose }: { listingId
       if (field) setFe({ [field]: field === "zip" ? checkLeadForm({ ...f, zip: "", consent }).zip : "Please check this field." });
       setErr(j.error === "rate_limited" ? "Too many requests. Please try again later."
         : j.error === "temporarily_unavailable" ? "Requests are paused right now. Please try again later."
-        : j.error === "contact_unavailable" ? "Contact isn't available for this listing."
         : r.status >= 500 ? "We couldn't save your request. Please try again in a few minutes."
         : "Please check your details and try again.");
       setState("error");
@@ -74,8 +73,8 @@ export default function LeadQuoteForm({ listingId, title, onClose }: { listingId
             style element, not Tailwind, so main's CSS and the shared component are untouched. */}
         <style>{`[data-lead-dialog] > button.absolute{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;top:6px;right:6px}`}</style>
         <DialogHeader>
-          <DialogTitle>Check availability / Get a quote</DialogTitle>
-          {title && <DialogDescription>{title}</DialogDescription>}
+          <DialogTitle>{LEAD_FORM_TITLE}</DialogTitle>
+          <DialogDescription data-testid="lead-followup">{LEAD_FORM_FOLLOWUP}{title ? <><br />{title}</> : null}</DialogDescription>
         </DialogHeader>
         {state === "done" ? (
           <>
