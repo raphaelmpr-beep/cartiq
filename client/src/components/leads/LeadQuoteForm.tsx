@@ -69,7 +69,10 @@ export default function LeadQuoteForm({ listingId, title, onClose }: { listingId
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent data-nosnippet>
+      <DialogContent data-nosnippet data-lead-dialog="">
+        {/* 44x44 hit area for the shared dialog's Close button (icon stays 16px). Scoped
+            style element, not Tailwind, so main's CSS and the shared component are untouched. */}
+        <style>{`[data-lead-dialog] > button.absolute{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;top:6px;right:6px}`}</style>
         <DialogHeader>
           <DialogTitle>Check availability / Get a quote</DialogTitle>
           {title && <DialogDescription>{title}</DialogDescription>}

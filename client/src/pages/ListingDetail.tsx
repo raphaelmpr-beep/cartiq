@@ -501,7 +501,7 @@ export default function ListingDetail() {
                   __LEAD_TRACKING_ENABLED__ ? (
                     <>
                       <a href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}>
-                        <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Call Seller</Button>
+                        <Button className="w-full gap-2" style={{ minHeight: 44 }} data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Call Seller</Button>
                       </a>
                       <LeadContactButton listingId={listing.id} dealerId={listing.dealerId} title={listing.title} variant="quote" />
                     </>

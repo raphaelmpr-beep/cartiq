@@ -67,7 +67,7 @@ export function createFixtureApp(opts: { log?: (...a: unknown[]) => void; fixtur
   app.get("/api/__fixture/store", (_req, res) => res.json({ events, leads: leads.length, forceRateLimit: state.forceRateLimit }));
   const admin = (_req: any, res: any) => res.status(401).json({ error: "Unauthorized (fixture mode has no admin)" });
   registerLeadRoutes(app, admin, {
-    enabled: true, store: () => store, ipSalt: "fixture",
+    enabled: true, store: () => store, ipSalt: "gcq-fixture-dev-salt-not-a-secret", // fixed dev salt (fixture only)
     forceRateLimit: () => state.forceRateLimit,
     exposeBlockReason: true,
     pausedCacheMs: 0,

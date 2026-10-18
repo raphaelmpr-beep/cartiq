@@ -14,6 +14,8 @@ import { volumeAlert } from "../shared/leadTracking";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
 const T0 = 1_760_000_000_000;
+const SALT = "test-salt-0123456789abcdef";
+const CRON = "test-cron-secret-0123456789";
 let leadN = 0;
 const goodLead = (o: Record<string, unknown> = {}) => ({
   idempotencyKey: randomUUID(), listingId: 5, name: "Pat Smith", email: `pat${++leadN}@example.com`, phone: "", zip: "32801",
@@ -113,7 +115,7 @@ async function withApp(enabled: boolean, fn: (base: string, m: ReturnType<typeof
   const admin = (req: any, res: any, next: any) => (req.headers["x-admin-token"] === "pw" ? next() : res.status(401).end());
   const logs: string[] = [];
   const alerts: any[] = [];
-  const registered = registerLeadRoutes(app, admin, { enabled, store: () => m.store, now: () => clock.t, ipSalt: "s", cronSecret: "cs", log: (msg) => logs.push(msg), notifier: (a) => alerts.push(a), pausedCacheMs: 0 });
+  const registered = registerLeadRoutes(app, admin, { enabled, store: () => m.store, now: () => clock.t, ipSalt: SALT, cronSecret: CRON, log: (msg) => logs.push(msg), notifier: (a) => alerts.push(a), pausedCacheMs: 0 });
   (m as any).alerts = alerts;
   (m as any).logs = logs;
   assert.equal(registered, enabled);
@@ -256,7 +258,7 @@ test("retention cron: cron secret or admin only; volume monitor admin-only", asy
     const c = (h: Record<string, string>) => fetch(base + "/api/cron/lead-retention", { method: "POST", headers: h });
     assert.equal((await c({})).status, 401);
     assert.equal((await c({ authorization: "Bearer wrong" })).status, 401);
-    const j = await (await c({ authorization: "Bearer cs" })).json();
+    const j = await (await c({ authorization: "Bearer " + CRON })).json();
     assert.equal(j.ok, true);
     assert.deepEqual(j.deleted, { leads: 1, events: 2, rate_limits: 3 });
     assert.equal(j.volume.alert, true);
@@ -267,7 +269,7 @@ test("retention cron: cron secret or admin only; volume monitor admin-only", asy
     assert.equal(v.baseline, 100);
   });
   await withApp(false, async (base) => {
-    assert.equal((await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer cs" } })).status, 404);
+    assert.equal((await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer " + CRON } })).status, 404);
   });
 });
 
@@ -283,7 +285,7 @@ test("volumeAlert + windowStart", () => {
 test("cron: volume alert sets lead_tracking_paused, logs LEAD_VOLUME_ALERT, then routes stop writing", async () => {
   await withApp(true, async (base, m) => {
     assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, true);
-    const j = await (await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer cs" } })).json();
+    const j = await (await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer " + CRON } })).json();
     assert.equal(j.pausedSet, true);
     assert.equal(m.paused.paused, true);
     assert.match(m.paused.reason!, /volume monitor/);
@@ -322,7 +324,7 @@ test("paused gate is cached (default 30 s)", async () => {
   const m = memStore(); let reads = 0; const orig = m.store.getPaused;
   m.store.getPaused = async () => { reads++; return orig(); };
   const clock = { t: T0 };
-  registerLeadRoutes(app, (_q, r) => { r.status(401).end(); }, { enabled: true, store: () => m.store, now: () => clock.t, ipSalt: "s" });
+  registerLeadRoutes(app, (_q, r) => { r.status(401).end(); }, { enabled: true, store: () => m.store, now: () => clock.t, ipSalt: SALT });
   const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
   try {
     for (let i = 0; i < 3; i++) await fetch(base + "/api/leads/status");
@@ -479,4 +481,79 @@ test("draft SQL: idempotency file keeps lockdown", () => {
   assert.match(sql, /create unique index if not exists uq_listing_leads_contact_bucket/);
   assert.match(sql, /revoke all on table public\.listing_leads from public, anon, authenticated/);
   assert.doesNotMatch(sql, /create policy|create (or replace )?function|grant /i);
+});
+
+async function saltApp(ipSalt: string | undefined, fn: (base: string, m: ReturnType<typeof memStore>, errs: string[]) => Promise<void>, cronSecret: string | undefined = CRON) {
+  const saved = process.env.LEAD_IP_SALT; delete process.env.LEAD_IP_SALT;
+  const errs: string[] = []; const realErr = console.error;
+  console.error = (...a: unknown[]) => { errs.push(a.map(String).join(" ")); };
+  const app = express(); app.use(express.json());
+  const m = memStore();
+  registerLeadRoutes(app, (req: any, res: any, next: any) => (req.headers["x-admin-token"] === "pw" ? next() : res.status(401).end()),
+    { enabled: true, store: () => m.store, ipSalt, cronSecret, pausedCacheMs: 0, log: () => {}, now: () => T0 });
+  const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try { await fn(base, m, errs); } finally { srv.close(); console.error = realErr; if (saved !== undefined) process.env.LEAD_IP_SALT = saved; }
+}
+
+for (const [label, salt] of [["missing", undefined], ["short", "only-15-chars.."]] as const) {
+  test(`LEAD_IP_SALT ${label}: tracking off (status off, events dropped, lead + cron 503), LEAD_CONFIG_ERROR logged once, no value`, async () => {
+    await saltApp(salt, async (base, m, errs) => {
+      assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, false);
+      await post(base + "/api/leads/event", { eventType: "listing_view", listingId: 5, sessionId: "abcdef123456" });
+      await tick();
+      assert.equal(m.events.length, 0);
+      const q = await post(base + "/api/leads/quote", goodLead(), UA, "7.7.0.1");
+      assert.equal(q.status, 503);
+      assert.equal(m.leads.length, 0);
+      const c = await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer " + CRON } });
+      assert.equal(c.status, 503);
+      const cfg = errs.filter((e) => e.startsWith("LEAD_CONFIG_ERROR"));
+      assert.equal(cfg.length, 1); // rate-limited
+      if (salt) for (const e of errs) assert.ok(!e.includes(salt));
+    });
+  });
+}
+
+test("LEAD_IP_SALT present (>=16): tracking on", async () => {
+  await saltApp(SALT, async (base, m, errs) => {
+    assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, true);
+    assert.equal((await post(base + "/api/leads/quote", goodLead(), UA, "7.7.0.2")).status, 200);
+    assert.equal(m.leads.length, 1);
+    assert.equal((await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer " + CRON } })).status, 200);
+    assert.equal(errs.filter((e) => e.startsWith("LEAD_CONFIG_ERROR")).length, 0);
+  });
+});
+
+test("LEAD_IP_SALT read from env when not injected", async () => {
+  const app = express(); app.use(express.json());
+  const m = memStore(); const saved = process.env.LEAD_IP_SALT;
+  process.env.LEAD_IP_SALT = SALT;
+  try {
+    registerLeadRoutes(app, (_q, r) => { r.status(401).end(); }, { enabled: true, store: () => m.store, pausedCacheMs: 0 });
+  } finally { if (saved === undefined) delete process.env.LEAD_IP_SALT; else process.env.LEAD_IP_SALT = saved; }
+  const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try { assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, true); } finally { srv.close(); }
+});
+
+test("CRON_SECRET missing or short: bearer rejected (401), admin token still works", async () => {
+  for (const cs of [undefined, "short-secret"]) {
+    await saltApp(SALT, async (base, _m, errs) => {
+      assert.equal((await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer " + (cs ?? "anything-at-all-123") } })).status, 401);
+      const ar = await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { "x-admin-token": "pw" } });
+      assert.equal(ar.status, 200);
+      assert.ok(errs.some((e) => e.startsWith("LEAD_CONFIG_ERROR") && e.includes("CRON_SECRET")));
+      if (cs) for (const e of errs) assert.ok(!e.includes(cs));
+    }, cs ?? "");
+  }
+});
+
+test("44px targets: dialog Close hit area (scoped style) and flag-on Call Seller only", () => {
+  const form = readFileSync(new URL("../client/src/components/leads/LeadQuoteForm.tsx", import.meta.url), "utf8");
+  assert.match(form, /data-lead-dialog=""/);
+  assert.match(form, /\[data-lead-dialog\] > button\.absolute\{min-width:44px;min-height:44px/);
+  const src = readFileSync(new URL("../client/src/pages/ListingDetail.tsx", import.meta.url), "utf8");
+  const flagOn = src.slice(src.indexOf("__LEAD_TRACKING_ENABLED__ ? (\n                    <>"), src.indexOf(") : (\n                    <a href"));
+  assert.match(flagOn, /style=\{\{ minHeight: 44 \}\} data-testid="btn-contact-seller"><Phone className="h-4 w-4" \/> Call Seller/);
+  assert.equal((src.match(/Check Similar Deals/g) ?? []).length, 1);
+  assert.doesNotMatch(src, /minHeight: 44 \}\}[^\n]*Check Similar/);
 });

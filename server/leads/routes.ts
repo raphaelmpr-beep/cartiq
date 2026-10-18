@@ -2,7 +2,7 @@
 // With the flag off this function returns before touching the app, so no route,
 // middleware or DB client exists and /api/leads/* falls through to today's 404.
 import type { Express, Request, Response, RequestHandler } from "express";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   parseFlag, isBotUserAgent, validateEvent, validateLead, Deduper,
   LEAD_CONSENT_TEXT, MONTH_RE, volumeAlert, LEAD_DEDUPE_MS,
@@ -37,6 +37,8 @@ export const LIMITS = {
   leadsPerListing: { scope: "lead_listing", windowMs: 24 * 60 * 60_000, limit: 20 },
 } as const;
 
+export const MIN_SECRET_LEN = 16;
+
 export function clientIp(req: Request): string {
   const xff = req.headers["x-forwarded-for"];
   const first = (Array.isArray(xff) ? xff[0] : xff ?? "").split(",")[0].trim();
@@ -52,9 +54,22 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   if (!enabled) return false;
   const now = opts.now ?? Date.now;
   const log = opts.log ?? ((msg, meta) => console.warn(`[leads] ${msg}`, meta ?? ""));
-  const salt = opts.ipSalt ?? process.env.LEAD_IP_SALT ?? randomBytes(16).toString("hex");
+  // LEAD_IP_SALT is required (>= 16 chars). Missing/short = lead tracking OFF (fail
+  // closed, like the pause switch). No random fallback: a per-instance salt would break
+  // cross-instance duplicate detection and make hashes unstable. Values are never logged.
+  const rawSalt = opts.ipSalt ?? process.env.LEAD_IP_SALT;
+  const saltOk = typeof rawSalt === "string" && rawSalt.length >= MIN_SECRET_LEN;
+  const salt = saltOk ? rawSalt! : "";
   const hashIp = (ip: string) => createHash("sha256").update(salt + ip).digest("hex").slice(0, 32);
-  const cronSecret = opts.cronSecret ?? process.env.CRON_SECRET;
+  // CRON_SECRET: missing/short = the bearer path is disabled (admin token still works).
+  const rawCron = opts.cronSecret ?? process.env.CRON_SECRET;
+  const cronSecret = typeof rawCron === "string" && rawCron.length >= MIN_SECRET_LEN ? rawCron : undefined;
+  let lastConfigLog = -Infinity;
+  const configError = (what: string) => {
+    if (now() - lastConfigLog < 60_000) return; // rate-limited: at most one line per minute
+    lastConfigLog = now();
+    console.error(`LEAD_CONFIG_ERROR ${JSON.stringify({ problem: what, effect: "lead tracking off" })}`);
+  };
   // Contact hash for duplicate detection (same listing + same email/phone within 10 min).
   // Salted like the IP hash; set LEAD_IP_SALT so it is stable across instances.
   const contactHash = (email: string | null, phone: string | null) =>
@@ -75,6 +90,7 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   // lead_tracking_paused row reads paused=false. A failed read fails CLOSED (off).
   let gate: { active: boolean; at: number } | null = null;
   async function isActive(): Promise<boolean> {
+    if (!saltOk) { configError("LEAD_IP_SALT missing or shorter than 16 chars"); return false; }
     if (gate && now() - gate.at < pausedCacheMs) return gate.active;
     let active = false;
     try {
@@ -205,6 +221,7 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   // Retention cron stub: admin token OR `Authorization: Bearer $CRON_SECRET`.
   const cronAuth: RequestHandler = (req, res, next) => {
     const auth = req.get("authorization") ?? "";
+    if (!cronSecret && auth.startsWith("Bearer ")) configError("CRON_SECRET missing or shorter than 16 chars; bearer auth disabled");
     if (cronSecret && auth.startsWith("Bearer ") && safeEq(auth.slice(7), cronSecret)) return next();
     return requireAdmin(req, res, next);
   };
@@ -213,6 +230,11 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   // and log LEAD_VOLUME_ALERT. Runs even while paused. Each run logs LEAD_CRON_RUN.
   app.post("/api/cron/lead-retention", cronAuth, async (_req, res) => {
     noindex(res);
+    if (!saltOk) {
+      configError("LEAD_IP_SALT missing or shorter than 16 chars");
+      console.log(`LEAD_CRON_RUN ${JSON.stringify({ at: new Date(now()).toISOString(), ok: false, configError: true })}`);
+      return res.status(503).json({ ok: false, error: "config_error" });
+    }
     const out: Record<string, unknown> = {};
     let ok = true;
     try { out.deleted = await getStore().cleanup(); }
