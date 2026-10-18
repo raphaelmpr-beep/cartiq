@@ -14,6 +14,7 @@ export default function LeadQuoteForm({ listingId, title, onClose }: { listingId
   const [consent, setConsent] = useState(false);
   const [state, setState] = useState<"idle" | "sending" | "done" | "error">("idle");
   const [err, setErr] = useState("");
+  const [blocked, setBlocked] = useState<string | null>(null); // set only by the fixture server
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
 
   async function submit(e: React.FormEvent) {
@@ -25,8 +26,8 @@ export default function LeadQuoteForm({ listingId, title, onClose }: { listingId
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...f, listingId, consent, startedAt: startedAt.current }),
       });
-      if (r.ok) { setState("done"); return; }
       const j = await r.json().catch(() => ({}));
+      if (r.ok) { setBlocked(typeof j.fixtureBlocked === "string" ? j.fixtureBlocked : null); setState("done"); return; }
       setErr(j.error === "rate_limited" ? "Too many requests. Please try again later." : "Please check your details and try again.");
       setState("error");
     } catch { setErr("Network error. Please try again."); setState("error"); }
@@ -40,7 +41,14 @@ export default function LeadQuoteForm({ listingId, title, onClose }: { listingId
           {title && <DialogDescription>{title}</DialogDescription>}
         </DialogHeader>
         {state === "done" ? (
-          <p className="text-sm" role="status" data-testid="lead-success">{LEAD_SUCCESS_TEXT}</p>
+          <>
+            {blocked && (
+              <p style={{ background: "#fde047", color: "#713f12", padding: "4px 8px", borderRadius: 4, fontFamily: "monospace", fontSize: 12 }} data-testid="lead-fixture-blocked">
+                DEV FIXTURE: blocked ({blocked}) — nothing stored
+              </p>
+            )}
+            <p className="text-sm" role="status" data-testid="lead-success">{LEAD_SUCCESS_TEXT}</p>
+          </>
         ) : (
           <form onSubmit={submit} className="space-y-3" noValidate>
             <Input placeholder="Name" value={f.name} onChange={set("name")} required maxLength={80} autoComplete="name" />

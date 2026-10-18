@@ -14,6 +14,11 @@ export interface LeadRouteOptions {
   store: () => LeadsStore; // lazy so nothing connects at registration time
   now?: () => number;
   ipSalt?: string;
+  /** Fixture mode only: force the 429 response so the UI state can be shown. */
+  forceRateLimit?: () => boolean;
+  /** Fixture mode only: add `fixtureBlocked` to silent-block responses. */
+  exposeBlockReason?: boolean;
+  onBlocked?: (reason: string) => void;
 }
 
 export function clientIp(req: Request): string {
@@ -66,12 +71,17 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   app.post("/api/leads/quote", async (req, res) => {
     noindex(res);
     try {
+      if (opts.forceRateLimit?.()) return res.status(429).json({ error: "rate_limited" });
       const ipH = hashIp(clientIp(req));
       if (!leadsPerIp.allow(ipH, now())) return res.status(429).json({ error: "rate_limited" });
       const v = validateLead(req.body, now());
       if (!v.ok) {
         // Honeypot / too-fast: pretend success so bots learn nothing; store nothing.
-        if (v.silent) return res.status(200).json({ ok: true });
+        if (v.silent) {
+          const reason = v.error === "too_fast" ? "min-fill" : v.error;
+          opts.onBlocked?.(reason);
+          return res.status(200).json(opts.exposeBlockReason ? { ok: true, fixtureBlocked: reason } : { ok: true });
+        }
         return res.status(400).json({ error: v.error });
       }
       const lead = v.value;
