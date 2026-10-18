@@ -5,12 +5,36 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LeadEventType, LeadInput, DealerMonthRow, DayCount } from "@shared/leadTracking";
 import { RateLimiter } from "@shared/leadTracking";
 
+export type LeadRow = LeadInput & {
+  dealerId: number | null; consentText: string; ipHash: string | null; contactHash: string; dedupeBucket: number;
+};
+
+/** Memory lead table with the same uniqueness rules as the draft SQL (fixture + tests). */
+export function memoryLeads(rows: (LeadRow & { created_at: string })[] = [], nowFn = Date.now) {
+  return {
+    rows,
+    async findDuplicateLead(q: { listingId: number; idempotencyKey: string; contactHash: string; since: string }) {
+      return rows.some((r) => r.idempotencyKey === q.idempotencyKey ||
+        (r.listingId === q.listingId && r.contactHash === q.contactHash && r.created_at >= q.since));
+    },
+    async insertLead(l: LeadRow) {
+      if (rows.some((r) => r.idempotencyKey === l.idempotencyKey ||
+        (r.listingId === l.listingId && r.contactHash === l.contactHash && r.dedupeBucket === l.dedupeBucket))) return { duplicate: true };
+      rows.push({ ...l, created_at: new Date(nowFn()).toISOString() });
+      return { duplicate: false };
+    },
+  };
+}
+
 export interface ListingRef { listingId: number; dealerId: number | null; }
 export interface LeadsStore {
   /** Returns the listing's dealer if the listing exists, is active and public; else null. */
   getPublicListing(listingId: number): Promise<ListingRef | null>;
   insertEvent(e: { eventType: LeadEventType; listingId: number; dealerId: number | null; sessionId: string }): Promise<void>;
-  insertLead(l: LeadInput & { dealerId: number | null; consentText: string; ipHash: string | null }): Promise<void>;
+  /** Existing lead with this idempotency key, or same listing + contact hash since `since`. */
+  findDuplicateLead(q: { listingId: number; idempotencyKey: string; contactHash: string; since: string }): Promise<boolean>;
+  /** Inserts; returns {duplicate:true} when a unique constraint (key or listing+contact+bucket) already holds it. */
+  insertLead(l: LeadRow): Promise<{ duplicate: boolean }>;
   monthlyReport(month: string): Promise<DealerMonthRow[]>;
   /** Atomic counter in lead_rate_limits. true = allowed. */
   hitRateLimit(scope: string, key: string, windowMs: number, limit: number, now: number): Promise<boolean>;
@@ -106,12 +130,24 @@ export function supabaseLeadsStore(sb: SupabaseClient): LeadsStore {
       const { error } = await sb.from("listing_events").insert({ event_type: e.eventType, listing_id: e.listingId, dealer_id: e.dealerId, session_id: e.sessionId });
       if (error) throw new Error(error.message);
     },
+    async findDuplicateLead(q) {
+      const byKey = await sb.from("listing_leads").select("id").eq("idempotency_key", q.idempotencyKey).limit(1);
+      if (byKey.error) throw new Error(byKey.error.message);
+      if (byKey.data?.length) return true;
+      const byContact = await sb.from("listing_leads").select("id")
+        .eq("listing_id", q.listingId).eq("contact_hash", q.contactHash).gte("created_at", q.since).limit(1);
+      if (byContact.error) throw new Error(byContact.error.message);
+      return !!byContact.data?.length;
+    },
     async insertLead(l) {
       const { error } = await sb.from("listing_leads").insert({
         listing_id: l.listingId, dealer_id: l.dealerId, name: l.name, email: l.email, phone: l.phone,
         zip: l.zip, message: l.message, consent_text: l.consentText, ip_hash: l.ipHash,
+        idempotency_key: l.idempotencyKey, contact_hash: l.contactHash, dedupe_bucket: l.dedupeBucket,
       });
+      if (error && (error as any).code === "23505") return { duplicate: true }; // lost the race: already stored
       if (error) throw new Error(error.message);
+      return { duplicate: false };
     },
     async monthlyReport(month) {
       const { start, end } = monthBounds(month);

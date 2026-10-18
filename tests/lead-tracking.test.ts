@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import express from "express";
 import type { AddressInfo } from "node:net";
 import {
@@ -8,13 +9,14 @@ import {
   LEAD_CONSENT_TEXT, LEAD_SUCCESS_TEXT, LEAD_MIN_FILL_MS,
 } from "../shared/leadTracking";
 import { registerLeadRoutes } from "../server/leads/routes";
-import { aggregateMonthly, monthBounds, memoryRateLimits, memoryPaused, windowStart, type LeadsStore } from "../server/leads/store";
+import { aggregateMonthly, monthBounds, memoryRateLimits, memoryPaused, memoryLeads, windowStart, type LeadsStore } from "../server/leads/store";
 import { volumeAlert } from "../shared/leadTracking";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
 const T0 = 1_760_000_000_000;
+let leadN = 0;
 const goodLead = (o: Record<string, unknown> = {}) => ({
-  listingId: 5, name: "Pat Smith", email: "pat@example.com", phone: "", zip: "32801",
+  idempotencyKey: randomUUID(), listingId: 5, name: "Pat Smith", email: `pat${++leadN}@example.com`, phone: "", zip: "32801",
   message: "Is it still available?", consent: true, website: "", startedAt: T0 - 10_000, ...o,
 });
 
@@ -83,14 +85,17 @@ test("consent and success copy (Inspector requirements)", () => {
   assert.match(LEAD_SUCCESS_TEXT, /No dealer has been contacted automatically/);
 });
 
-function memStore() {
-  const events: any[] = [], leads: any[] = [];
+function memStore(nowFn: () => number = Date.now) {
+  const events: any[] = [];
   const fail = { event: false, lead: false };
+  const ml = memoryLeads([], nowFn);
+  const leads = ml.rows;
   const paused = memoryPaused();
   const store: LeadsStore = {
     async getPublicListing(id) { return id === 404 ? null : { listingId: id, dealerId: id === 12 ? null : 9 }; },
     async insertEvent(e) { if (fail.event) throw new Error("db down"); events.push(e); },
-    async insertLead(l) { if (fail.lead) throw new Error("db down"); leads.push(l); },
+    findDuplicateLead: (q) => ml.findDuplicateLead(q),
+    async insertLead(l) { if (fail.lead) throw new Error("db down"); return ml.insertLead(l); },
     hitRateLimit: memoryRateLimits(),
     getPaused: paused.getPaused, setPaused: paused.setPaused, clearPaused: paused.clearPaused,
     async cleanup() { return { leads: 1, events: 2, rate_limits: 3 }; },
@@ -103,8 +108,8 @@ function memStore() {
 async function withApp(enabled: boolean, fn: (base: string, m: ReturnType<typeof memStore>, clock: { t: number }) => Promise<void>) {
   const app = express();
   app.use(express.json());
-  const m = memStore();
   const clock = { t: T0 };
+  const m = memStore(() => clock.t);
   const admin = (req: any, res: any, next: any) => (req.headers["x-admin-token"] === "pw" ? next() : res.status(401).end());
   const logs: string[] = [];
   const alerts: any[] = [];
@@ -160,7 +165,8 @@ test("quote: stores lead, honeypot silent, per-IP and per-listing limits", async
     assert.equal((await post(base + "/api/leads/quote", goodLead({ website: "x" }), UA, "2.2.2.2")).status, 200);
     assert.equal(m.leads.length, 1);
     assert.equal((await post(base + "/api/leads/quote", goodLead({ zip: "x" }), UA, "2.2.2.2")).status, 400);
-    assert.equal((await post(base + "/api/leads/quote", goodLead(), UA, "1.1.1.1")).status, 429); // same ip+listing
+    assert.equal((await post(base + "/api/leads/quote", goodLead({ email: m.leads[0].email }), UA, "1.1.1.1")).status, 200); // same contact+listing: duplicate
+    assert.equal(m.leads.length, 1);
     for (let i = 0; i < 4; i++) await post(base + "/api/leads/quote", goodLead({ listingId: 100 + i }), UA, "3.3.3.3");
     assert.equal((await post(base + "/api/leads/quote", goodLead({ listingId: 200 }), UA, "3.3.3.3")).status, 200);
     assert.equal((await post(base + "/api/leads/quote", goodLead({ listingId: 201 }), UA, "3.3.3.3")).status, 429); // 5/h per IP
@@ -371,4 +377,106 @@ test("UI: contact control hidden for no-dealer, paused, failed or pending status
     assert.equal(renderToString(React.createElement(LeadContactButton, { listingId: 1, dealerId: 9001, variant })), "");
     assert.equal(renderToString(React.createElement(LeadContactButton, { listingId: 1, variant })), "");
   }
+});
+
+test("double submit: same idempotency key twice -> one lead, both succeed, not counted", async () => {
+  await withApp(true, async (base, m) => {
+    const lead = goodLead({ listingId: 61 });
+    const a = await post(base + "/api/leads/quote", lead, UA, "6.1.1.1");
+    const b = await post(base + "/api/leads/quote", lead, UA, "6.1.1.1");
+    assert.deepEqual([a.status, b.status], [200, 200]);
+    assert.deepEqual(await b.json(), { ok: true });
+    assert.equal(m.leads.length, 1);
+    // duplicate didn't consume the per-IP budget (5/h): 4 more distinct leads still pass
+    for (let i = 0; i < 4; i++) assert.equal((await post(base + "/api/leads/quote", goodLead({ listingId: 70 + i }), UA, "6.1.1.1")).status, 200);
+  });
+});
+
+test("double submit: same listing + same contact within 10 min, new key -> one lead", async () => {
+  await withApp(true, async (base, m, clock) => {
+    const a = await post(base + "/api/leads/quote", goodLead({ listingId: 62, email: "same@example.com" }), UA, "6.2.1.1");
+    clock.t += 5 * 60_000;
+    const b = await post(base + "/api/leads/quote", goodLead({ listingId: 62, email: "SAME@example.com", startedAt: clock.t - 10_000 }), UA, "6.2.1.2");
+    assert.deepEqual([a.status, b.status], [200, 200]);
+    assert.equal(m.leads.length, 1);
+    clock.t += 6 * 60_000; // > 10 min after the first: a genuine new request
+    const c = await post(base + "/api/leads/quote", goodLead({ listingId: 62, email: "same@example.com", startedAt: clock.t - 10_000 }), UA, "6.2.1.3");
+    assert.equal(c.status, 200);
+    assert.equal(m.leads.length, 2);
+  });
+});
+
+test("double submit: concurrent POSTs race -> unique conflict caught, one lead, both succeed", async () => {
+  await withApp(true, async (base, m) => {
+    // Force both requests past the pre-check so the insert-level uniqueness decides.
+    m.store.findDuplicateLead = async () => false;
+    const lead = goodLead({ listingId: 63 });
+    const rs = await Promise.all([1, 2, 3].map(() => post(base + "/api/leads/quote", lead, UA, "6.3.1.1")));
+    assert.deepEqual(rs.map((r) => r.status), [200, 200, 200]);
+    assert.equal(m.leads.length, 1);
+  });
+});
+
+test("supabase store maps unique violation 23505 to duplicate, other errors throw", async () => {
+  const { supabaseLeadsStore } = await import("../server/leads/store");
+  const mk = (error: any) => ({ from: () => ({ insert: async () => ({ error }) }) }) as any;
+  const row: any = { ...goodLead(), dealerId: 1, consentText: "c", ipHash: null, contactHash: "a".repeat(32), dedupeBucket: 1 };
+  assert.deepEqual(await supabaseLeadsStore(mk({ code: "23505", message: "dup" })).insertLead(row), { duplicate: true });
+  assert.deepEqual(await supabaseLeadsStore(mk(null)).insertLead(row), { duplicate: false });
+  await assert.rejects(() => supabaseLeadsStore(mk({ code: "08006", message: "down" })).insertLead(row));
+});
+
+test("idempotency key required and UUID-shaped", () => {
+  assert.equal((validateLead(goodLead({ idempotencyKey: undefined }), T0) as any).error, "idempotency_key");
+  assert.equal((validateLead(goodLead({ idempotencyKey: "abc" }), T0) as any).error, "idempotency_key");
+});
+
+test("form checks: ZIP same rule as server with ZIP message; contact error; server code -> field", async () => {
+  const { checkLeadForm, serverErrorField, ZIP_MESSAGE } = await import("../shared/leadTracking");
+  const ok = { name: "Pat Smith", email: "p@example.com", phone: "", zip: "32801", consent: true };
+  assert.deepEqual(checkLeadForm(ok), {});
+  for (const zip of ["3280", "abcde", "32801-12", ""]) {
+    assert.equal(checkLeadForm({ ...ok, zip }).zip, ZIP_MESSAGE);
+    assert.equal(validateLead(goodLead({ zip }), T0).ok, false); // server agrees
+  }
+  assert.equal(checkLeadForm({ ...ok, zip: "32801-1234" }).zip, undefined);
+  assert.equal(checkLeadForm({ ...ok, email: "", phone: "" }).contact, "Add an email or a phone number.");
+  assert.ok(checkLeadForm({ ...ok, phone: "123" }).phone);
+  assert.ok(checkLeadForm({ ...ok, name: "see x.com" }).name);
+  assert.equal(serverErrorField("zip"), "zip");
+  assert.equal(serverErrorField("contact_required"), "contact");
+  assert.equal(serverErrorField("rate_limited"), null);
+});
+
+test("form markup: labels, aria wiring, 44px targets, idempotency + no auto-resend", async () => {
+  const src = readFileSync(new URL("../client/src/components/leads/LeadQuoteForm.tsx", import.meta.url), "utf8");
+  for (const k of ["name", "email", "phone", "zip", "message", "consent"]) {
+    assert.match(src, new RegExp(`htmlFor=\\{id\\("${k}"\\)\\}`), `label for ${k}`);
+    assert.match(src, new RegExp(`id=\\{id\\("${k}"\\)\\}`), `control id ${k}`);
+  }
+  assert.doesNotMatch(src, /placeholder=/); // labels, not placeholders
+  assert.match(src, /"aria-invalid"/);
+  assert.match(src, /"aria-describedby"/);
+  assert.match(src, /a11y\("email", "contact"\)/);
+  assert.match(src, /a11y\("phone", "contact"\)/);
+  assert.match(src, /<fieldset aria-describedby=\{fe\.contact \? id\("contact-err"\)/);
+  assert.equal((src.match(/style=\{TAP\}/g) ?? []).length, 5); // name, email, phone, zip, submit
+  assert.match(src, /const TAP = \{ minHeight: 44 \}/);
+  assert.match(src, /idempotencyKey: idemKey\.current/);
+  assert.match(src, /if \(inFlight\.current\) return;/);
+  assert.match(src, /disabled=\{state === "sending"\}/);
+  const tr = readFileSync(new URL("../client/src/components/leads/LeadTracking.tsx", import.meta.url), "utf8");
+  assert.equal((tr.match(/style=\{\{ minHeight: 44 \}\}/g) ?? []).length, 2); // quote + contact buttons
+  const { newIdempotencyKey } = await import("../client/src/components/leads/LeadQuoteForm");
+  const k1 = newIdempotencyKey(), k2 = newIdempotencyKey();
+  assert.match(k1, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.notEqual(k1, k2);
+});
+
+test("draft SQL: idempotency file keeps lockdown", () => {
+  const sql = readFileSync(new URL("../db/drafts/20261018_lead_idempotency_draft.sql", import.meta.url), "utf8");
+  assert.match(sql, /create unique index if not exists uq_listing_leads_idempotency_key/);
+  assert.match(sql, /create unique index if not exists uq_listing_leads_contact_bucket/);
+  assert.match(sql, /revoke all on table public\.listing_leads from public, anon, authenticated/);
+  assert.doesNotMatch(sql, /create policy|create (or replace )?function|grant /i);
 });

@@ -82,12 +82,17 @@ export const LEAD_SUCCESS_TEXT =
 
 export interface LeadInput {
   listingId: number; name: string; email: string | null; phone: string | null;
-  zip: string; message: string | null; consent: true;
+  zip: string; message: string | null; consent: true; idempotencyKey: string;
 }
 
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const LEAD_DEDUPE_MS = 10 * 60_000;
+/** Same rule as the server, for the form's inline check. */
+export const ZIP_MESSAGE = "Enter a 5-digit ZIP code (for example 32801).";
+
 const URL_RE = /(https?:\/\/|www\.|\b[a-z0-9-]+\.(com|net|org|io|ru|xyz|info|biz|co|us|top|site|online)\b|<|>)/i;
-const EMAIL_RE = /^[^\s@<>()]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
-const ZIP_RE = /^\d{5}(-\d{4})?$/;
+export const EMAIL_RE = /^[^\s@<>()]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
+export const ZIP_RE = /^\d{5}(-\d{4})?$/;
 
 export type LeadCheck =
   | { ok: true; value: LeadInput }
@@ -122,7 +127,9 @@ export function validateLead(body: unknown, now = Date.now()): LeadCheck {
   if (message && message.length > 1000) return { ok: false, error: "message" };
   if (message && (message.match(/https?:\/\//gi) ?? []).length > 1) return { ok: false, error: "message" };
   if (b.consent !== true) return { ok: false, error: "consent" };
-  return { ok: true, value: { listingId, name, email: email ? email.toLowerCase() : null, phone, zip, message, consent: true } };
+  const idempotencyKey = str(b.idempotencyKey).toLowerCase();
+  if (!UUID_RE.test(idempotencyKey)) return { ok: false, error: "idempotency_key" };
+  return { ok: true, value: { listingId, name, email: email ? email.toLowerCase() : null, phone, zip, message, consent: true, idempotencyKey } };
 }
 
 // ── Monthly report ─────────────────────────────────────────────────────────
@@ -148,4 +155,28 @@ export function volumeAlert(days: DayCount[], factor = 3, minBaseline = 50) {
   const baseline = prior.length % 2 ? prior[mid] : (prior[mid - 1] + prior[mid]) / 2;
   const alert = latest.events > factor * Math.max(baseline, minBaseline);
   return { alert, reason: alert ? `latest ${latest.events} > ${factor}x baseline ${baseline}` : "ok", latest, baseline };
+}
+
+// ── Form-side checks (same rules as validateLead, field-specific messages) ──
+export type LeadField = "name" | "contact" | "email" | "phone" | "zip" | "message" | "consent";
+export function checkLeadForm(f: { name: string; email: string; phone: string; zip: string; message?: string; consent: boolean }): Partial<Record<LeadField, string>> {
+  const e: Partial<Record<LeadField, string>> = {};
+  const name = f.name.trim();
+  if (name.length < 2 || name.length > 80 || URL_RE.test(name)) e.name = "Enter your name (2–80 characters, no links).";
+  const email = f.email.trim(), phone = f.phone.trim();
+  if (!email && !phone) e.contact = "Add an email or a phone number.";
+  if (email && (email.length > 254 || !EMAIL_RE.test(email))) e.email = "Enter a valid email address.";
+  if (phone) {
+    const d = phone.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+    if (phone.length > 25 || !/^[\d\s().+-]+$/.test(phone) || d.length !== 10) e.phone = "Enter a 10-digit US phone number.";
+  }
+  if (!ZIP_RE.test(f.zip.trim())) e.zip = ZIP_MESSAGE;
+  if ((f.message ?? "").trim().length > 1000) e.message = "Keep the message under 1,000 characters.";
+  if (!f.consent) e.consent = "Please agree so we can pass your request on.";
+  return e;
+}
+/** Maps a server 400 error code to the field it belongs to. */
+export function serverErrorField(code: string): LeadField | null {
+  return (["name", "email", "phone", "zip", "message", "consent"] as const).find((k) => k === code)
+    ?? (code === "contact_required" ? "contact" : null);
 }

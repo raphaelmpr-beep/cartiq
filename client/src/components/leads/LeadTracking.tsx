@@ -118,9 +118,9 @@ export function LeadContactButton({ listingId, dealerId, title, variant = "conta
   return (
     <>
       {mode === "quote" ? (
-        <Button variant="outline" className="w-full" data-testid="btn-get-quote" onClick={open}>Check availability / Get a quote</Button>
+        <Button variant="outline" className="w-full" style={{ minHeight: 44 }} data-testid="btn-get-quote" onClick={open}>Check availability / Get a quote</Button>
       ) : (
-        <Button className="w-full gap-2" data-testid="btn-contact-seller" onClick={open}><Phone className="h-4 w-4" /> Contact Seller</Button>
+        <Button className="w-full gap-2" style={{ minHeight: 44 }} data-testid="btn-contact-seller" onClick={open}><Phone className="h-4 w-4" /> Contact Seller</Button>
       )}
       {Form && <Form listingId={listingId} title={title} onClose={() => setForm(null)} />}
     </>

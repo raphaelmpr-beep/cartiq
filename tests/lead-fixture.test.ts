@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import type { AddressInfo } from "node:net";
 import { build } from "esbuild";
+import { randomUUID } from "node:crypto";
 import { assertFixtureAllowed, fixtureModeRequested } from "../server/fixture/guard";
 
 test("fixture guard: refuses production, ignores APP_ENV", () => {
@@ -48,7 +49,7 @@ test("fixture app: no Supabase client constructed, no outbound network", async (
     await new Promise((r) => srv.once("listening", r));
     const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
     const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
-    const post = (p: string, b: unknown, ip = "5.5.5.5") => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", "user-agent": UA, "x-forwarded-for": ip }, body: JSON.stringify(b) });
+    const post = (p: string, b: unknown, ip = "5.5.5.5") => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", "user-agent": UA, "x-forwarded-for": ip }, body: JSON.stringify((b as any)?.name ? { idempotencyKey: randomUUID(), ...(b as any), email: `f${Math.random().toString(36).slice(2)}@example.com` } : b) });
     try {
       assert.equal((await (await fetch(base + "/api/listings/990001")).json()).dealerId, 9001);
       assert.equal((await (await fetch(base + "/api/listings/990002")).json()).dealerId, undefined);

@@ -5,7 +5,7 @@ import type { Express, Request, Response, RequestHandler } from "express";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   parseFlag, isBotUserAgent, validateEvent, validateLead, Deduper,
-  LEAD_CONSENT_TEXT, MONTH_RE, volumeAlert,
+  LEAD_CONSENT_TEXT, MONTH_RE, volumeAlert, LEAD_DEDUPE_MS,
 } from "@shared/leadTracking";
 import type { LeadsStore } from "./store";
 import { logNotifier, type Notifier } from "./notifier";
@@ -32,7 +32,8 @@ export interface LeadRouteOptions {
 export const LIMITS = {
   eventsPerIp:     { scope: "ev_ip",      windowMs: 60_000,           limit: 120 },
   leadsPerIp:      { scope: "lead_ip",    windowMs: 60 * 60_000,      limit: 5 },
-  leadsPerIpListing: { scope: "lead_ip_listing", windowMs: 10 * 60_000, limit: 1 },
+  // (lead_ip_listing removed: "same person, same cart within 10 min" is now handled by
+  //  the contact-hash duplicate check, which returns the original success instead of 429.)
   leadsPerListing: { scope: "lead_listing", windowMs: 24 * 60 * 60_000, limit: 20 },
 } as const;
 
@@ -54,6 +55,10 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   const salt = opts.ipSalt ?? process.env.LEAD_IP_SALT ?? randomBytes(16).toString("hex");
   const hashIp = (ip: string) => createHash("sha256").update(salt + ip).digest("hex").slice(0, 32);
   const cronSecret = opts.cronSecret ?? process.env.CRON_SECRET;
+  // Contact hash for duplicate detection (same listing + same email/phone within 10 min).
+  // Salted like the IP hash; set LEAD_IP_SALT so it is stable across instances.
+  const contactHash = (email: string | null, phone: string | null) =>
+    createHash("sha256").update(`${salt}|c|${email ?? ""}|${phone ?? ""}`).digest("hex").slice(0, 32);
 
   // Dedupe stays in memory: it only drops repeat views/double clicks (a miss just
   // records one extra view); it is not an abuse control.
@@ -149,11 +154,20 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
       if (ref.dealerId == null) {
         return res.status(422).json({ error: "contact_unavailable", message: "Contact isn't available for this listing." });
       }
+      // Duplicate (double submit / resend): return the original success, don't store
+      // again and don't count it against the rate limits.
+      const cHash = contactHash(lead.email, lead.phone);
+      const t = now();
+      if (await store.findDuplicateLead({ listingId: lead.listingId, idempotencyKey: lead.idempotencyKey, contactHash: cHash, since: new Date(t - LEAD_DEDUPE_MS).toISOString() })) {
+        return res.status(200).json({ ok: true });
+      }
       const ipH = hashIp(clientIp(req));
       if (!(await hit(LIMITS.leadsPerIp, ipH))) return res.status(429).json({ error: "rate_limited" });
-      if (!(await hit(LIMITS.leadsPerIpListing, `${ipH}:${lead.listingId}`))) return res.status(429).json({ error: "rate_limited" });
       if (!(await hit(LIMITS.leadsPerListing, String(lead.listingId)))) return res.status(429).json({ error: "rate_limited" });
-      await store.insertLead({ ...lead, dealerId: ref.dealerId, consentText: LEAD_CONSENT_TEXT, ipHash: ipH });
+      // Race: a concurrent identical POST can pass the check above; the unique
+      // constraints catch it and the loser also gets the original success.
+      await store.insertLead({ ...lead, dealerId: ref.dealerId, consentText: LEAD_CONSENT_TEXT, ipHash: ipH,
+        contactHash: cHash, dedupeBucket: Math.floor(t / LEAD_DEDUPE_MS) });
       // No email, SMS or webhook to any dealer. Leads wait for manual admin review.
       return res.status(200).json({ ok: true });
     } catch (err: any) {

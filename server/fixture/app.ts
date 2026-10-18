@@ -3,7 +3,7 @@
 import express, { type Express } from "express";
 import { readFileSync } from "node:fs";
 import { registerLeadRoutes } from "../leads/routes";
-import { aggregateMonthly, memoryRateLimits, memoryPaused, type LeadsStore } from "../leads/store";
+import { aggregateMonthly, memoryRateLimits, memoryPaused, memoryLeads, type LeadsStore } from "../leads/store";
 
 type Fx = { dealers: any[]; listings: any[] };
 
@@ -14,7 +14,9 @@ export function loadFixtures(path = new URL("./fixtures.json", import.meta.url))
 export function createFixtureApp(opts: { log?: (...a: unknown[]) => void; fixtures?: Fx } = {}) {
   const log = opts.log ?? ((...a: unknown[]) => console.log("[fixture]", ...a));
   const fx = opts.fixtures ?? loadFixtures();
-  const events: any[] = [], leads: any[] = [];
+  const events: any[] = [];
+  const memLeads = memoryLeads();
+  const leads = memLeads.rows;
   const state = { forceRateLimit: false };
   const pausedSw = memoryPaused();
   const store: LeadsStore = {
@@ -23,7 +25,13 @@ export function createFixtureApp(opts: { log?: (...a: unknown[]) => void; fixtur
       return l ? { listingId: id, dealerId: l.dealerId ?? null } : null;
     },
     async insertEvent(e) { events.push({ ...e, created_at: new Date().toISOString() }); log("listing_events insert", e); },
-    async insertLead(l) { leads.push({ ...l, created_at: new Date().toISOString() }); log("listing_leads insert", { ...l, email: l.email ? "<redacted>" : null, phone: l.phone ? "<redacted>" : null }); },
+    findDuplicateLead: async (q) => { const d = await memLeads.findDuplicateLead(q); if (d) log("lead duplicate (idempotency/contact) — original success returned, not stored"); return d; },
+    async insertLead(l) {
+      const r = await memLeads.insertLead(l);
+      if (r.duplicate) log("lead duplicate on insert (unique conflict) — not stored");
+      else log("listing_leads insert", { ...l, email: l.email ? "<redacted>" : null, phone: l.phone ? "<redacted>" : null });
+      return r;
+    },
     async monthlyReport(m) {
       return aggregateMonthly(m, events.map((e) => ({ event_type: e.eventType, dealer_id: e.dealerId })),
         leads.map((l) => ({ dealer_id: l.dealerId })), new Map(fx.dealers.map((d) => [d.id, d.name])));
