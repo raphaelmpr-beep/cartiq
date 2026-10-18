@@ -54,6 +54,8 @@ function norm(row: any): any { return toCamel(row); }
 import { getMetaConnectorStatus } from "./connectors/metaMarketplace";
 import { getRetailConnectorStatus } from "./connectors/retailSource";
 import { supabaseAdmin } from "./supabase-admin";
+import { registerLeadRoutes } from "./leads/routes";
+import { supabaseLeadsStore } from "./leads/store";
 import { registerRecheckRoutes } from "./recheck/routes";
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -378,6 +380,8 @@ ${pageUrls.join("\n")}
     return res.status(401).json({ error: "Unauthorized" });
   }
   registerRecheckRoutes(app, requireAdmin);
+  // Lead tracking (DRAFT): no-op unless LEAD_TRACKING_ENABLED is on.
+  registerLeadRoutes(app, requireAdmin, { store: () => supabaseLeadsStore(supabaseAdmin()) });
 
 
   // GET /api/admin/verify — lightweight endpoint the Admin UI uses to gate

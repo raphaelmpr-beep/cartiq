@@ -4,6 +4,10 @@ import path from "node:path";
 
 export default defineConfig({
   plugins: [react()],
+  // Lead tracking draft flag (default OFF). See client/src/lead-tracking-flag.d.ts.
+  define: {
+    __LEAD_TRACKING_ENABLED__: JSON.stringify(/^(1|true|on|yes)$/i.test((process.env.LEAD_TRACKING_ENABLED ?? "").trim())),
+  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),
