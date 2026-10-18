@@ -18,6 +18,21 @@ export interface LeadsStore {
   cleanup(): Promise<{ leads: number; events: number; rate_limits: number }>;
   /** Last `days` complete UTC days of listing_events counts (oldest first). */
   dailyEventCounts(days: number, now: number): Promise<DayCount[]>;
+  /** lead_tracking_paused row. Throws if it can't be read (caller fails closed). */
+  getPaused(): Promise<{ paused: boolean; reason: string | null }>;
+  setPaused(reason: string): Promise<void>;
+  clearPaused(): Promise<void>;
+}
+
+/** In-memory pause switch (fixture mode + tests only). */
+export function memoryPaused() {
+  const k = { paused: false, reason: null as string | null, failRead: false };
+  return {
+    state: k,
+    getPaused: async () => { if (k.failRead) throw new Error("read failed"); return { paused: k.paused, reason: k.reason }; },
+    setPaused: async (reason: string) => { k.paused = true; k.reason = reason; },
+    clearPaused: async () => { k.paused = false; k.reason = null; },
+  };
 }
 
 export const windowStart = (now: number, windowMs: number) => new Date(Math.floor(now / windowMs) * windowMs).toISOString();
@@ -129,6 +144,22 @@ export function supabaseLeadsStore(sb: SupabaseClient): LeadsStore {
       const { data, error } = await sb.rpc("listing_events_daily_counts", { p_days: days, p_until: new Date(now).toISOString() });
       if (error) throw new Error(error.message);
       return ((data ?? []) as any[]).map((r) => ({ day: String(r.day), events: Number(r.events) }));
+    },
+    async getPaused() {
+      const { data, error } = await sb.from("lead_tracking_paused").select("paused, reason").eq("id", 1).maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error("lead_tracking_paused row missing");
+      return { paused: data.paused === true, reason: (data.reason as string | null) ?? null };
+    },
+    async setPaused(reason) {
+      const at = new Date().toISOString();
+      const { error } = await sb.from("lead_tracking_paused").upsert({ id: 1, paused: true, reason: reason.slice(0, 500), set_at: at, updated_at: at });
+      if (error) throw new Error(error.message);
+    },
+    async clearPaused() {
+      const at = new Date().toISOString();
+      const { error } = await sb.from("lead_tracking_paused").upsert({ id: 1, paused: false, reason: null, cleared_at: at, updated_at: at });
+      if (error) throw new Error(error.message);
     },
   };
 }

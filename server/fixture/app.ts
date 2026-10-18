@@ -3,7 +3,7 @@
 import express, { type Express } from "express";
 import { readFileSync } from "node:fs";
 import { registerLeadRoutes } from "../leads/routes";
-import { aggregateMonthly, memoryRateLimits, type LeadsStore } from "../leads/store";
+import { aggregateMonthly, memoryRateLimits, memoryPaused, type LeadsStore } from "../leads/store";
 
 type Fx = { dealers: any[]; listings: any[] };
 
@@ -16,6 +16,7 @@ export function createFixtureApp(opts: { log?: (...a: unknown[]) => void; fixtur
   const fx = opts.fixtures ?? loadFixtures();
   const events: any[] = [], leads: any[] = [];
   const state = { forceRateLimit: false };
+  const pausedSw = memoryPaused();
   const store: LeadsStore = {
     async getPublicListing(id) {
       const l = fx.listings.find((x) => x.id === id && x.publicListing && x.status === "active");
@@ -30,6 +31,7 @@ export function createFixtureApp(opts: { log?: (...a: unknown[]) => void; fixtur
     hitRateLimit: memoryRateLimits(),
     async cleanup() { log("cleanup (fixture no-op)"); return { leads: 0, events: 0, rate_limits: 0 }; },
     async dailyEventCounts() { return []; },
+    getPaused: pausedSw.getPaused, setPaused: pausedSw.setPaused, clearPaused: pausedSw.clearPaused,
   };
 
   const app: Express = express();
@@ -48,14 +50,21 @@ export function createFixtureApp(opts: { log?: (...a: unknown[]) => void; fixtur
     log("forceRateLimit =", state.forceRateLimit);
     res.json({ forceRateLimit: state.forceRateLimit });
   });
+  // Dev debug toggle: GET /api/__fixture/paused?on=1 | ?on=0 (lead_tracking_paused stand-in)
+  app.get("/api/__fixture/paused", async (req, res) => {
+    if (req.query.on !== undefined) { if (/^(1|true|on)$/i.test(String(req.query.on))) await pausedSw.setPaused("fixture toggle"); else await pausedSw.clearPaused(); }
+    log("paused =", pausedSw.state.paused);
+    res.json({ paused: pausedSw.state.paused });
+  });
   app.get("/api/__fixture/store", (_req, res) => res.json({ events, leads: leads.length, forceRateLimit: state.forceRateLimit }));
   const admin = (_req: any, res: any) => res.status(401).json({ error: "Unauthorized (fixture mode has no admin)" });
   registerLeadRoutes(app, admin, {
     enabled: true, store: () => store, ipSalt: "fixture",
     forceRateLimit: () => state.forceRateLimit,
     exposeBlockReason: true,
+    pausedCacheMs: 0,
     onBlocked: (reason) => log(`lead blocked (${reason}) — success shown, nothing stored`),
   });
   app.use("/api", (_req, res) => res.status(404).json({ error: "not available in fixture mode" }));
-  return { app, store, events, leads, state };
+  return { app, store, events, leads, state, paused: pausedSw.state };
 }

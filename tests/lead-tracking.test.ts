@@ -8,7 +8,7 @@ import {
   LEAD_CONSENT_TEXT, LEAD_SUCCESS_TEXT, LEAD_MIN_FILL_MS,
 } from "../shared/leadTracking";
 import { registerLeadRoutes } from "../server/leads/routes";
-import { aggregateMonthly, monthBounds, memoryRateLimits, windowStart, type LeadsStore } from "../server/leads/store";
+import { aggregateMonthly, monthBounds, memoryRateLimits, memoryPaused, windowStart, type LeadsStore } from "../server/leads/store";
 import { volumeAlert } from "../shared/leadTracking";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
@@ -86,16 +86,18 @@ test("consent and success copy (Inspector requirements)", () => {
 function memStore() {
   const events: any[] = [], leads: any[] = [];
   const fail = { event: false, lead: false };
+  const paused = memoryPaused();
   const store: LeadsStore = {
     async getPublicListing(id) { return id === 404 ? null : { listingId: id, dealerId: id === 12 ? null : 9 }; },
     async insertEvent(e) { if (fail.event) throw new Error("db down"); events.push(e); },
     async insertLead(l) { if (fail.lead) throw new Error("db down"); leads.push(l); },
     hitRateLimit: memoryRateLimits(),
+    getPaused: paused.getPaused, setPaused: paused.setPaused, clearPaused: paused.clearPaused,
     async cleanup() { return { leads: 1, events: 2, rate_limits: 3 }; },
     async dailyEventCounts() { return Array.from({ length: 15 }, (_, i) => ({ day: `2026-10-${String(i + 1).padStart(2, "0")}`, events: i === 14 ? 1000 : 100 })); },
     async monthlyReport(m) { return aggregateMonthly(m, events.map((e) => ({ event_type: e.eventType, dealer_id: e.dealerId })), leads.map((l) => ({ dealer_id: l.dealerId })), new Map([[9, "D9"]])); },
   };
-  return { store, events, leads, fail };
+  return { store, events, leads, fail, paused: paused.state };
 }
 
 async function withApp(enabled: boolean, fn: (base: string, m: ReturnType<typeof memStore>, clock: { t: number }) => Promise<void>) {
@@ -105,7 +107,9 @@ async function withApp(enabled: boolean, fn: (base: string, m: ReturnType<typeof
   const clock = { t: T0 };
   const admin = (req: any, res: any, next: any) => (req.headers["x-admin-token"] === "pw" ? next() : res.status(401).end());
   const logs: string[] = [];
-  const registered = registerLeadRoutes(app, admin, { enabled, store: () => m.store, now: () => clock.t, ipSalt: "s", cronSecret: "cs", log: (msg) => logs.push(msg) });
+  const alerts: any[] = [];
+  const registered = registerLeadRoutes(app, admin, { enabled, store: () => m.store, now: () => clock.t, ipSalt: "s", cronSecret: "cs", log: (msg) => logs.push(msg), notifier: (a) => alerts.push(a), pausedCacheMs: 0 });
+  (m as any).alerts = alerts;
   (m as any).logs = logs;
   assert.equal(registered, enabled);
   app.use((_req, res) => res.status(404).send("fallthrough"));
@@ -246,7 +250,10 @@ test("retention cron: cron secret or admin only; volume monitor admin-only", asy
     const c = (h: Record<string, string>) => fetch(base + "/api/cron/lead-retention", { method: "POST", headers: h });
     assert.equal((await c({})).status, 401);
     assert.equal((await c({ authorization: "Bearer wrong" })).status, 401);
-    assert.deepEqual(await (await c({ authorization: "Bearer cs" })).json(), { ok: true, deleted: { leads: 1, events: 2, rate_limits: 3 } });
+    const j = await (await c({ authorization: "Bearer cs" })).json();
+    assert.equal(j.ok, true);
+    assert.deepEqual(j.deleted, { leads: 1, events: 2, rate_limits: 3 });
+    assert.equal(j.volume.alert, true);
     assert.equal((await c({ "x-admin-token": "pw" })).status, 200);
     assert.equal((await fetch(base + "/api/admin/leads/event-volume")).status, 401);
     const v = await (await fetch(base + "/api/admin/leads/event-volume", { headers: { "x-admin-token": "pw" } })).json();
@@ -265,4 +272,86 @@ test("volumeAlert + windowStart", () => {
   assert.equal(volumeAlert(days([100, 100, 100, 100, 100, 100, 100, 301])).alert, true);
   assert.equal(volumeAlert(days([5, 5, 5, 5, 5, 5, 5, 40])).alert, false); // baseline floor 50
   assert.equal(windowStart(Date.UTC(2026, 9, 18, 21, 17, 30), 10 * 60_000), "2026-10-18T21:10:00.000Z");
+});
+
+test("cron: volume alert sets lead_tracking_paused, logs LEAD_VOLUME_ALERT, then routes stop writing", async () => {
+  await withApp(true, async (base, m) => {
+    assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, true);
+    const j = await (await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer cs" } })).json();
+    assert.equal(j.pausedSet, true);
+    assert.equal(m.paused.paused, true);
+    assert.match(m.paused.reason!, /volume monitor/);
+    assert.equal((m as any).alerts.length, 1);
+    assert.equal((m as any).alerts[0].type, "LEAD_VOLUME_ALERT");
+    // paused: UI flag off, events dropped, leads refused (no fake success)
+    assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, false);
+    await post(base + "/api/leads/event", { eventType: "listing_view", listingId: 5, sessionId: "abcdef123456" });
+    await tick();
+    assert.equal(m.events.length, 0);
+    const q = await post(base + "/api/leads/quote", goodLead(), UA, "4.4.9.9");
+    assert.equal(q.status, 503);
+    assert.equal(m.leads.length, 0);
+    // admin clears it
+    assert.equal((await fetch(base + "/api/admin/leads/paused/clear", { method: "POST" })).status, 401);
+    assert.equal((await fetch(base + "/api/admin/leads/paused/clear", { method: "POST", headers: { "x-admin-token": "pw" } })).status, 200);
+    assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, true);
+    assert.equal((await post(base + "/api/leads/quote", goodLead(), UA, "4.4.9.9")).status, 200);
+  });
+});
+
+test("paused read failure fails closed", async () => {
+  await withApp(true, async (base, m) => {
+    (m.paused as any).failRead = true;
+    assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, false);
+    assert.equal((await post(base + "/api/leads/quote", goodLead(), UA, "4.4.8.8")).status, 503);
+    await post(base + "/api/leads/event", { eventType: "listing_view", listingId: 5, sessionId: "abcdef123456" });
+    await tick();
+    assert.equal(m.events.length + m.leads.length, 0);
+    assert.ok((m as any).logs.includes("lead_tracking_paused read failed; failing closed"));
+  });
+});
+
+test("paused gate is cached (default 30 s)", async () => {
+  const app = express(); app.use(express.json());
+  const m = memStore(); let reads = 0; const orig = m.store.getPaused;
+  m.store.getPaused = async () => { reads++; return orig(); };
+  const clock = { t: T0 };
+  registerLeadRoutes(app, (_q, r) => { r.status(401).end(); }, { enabled: true, store: () => m.store, now: () => clock.t, ipSalt: "s" });
+  const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try {
+    for (let i = 0; i < 3; i++) await fetch(base + "/api/leads/status");
+    assert.equal(reads, 1);
+    clock.t += 31_000; await fetch(base + "/api/leads/status");
+    assert.equal(reads, 2);
+  } finally { srv.close(); }
+});
+
+test("client UI flag: leadTrackingLive is off on paused/error/non-OK", async () => {
+  const realFetch = globalThis.fetch;
+  const { leadTrackingLive } = await import("../client/src/components/leads/LeadTracking");
+  const cases: [() => Promise<Response>, boolean][] = [
+    [async () => new Response(JSON.stringify({ enabled: false })), false],
+    [async () => new Response("", { status: 404 }), false],
+    [async () => { throw new Error("net"); }, false],
+    [async () => new Response(JSON.stringify({ enabled: true })), true],
+  ];
+  const realNow = Date.now; let t = 0; Date.now = () => (t += 61_000);
+  try {
+    for (const [f, want] of cases) { globalThis.fetch = f as any; assert.equal(await leadTrackingLive(), want); }
+  } finally { globalThis.fetch = realFetch; Date.now = realNow; }
+});
+
+test("draft SQL: lead_tracking_paused locked down", () => {
+  const sql = readFileSync(new URL("../db/drafts/20261018_lead_tracking_paused_draft.sql", import.meta.url), "utf8");
+  assert.match(sql, /alter table public\.lead_tracking_paused enable row level security/);
+  assert.match(sql, /revoke all on table public\.lead_tracking_paused from public, anon, authenticated/);
+  assert.doesNotMatch(sql, /create policy|create (or replace )?function|grant /i);
+});
+
+test("notifier: structured LEAD_VOLUME_ALERT line only", async () => {
+  const { logNotifier } = await import("../server/leads/notifier");
+  const lines: string[] = [];
+  logNotifier((l) => lines.push(l))({ type: "LEAD_VOLUME_ALERT", at: "x", reason: "r", latest: null, baseline: 1, pausedSet: true });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^LEAD_VOLUME_ALERT \{"type":"LEAD_VOLUME_ALERT"/);
 });

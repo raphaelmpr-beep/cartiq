@@ -8,6 +8,7 @@ import {
   LEAD_CONSENT_TEXT, MONTH_RE, volumeAlert,
 } from "@shared/leadTracking";
 import type { LeadsStore } from "./store";
+import { logNotifier, type Notifier } from "./notifier";
 
 export interface LeadRouteOptions {
   enabled?: boolean;
@@ -16,6 +17,10 @@ export interface LeadRouteOptions {
   ipSalt?: string;
   cronSecret?: string;
   log?: (msg: string, meta?: Record<string, unknown>) => void;
+  /** Alert sink for the volume monitor. Default: structured LEAD_VOLUME_ALERT log line. */
+  notifier?: Notifier;
+  /** How long a lead_tracking_paused read is cached (ms). Default 30 s. */
+  pausedCacheMs?: number;
   /** Fixture mode only: force the 429 response so the UI state can be shown. */
   forceRateLimit?: () => boolean;
   /** Fixture mode only: add `fixtureBlocked` to silent-block responses. */
@@ -58,8 +63,39 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
   let _store: LeadsStore | null = null;
   const getStore = () => (_store ??= opts.store());
   const noindex = (res: Response) => res.setHeader("X-Robots-Tag", "noindex");
+  const notify = opts.notifier ?? logNotifier();
+  const pausedCacheMs = opts.pausedCacheMs ?? 30_000;
+
+  // Runtime gate: tracking is ON only if the env flag is on (checked above) AND the
+  // lead_tracking_paused row reads paused=false. A failed read fails CLOSED (off).
+  let gate: { active: boolean; at: number } | null = null;
+  async function isActive(): Promise<boolean> {
+    if (gate && now() - gate.at < pausedCacheMs) return gate.active;
+    let active = false;
+    try {
+      active = !(await getStore().getPaused()).paused;
+    } catch (err: any) {
+      log("lead_tracking_paused read failed; failing closed", { error: String(err?.message ?? err).slice(0, 200) });
+    }
+    gate = { active, at: now() };
+    return active;
+  }
+  let lastPausedLog = -Infinity;
+  const logPausedSkip = (what: string) => {
+    if (now() - lastPausedLog < 60_000) return; // at most one error line per minute
+    lastPausedLog = now();
+    console.error(`[leads] ERROR lead tracking paused or unverifiable; ${what} not written`);
+  };
+
   const hit = (rule: { scope: string; windowMs: number; limit: number }, key: string) =>
     getStore().hitRateLimit(rule.scope, key, rule.windowMs, rule.limit, now());
+
+  // Runtime UI flag: the client asks this before showing the form or sending events.
+  app.get("/api/leads/status", async (_req, res) => {
+    noindex(res);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ enabled: await isActive() });
+  });
 
   // Events: fire-and-forget. Always 204 so the beacon never retries or surfaces
   // errors. Any failure (DB down, bad input) is dropped and logged without PII.
@@ -75,6 +111,7 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
       const key = `${e.sessionId}:${e.listingId}:${e.eventType}`;
       const fresh = e.eventType === "listing_view" ? viewDedupe.check(key, now()) : clickDedupe.check(key, now());
       if (!fresh) return;
+      if (!(await isActive())) { logPausedSkip("event"); return; }
       if (!(await hit(LIMITS.eventsPerIp, hashIp(clientIp(req))))) return;
       const store = getStore();
       const ref = await store.getPublicListing(e.listingId);
@@ -101,6 +138,10 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
     }
     const lead = v.value;
     try {
+      if (!(await isActive())) {
+        logPausedSkip("lead");
+        return res.status(503).json({ error: "temporarily_unavailable" });
+      }
       if (opts.forceRateLimit?.()) return res.status(429).json({ error: "rate_limited" });
       const store = getStore();
       const ref = await store.getPublicListing(lead.listingId);
@@ -153,13 +194,40 @@ export function registerLeadRoutes(app: Express, requireAdmin: RequestHandler, o
     if (cronSecret && auth.startsWith("Bearer ") && safeEq(auth.slice(7), cronSecret)) return next();
     return requireAdmin(req, res, next);
   };
+  // Daily job (one schedule covers both; suggest 09:00 UTC, not set here):
+  // 1) retention cleanup, 2) volume monitor -> on alert set lead_tracking_paused
+  // and log LEAD_VOLUME_ALERT. Runs even while paused. Each run logs LEAD_CRON_RUN.
   app.post("/api/cron/lead-retention", cronAuth, async (_req, res) => {
     noindex(res);
+    const out: Record<string, unknown> = {};
+    let ok = true;
+    try { out.deleted = await getStore().cleanup(); }
+    catch { ok = false; out.cleanupError = true; log("cleanup failed"); }
     try {
-      res.json({ ok: true, deleted: await getStore().cleanup() });
-    } catch {
-      res.status(500).json({ error: "cleanup_failed" });
-    }
+      const days = await getStore().dailyEventCounts(15, now());
+      const v = volumeAlert(days);
+      out.volume = { alert: v.alert, reason: v.reason, latest: v.latest, baseline: v.baseline };
+      if (v.alert) {
+        let pausedSet = false;
+        try { await getStore().setPaused(`volume monitor: ${v.reason}`); pausedSet = true; gate = null; }
+        catch { ok = false; log("setting lead_tracking_paused failed"); }
+        out.pausedSet = pausedSet;
+        notify({ type: "LEAD_VOLUME_ALERT", at: new Date(now()).toISOString(), reason: v.reason, latest: v.latest, baseline: v.baseline, pausedSet });
+      }
+    } catch { ok = false; out.monitorError = true; log("volume monitor failed"); }
+    console.log(`LEAD_CRON_RUN ${JSON.stringify({ at: new Date(now()).toISOString(), ok, ...out })}`);
+    res.status(ok ? 200 : 500).json({ ok, ...out });
+  });
+
+  // Admin: read / clear the pause switch.
+  app.get("/api/admin/leads/paused", requireAdmin, async (_req, res) => {
+    noindex(res);
+    try { res.json(await getStore().getPaused()); } catch { res.status(500).json({ error: "read_failed" }); }
+  });
+  app.post("/api/admin/leads/paused/clear", requireAdmin, async (_req, res) => {
+    noindex(res);
+    try { await getStore().clearPaused(); gate = null; console.log("[leads] lead_tracking_paused cleared by admin"); res.json({ ok: true }); }
+    catch { res.status(500).json({ error: "clear_failed" }); }
   });
   return true;
 }

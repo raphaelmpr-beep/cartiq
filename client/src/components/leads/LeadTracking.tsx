@@ -24,10 +24,30 @@ export function leadSessionId(): string {
   }
 }
 
+/**
+ * Runtime gate. The build flag only compiles this code in; the server decides
+ * whether tracking is live (env flag AND lead_tracking_paused not set). Any error
+ * or non-OK answer means OFF. Re-checked at most once a minute.
+ */
+let statusCache: { p: Promise<boolean>; at: number } | null = null;
+export function leadTrackingLive(): Promise<boolean> {
+  if (statusCache && Date.now() - statusCache.at < 60_000) return statusCache.p;
+  const p = fetch("/api/leads/status", { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : { enabled: false }))
+    .then((j) => j?.enabled === true)
+    .catch(() => false);
+  statusCache = { p, at: Date.now() };
+  return p;
+}
+
 /** Fire-and-forget. Never awaited, never throws, never blocks render. */
 export function sendLeadEvent(eventType: LeadEventType, listingId: number, dealerId?: number | null) {
+  if (navigator.webdriver) return; // automated browsers
+  void leadTrackingLive().then((live) => { if (live) beacon(eventType, listingId, dealerId); });
+}
+
+function beacon(eventType: LeadEventType, listingId: number, dealerId?: number | null) {
   try {
-    if (navigator.webdriver) return; // automated browsers
     const body = JSON.stringify({ eventType, listingId, dealerId: dealerId ?? null, sessionId: leadSessionId() });
     const blob = new Blob([body], { type: "application/json" });
     if (navigator.sendBeacon && navigator.sendBeacon("/api/leads/event", blob)) return;
@@ -78,7 +98,10 @@ export function useLeadTracking(listing: L) {
 export function LeadContactButton({ listingId, dealerId, title, variant = "contact" }: { listingId: number; dealerId?: number; title?: string; variant?: "contact" | "quote" }) {
   const [Form, setForm] = useState<ComponentType<{ listingId: number; title?: string; onClose: () => void }> | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [live, setLive] = useState(false);
+  useEffect(() => { let on = true; leadTrackingLive().then((v) => { if (on) setLive(v); }); return () => { on = false; }; }, []);
   const open = () => {
+    if (!live) return; // paused / off: behave like today's no-op button
     sendLeadEvent("contact_click", listingId, dealerId);
     if (!dealerId) { setUnavailable(true); return; }
     import("./LeadQuoteForm").then((m) => setForm(() => m.default)).catch(() => {});
@@ -86,7 +109,7 @@ export function LeadContactButton({ listingId, dealerId, title, variant = "conta
   return (
     <>
       {variant === "quote" ? (
-        dealerId ? <Button variant="outline" className="w-full" data-testid="btn-get-quote" onClick={open}>Check availability / Get a quote</Button> : null
+        dealerId && live ? <Button variant="outline" className="w-full" data-testid="btn-get-quote" onClick={open}>Check availability / Get a quote</Button> : null
       ) : (
         <Button className="w-full gap-2" data-testid="btn-contact-seller" onClick={open}><Phone className="h-4 w-4" /> Contact Seller</Button>
       )}

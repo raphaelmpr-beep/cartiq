@@ -29,6 +29,7 @@ export default function LeadQuoteForm({ listingId, title, onClose }: { listingId
       const j = await r.json().catch(() => ({}));
       if (r.ok) { setBlocked(typeof j.fixtureBlocked === "string" ? j.fixtureBlocked : null); setState("done"); return; }
       setErr(j.error === "rate_limited" ? "Too many requests. Please try again later."
+        : j.error === "temporarily_unavailable" ? "Requests are paused right now. Please try again later."
         : j.error === "contact_unavailable" ? "Contact isn't available for this listing."
         : r.status >= 500 ? "We couldn't save your request. Please try again in a few minutes."
         : "Please check your details and try again.");
