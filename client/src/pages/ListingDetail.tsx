@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { setSEO, listingToProductSchema, breadcrumbSchema } from "@/lib/seo";
 import { getBrandWikiByDbName } from "@/lib/brand-wiki-data";
 import { useQuery } from "@tanstack/react-query";
+import { trackSiteEvent } from "@/lib/track";
 import { useParams, Link, useLocation } from "wouter";
 import { ArrowLeft, AlertTriangle, HelpCircle, CheckCircle, ExternalLink, Phone, Mail, Store, User, Truck, ShieldCheck } from "lucide-react";
 import SaveButton from "@/components/SaveButton";
@@ -52,6 +53,15 @@ export default function ListingDetail() {
     navigate(redirectPath);
     return () => { document.head.removeChild(meta); };
   }, [redirectPath, navigate]);
+
+  // site_events: one listing_view per listing per page load (server enriches + filters bots)
+  const trackedId = (listing as any)?.id as number | undefined;
+  useEffect(() => {
+    if (trackedId && !redirectPath) trackSiteEvent({ eventType: "listing_view", listingId: trackedId });
+  }, [trackedId, redirectPath]);
+  const lead = (leadType: "phone" | "email" | "website" | "directions") => () => {
+    if (trackedId) trackSiteEvent({ eventType: "lead_click", listingId: trackedId, leadType });
+  };
 
   const dealerSlug = listing?.syncSource;
   const { data: dealer } = useQuery<Dealer>({
@@ -458,6 +468,7 @@ export default function ListingDetail() {
               {listing.sellerPhone && (
                 <a
                   href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}
+                  onClick={lead("phone")}
                   className="flex items-center gap-2 text-sm text-green-700 hover:text-green-900 font-medium"
                 >
                   <Phone size={14} />
@@ -468,6 +479,7 @@ export default function ListingDetail() {
               {listing.sellerEmail && !listing.sellerEmail.endsWith(".local") && (
                 <a
                   href={`mailto:${listing.sellerEmail}`}
+                  onClick={lead("email")}
                   className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
                 >
                   <Mail size={14} />
@@ -478,6 +490,7 @@ export default function ListingDetail() {
               {listing.sourceUrl && (
                 <a
                   href={listing.sourceUrl}
+                  onClick={lead("website")}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 font-medium"
@@ -494,7 +507,7 @@ export default function ListingDetail() {
                     <Button className="w-full gap-2" data-testid="btn-view-retailer"><ExternalLink className="h-4 w-4" /> View Retailer</Button>
                   </a>
                 ) : listing.sellerPhone ? (
-                  <a href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}>
+                  <a href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`} onClick={lead("phone")}>
                     <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Call Seller</Button>
                   </a>
                 ) : (

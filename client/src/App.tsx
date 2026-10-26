@@ -32,6 +32,8 @@ import DealChecker from "@/pages/DealChecker";
 import { BuyerGuideIndex, ArticleDetail } from "@/pages/BuyerGuide";
 import Admin from "@/pages/Admin";
 import MyGarage from "@/pages/MyGarage";
+import Dealers from "@/pages/Dealers";
+import Portal from "@/pages/Portal";
 import Disclosure from "@/pages/Legal";
 import HowItWorks from "@/pages/HowItWorks";
 import CityPage from "@/pages/seo/CityPage";
@@ -80,6 +82,8 @@ function AppRoutes() {
           <Route path="/sell" component={SellPage} />
           <Route path="/garage" component={MyGarage} />
           <Route path="/admin" component={Admin} />
+          <Route path="/dealers" component={Dealers} />
+          <Route path="/portal" component={Portal} />
           <Route path="/disclosure" component={Disclosure} />
           <Route path="/how-it-works" component={HowItWorks} />
           {/* SEO landing pages */}
