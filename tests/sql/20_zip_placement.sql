@@ -9,8 +9,8 @@ $$ begin perform set_config('request.jwt.claims', json_build_object('sub',u,'rol
 insert into auth.users values ('00000000-0000-0000-0000-00000000000d','d@d.com');
 insert into dealer_accounts(user_id,dealer_id,status) values ('00000000-0000-0000-0000-00000000000d',4,'approved');
 update dealer_accounts set status='approved' where dealer_id=3;
-update dealer_subscriptions set status='active', plan=null, zip_featured_quantity=0, zip_listings_quantity=0;
-insert into dealer_subscriptions(dealer_id,status) values (4,'active');
+update dealer_subscriptions set status='active', plan='featured', zip_featured_quantity=0, zip_listings_quantity=0;
+insert into dealer_subscriptions(dealer_id,status,plan) values (4,'active','featured');
 insert into listings(id,dealer_id,brand,state,title) values (15,1,'Evolution','FL','A cart 2'),(16,1,'Icon','FL','A cart 3');
 
 -- Capacity: first three dealers get 32162, the fourth is sold out
@@ -79,4 +79,24 @@ select pg_temp.as_user('00000000-0000-0000-0000-00000000000d'); set role authent
 select pg_temp.ok(public.reserve_zip_placement('32162','featured_dealer')='pending', 'expired/stale holds free the slot; D can now reserve 32162');
 reset role;
 select pg_temp.ok(not has_function_privilege('anon','public.get_featured_for_zip(text)','execute'), 'anon cannot call placement RPC directly (server endpoint only)');
+
+-- Base plan required (no standalone ZIP purchase)
+update dealer_subscriptions set status='active', plan='insights' where dealer_id=1; select public.sync_zip_placements(1);
+select pg_temp.ok(jsonb_array_length(public.get_featured_for_zip('32162')->'dealers')=1, 'base plan active => A placed again');
+update dealer_subscriptions set plan=null where dealer_id=1;   -- ZIP-only subscription (base item removed)
+select pg_temp.ok(jsonb_array_length(public.get_featured_for_zip('32162')->'dealers')=0, 'no base plan => placement refused at read time');
+select public.sync_zip_placements(1);
+select pg_temp.ok((select bool_and(status<>'active') from dealer_zip_placements where dealer_id=1), 'no base plan => sync turns ZIPs off');
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000a'); set role authenticated;
+do $$ begin perform public.reserve_zip_placement('32170','featured_dealer'); raise exception 'FAIL';
+  exception when insufficient_privilege then raise notice 'PASS: no base plan => cannot reserve a ZIP'; end $$;
+reset role;
+update dealer_subscriptions set plan='featured', status='canceled' where dealer_id=1;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000a'); set role authenticated;
+do $$ begin perform public.reserve_zip_placement('32170','featured_dealer'); raise exception 'FAIL';
+  exception when insufficient_privilege then raise notice 'PASS: canceled base plan => cannot reserve a ZIP'; end $$;
+reset role;
+select public.sync_zip_placements(1);
+select pg_temp.ok(jsonb_array_length(public.get_featured_for_zip('32162')->'dealers')=0 and (select bool_and(status<>'active') from dealer_zip_placements where dealer_id=1), 'canceled base plan => ZIPs come off');
+select pg_temp.ok(public.zip_slot_capacity('featured_dealer')=3 and public.zip_slot_capacity('featured_listings')=3, 'capacity 3 per ZIP for both products');
 \echo ALL_ZIP_TESTS_PASSED

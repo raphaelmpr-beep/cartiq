@@ -10,7 +10,7 @@ import rateLimit from "express-rate-limit";
 import Stripe from "stripe";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin, getSupabaseUrl } from "./supabase-admin";
-import { handleStripeEvent, verifyStripeEvent, planToPrice, zipPriceFor, priceForQuantity, type BillingDb, type ZipProduct } from "./dealer-billing";
+import { handleStripeEvent, verifyStripeEvent, planToPrice, zipPriceFor, priceForQuantity, buildCheckoutItems, canBillZips, type BillingDb, type ZipProduct } from "./dealer-billing";
 
 let _stripe: Stripe | null = null;
 export function stripeClient(): Stripe {
@@ -228,9 +228,9 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
   app.post("/api/checkout", requireUser, async (req: AuthedReq, res) => {
     try {
       const plan = String(req.body?.plan || "");
-      const price = plan ? planToPrice(plan) : null;
-      if (plan && plan !== "featured" && plan !== "insights") return res.status(400).json({ error: "Unknown plan" });
-      if (plan && !price) return res.status(503).json({ error: "Billing is not configured yet" });
+      if (plan !== "featured" && plan !== "insights") return res.status(400).json({ error: "Choose Featured or Insights. ZIP placement is an add-on to a base plan." });
+      const price = planToPrice(plan);
+      if (!price) return res.status(503).json({ error: "Billing is not configured yet" });
       const claim = await myClaim(req.token!);
       if (!claim) return res.status(400).json({ error: "Claim your dealership first" });
       if (!claim.dealer_id) return res.status(400).json({ error: "We're reviewing your new-dealer submission. You can pay once it's added." });
@@ -250,15 +250,15 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
         const c = await stripe.customers.create({ email: req.user!.email, metadata: { dealer_id: String(claim.dealer_id), user_id: req.user!.id } });
         customer = c.id;
       }
-      const lineItems: { price: string; quantity: number }[] = price ? [{ price, quantity: 1 }] : [];
+      const zipItems: { price: string; quantity: number }[] = [];
       if (claim.status === "approved") {
         const counts = await zipCounts(claim.dealer_id);
         for (const p of ["featured_dealer", "featured_listings"] as ZipProduct[]) {
           const zp = zipPriceFor(p);
-          if (counts[p] > 0) { if (!zp) return res.status(503).json({ error: "ZIP billing is not configured yet" }); lineItems.push({ price: zp, quantity: counts[p] }); }
+          if (counts[p] > 0) { if (!zp) return res.status(503).json({ error: "ZIP billing is not configured yet" }); zipItems.push({ price: zp, quantity: counts[p] }); }
         }
       }
-      if (!lineItems.length) return res.status(400).json({ error: "Pick a plan or reserve at least one ZIP" });
+      const lineItems = buildCheckoutItems(price, zipItems);
       const metadata = { user_id: req.user!.id, dealer_id: String(claim.dealer_id), plan };
       const base = siteUrl(req);
       const session = await stripe.checkout.sessions.create({
@@ -359,6 +359,7 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
         r = await sb.rpc("set_zip_listings", { p_zip: zip, p_listing_ids: ids });
       } else return res.status(404).json({ error: "unknown action" });
       if (r.error) {
+        if (r.error.hint === "base_plan_required") return res.status(402).json({ error: "ZIP placement needs an active Featured or Insights plan.", upgrade: true });
         const msg = r.error.hint === "sold_out" || /sold out/.test(r.error.message) ? "That ZIP is sold out" : r.error.code === "42501" ? "Not allowed" : r.error.message;
         return res.status(r.error.hint === "sold_out" || /sold out/.test(r.error.message) ? 409 : 400).json({ error: msg });
       }
@@ -372,12 +373,12 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
       const claim = await myClaim(req.token!);
       if (!claim?.dealer_id || claim.status !== "approved") return res.status(403).json({ error: "Your claim must be approved first" });
       const admin = supabaseAdmin();
-      const { data: sub } = await admin.from("dealer_subscriptions").select("stripe_subscription_id,status").eq("dealer_id", claim.dealer_id).maybeSingle();
-      if (!sub?.stripe_subscription_id || !["active", "trialing", "past_due"].includes(sub.status)) {
-        return res.status(409).json({ error: "No active subscription yet", checkout: true });
+      const { data: sub } = await admin.from("dealer_subscriptions").select("stripe_subscription_id,status,plan").eq("dealer_id", claim.dealer_id).maybeSingle();
+      if (!canBillZips(sub as any)) {
+        return res.status(402).json({ error: "ZIP placement needs an active Featured ($199/mo) or Insights ($499/mo) plan.", upgrade: true });
       }
       const stripe = stripeClient();
-      const s = await stripe.subscriptions.retrieve(sub.stripe_subscription_id);
+      const s = await stripe.subscriptions.retrieve(sub!.stripe_subscription_id);
       const counts = await zipCounts(claim.dealer_id);
       const items: Stripe.SubscriptionUpdateParams.Item[] = [];
       for (const p of ["featured_dealer", "featured_listings"] as ZipProduct[]) {

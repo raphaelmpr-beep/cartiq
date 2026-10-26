@@ -194,7 +194,7 @@ function BrandTable({ title, block, valueKey }: { title: string; block: any; val
 const PRODUCT_LABEL: Record<string, string> = { featured_dealer: "Featured dealer", featured_listings: "Featured listings" };
 const fmt = (c: number, cur = "usd") => (c / 100).toLocaleString(undefined, { style: "currency", currency: cur.toUpperCase() });
 
-function ZipManager({ listings, hasSub, go }: { listings: any[]; hasSub: boolean; go: (u: string, b?: any) => void }) {
+function ZipManager({ listings }: { listings: any[] }) {
   const [mine, setMine] = useState<{ placements: any[]; listings: any[] }>({ placements: [], listings: [] });
   const [input, setInput] = useState(""); const [avail, setAvail] = useState<any[]>([]);
   const [pricing, setPricing] = useState<any>(null); const [msg, setMsg] = useState("");
@@ -218,10 +218,8 @@ function ZipManager({ listings, hasSub, go }: { listings: any[]; hasSub: boolean
   }
   const own = (zip: string, product: string) => mine.placements.find((p) => p.zip === zip && p.product === product);
   async function updateBilling() {
-    if (!hasSub) return go("/api/checkout", {});
     const r = await dealerFetch("/api/portal/zip-billing", { method: "POST", body: "{}" });
     const j = await r.json().catch(() => ({}));
-    if (r.status === 409 && j.checkout) return go("/api/checkout", {});
     setMsg(r.ok ? "Billing updated. Your ZIPs go live as soon as Stripe confirms (a few seconds)." : j.error || "Failed");
   }
   return (
@@ -261,10 +259,22 @@ function ZipManager({ listings, hasSub, go }: { listings: any[]; hasSub: boolean
             <div className="text-xs text-muted-foreground mt-1">Live price from Stripe. Volume tiers: the per-ZIP rate drops as you add ZIPs, your total grows with each ZIP.</div></>
         ) : "Loading price…"}
       </div>
-      <Button onClick={updateBilling} disabled={!counts.featured_dealer && !counts.featured_listings}>{hasSub ? "Update ZIP billing" : "Check out ZIPs"}</Button>
+      <Button onClick={updateBilling} disabled={!counts.featured_dealer && !counts.featured_listings}>Update ZIP billing</Button>
       {msg && <p className="text-sm">{msg}</p>}
     </div>
   );
+}
+
+export function ZipSection({ sub, listings }: { sub: any; listings: any[] }) {
+  const subActive = sub && ["active", "trialing"].includes(sub.status);
+  return (<>
+    {subActive && (sub?.plan === "featured" || sub?.plan === "insights")
+            ? <ZipManager listings={listings} />
+            : <div className="text-sm space-y-2" data-testid="zip-upgrade-prompt">
+                <p>ZIP code placement is an add-on for Featured Dealer ($199/mo) and Dealer Insights ($499/mo) members. Choose a plan above to unlock it.</p>
+                {sub && !subActive && <p className="text-muted-foreground">Your plan isn't active, so any ZIP placements are paused.</p>}
+              </div>}
+  </>);
 }
 
 export default function Portal() {
@@ -342,7 +352,7 @@ export default function Portal() {
       {approved && (
         <section className="rounded-xl border p-5 bg-white space-y-3">
           <h2 className="font-semibold">ZIP code placement</h2>
-          <ZipManager listings={listings} hasSub={Boolean(sub && ["active", "trialing", "past_due"].includes(sub.status))} go={go} />
+          <ZipSection sub={sub} listings={listings} />
         </section>
       )}
 

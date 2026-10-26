@@ -304,6 +304,7 @@ grant execute on function public.dealer_is_featured(integer), public.my_approved
 -- ─── Per-ZIP paid placement (AutoTrader/CarGurus style) ────────────────────
 -- A dealer reserves ZIPs per product; billing is a Stripe subscription item per product
 -- with quantity = number of ZIPs (graduated tiers configured in Stripe, not here).
+-- ZIPs are an add-on to an active Featured/Insights base plan; no standalone ZIP purchase.
 alter table public.dealer_subscriptions
   add column if not exists zip_featured_quantity integer not null default 0,
   add column if not exists zip_listings_quantity integer not null default 0;
@@ -376,6 +377,8 @@ returns text language plpgsql security definer set search_path = public, pg_temp
 declare d integer := public.my_approved_dealer_id(); cur text;
 begin
   if d is null then raise exception 'approved claim required' using errcode = '42501'; end if;
+  -- ZIPs are an add-on: an active/trialing Featured or Insights base plan is required.
+  if public.my_plan() is null then raise exception 'base plan required' using errcode = '42501', hint = 'base_plan_required'; end if;
   if p_zip !~ '^[0-9]{5}$' or p_product not in ('featured_dealer','featured_listings') then
     raise exception 'bad zip or product' using errcode = '22023'; end if;
   perform pg_advisory_xact_lock(hashtext('zip:'||p_zip||':'||p_product));
@@ -418,7 +421,7 @@ create or replace function public.sync_zip_placements(p_dealer_id integer)
 returns void language plpgsql security definer set search_path = public, pg_temp as $$
 declare live boolean; qf int; ql int;
 begin
-  select s.status in ('active','trialing') and exists (select 1 from dealer_accounts a where a.dealer_id = s.dealer_id and a.status='approved'),
+  select s.status in ('active','trialing') and s.plan in ('featured','insights') and exists (select 1 from dealer_accounts a where a.dealer_id = s.dealer_id and a.status='approved'),
          s.zip_featured_quantity, s.zip_listings_quantity
     into live, qf, ql from dealer_subscriptions s where s.dealer_id = p_dealer_id;
   live := coalesce(live, false);
@@ -437,12 +440,13 @@ begin
 end $$;
 
 -- Placement: what to show a searcher in a zip. Public. Labelled 'Featured'.
--- Live only if placement active AND subscription active/trialing AND claim approved (checked at read time too).
+-- Live only if placement active AND subscription active/trialing WITH a base plan AND claim approved (checked at read time too).
 create or replace function public.get_featured_for_zip(p_zip text)
 returns jsonb language sql stable security definer set search_path = public, pg_temp as $$
   with live as (
     select z.* from dealer_zip_placements z
     join dealer_subscriptions s on s.dealer_id = z.dealer_id and s.status in ('active','trialing')
+                               and s.plan in ('featured','insights')   -- base plan required
     join dealer_accounts a on a.dealer_id = z.dealer_id and a.status = 'approved'
     where z.zip = p_zip and z.status = 'active')
   select jsonb_build_object('zip', p_zip, 'label', 'Featured',

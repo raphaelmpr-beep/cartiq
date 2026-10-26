@@ -147,3 +147,13 @@ export async function handleStripeEvent(
   await db.recordEvent(event.id);
   return result;
 }
+
+/** Checkout line items. ZIPs are an add-on: never sold without a base plan price. */
+export function buildCheckoutItems(basePlanPrice: string | null, zipItems: { price: string; quantity: number }[]) {
+  if (!basePlanPrice) throw Object.assign(new Error("Choose Featured or Insights first. ZIP placement is an add-on to a base plan."), { status: 400 });
+  return [{ price: basePlanPrice, quantity: 1 }, ...zipItems.filter((i) => i.quantity > 0)];
+}
+/** ZIP quantity changes are allowed only on a live subscription that carries a base plan. */
+export function canBillZips(sub: { plan: string | null; status: string; stripe_subscription_id: string | null } | null): boolean {
+  return Boolean(sub?.stripe_subscription_id && (sub.plan === "featured" || sub.plan === "insights") && ["active", "trialing"].includes(sub.status));
+}

@@ -19,3 +19,12 @@ test("ok metric renders the live value", () => {
   const html = renderToStaticMarkup(<MetricValue label="Listing views" m={{ status: "ok", value: 30, tracking_since: "2026-09-01T00:00:00Z" }} />);
   assert.match(html, />30</);
 });
+
+import { ZipSection } from "../client/src/pages/Portal";
+test("ZIP purchase hidden with upgrade prompt when there is no active base plan", () => {
+  for (const sub of [null, { status: "canceled", plan: "featured" }, { status: "active", plan: null }, { status: "past_due", plan: "insights" }]) {
+    const html = renderToStaticMarkup(<ZipSection sub={sub} listings={[]} />);
+    assert.match(html, /zip-upgrade-prompt/);
+    assert.doesNotMatch(html, /Update ZIP billing/);
+  }
+});

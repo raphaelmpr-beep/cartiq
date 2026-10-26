@@ -130,3 +130,15 @@ test("price preview: graduated tiers make the total rise with every ZIP", () => 
   assert.equal(priceForQuantity({ billing_scheme: "per_unit", unit_amount: 5000 }, 3), 15000);
   assert.equal(priceForQuantity({ billing_scheme: "tiered", tiers_mode: "volume", tiers: [{ up_to: 3, unit_amount: 4900, flat_amount: null }, { up_to: null, unit_amount: 3900, flat_amount: null }] }, 4), 15600);
 });
+
+test("no standalone ZIP purchase: checkout and ZIP billing require a base plan", async () => {
+  const { buildCheckoutItems, canBillZips } = await import("../server/dealer-billing");
+  assert.throws(() => buildCheckoutItems(null, [{ price: "price_zipf_test", quantity: 3 }]), /base plan/);
+  assert.deepEqual(buildCheckoutItems("price_featured_test", [{ price: "price_zipf_test", quantity: 2 }, { price: "price_zipl_test", quantity: 0 }]),
+    [{ price: "price_featured_test", quantity: 1 }, { price: "price_zipf_test", quantity: 2 }]);
+  assert.equal(canBillZips(null), false);
+  assert.equal(canBillZips({ plan: null, status: "active", stripe_subscription_id: "sub_1" }), false);
+  assert.equal(canBillZips({ plan: "featured", status: "canceled", stripe_subscription_id: "sub_1" }), false);
+  assert.equal(canBillZips({ plan: "featured", status: "past_due", stripe_subscription_id: "sub_1" }), false);
+  assert.equal(canBillZips({ plan: "insights", status: "trialing", stripe_subscription_id: "sub_1" }), true);
+});
