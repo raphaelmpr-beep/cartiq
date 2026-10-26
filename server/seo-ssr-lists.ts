@@ -32,7 +32,8 @@ export function __setListingLoader(fn: Loader | null): void {
 
 async function eligible(): Promise<Listing[]> {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.rows;
-  const rows = await loader();
+  const seen = new Set<number>();
+  const rows = (await loader()).filter((l) => (seen.has(l.id) ? false : (seen.add(l.id), true)));
   cache = { at: Date.now(), rows };
   return rows;
 }
