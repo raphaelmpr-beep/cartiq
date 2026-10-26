@@ -121,6 +121,13 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
 
+  // ─── SEO: legacy hub paths → /search (301) ─────────────────────────────────
+  // Neither path has its own page; they used to fall through to a copy of the
+  // homepage (canonical "/"). /search is the real all-listings hub.
+  app.get(["/golf-carts-for-sale", "/golf-carts-for-sale/", "/listings", "/listings/"], (_req, res) => {
+    res.redirect(301, "/search");
+  });
+
   // ─── SEO: robots.txt ────────────────────────────────────────────────────────
   app.get("/robots.txt", (_req, res) => {
     res.type("text/plain").send(`# GolfCartIQ — Florida & Georgia Golf Cart Price Intelligence
@@ -129,6 +136,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
 User-agent: *
 Allow: /
 Disallow: /admin
+Allow: /api/listings$
+Allow: /api/listings?
 Disallow: /api/
 Disallow: /my-garage
 
@@ -3108,7 +3117,7 @@ ${pageUrls.join("\n")}
 
     app.use("/{*path}", async (req: import("express").Request, res: import("express").Response) => {
       // Skip non-HTML file extensions
-      const { pathname } = new URL(req.originalUrl || req.url || "/", "https://golfcartiq.com");
+      const { pathname, search } = new URL(req.originalUrl || req.url || "/", "https://golfcartiq.com");
       const ext = pathname.split(".").pop();
       if (ext && ext !== pathname && ext !== "html") {
         return res.status(404).json({ error: "Not found" });
@@ -3119,7 +3128,7 @@ ${pageUrls.join("\n")}
       // sees unique title/description/JSON-LD in the initial response.
       let meta;
       try {
-        meta = await getRouteMetaAsync(pathname);
+        meta = await getRouteMetaAsync(pathname, search);
       } catch {
         meta = getRouteMeta(pathname);
       }
