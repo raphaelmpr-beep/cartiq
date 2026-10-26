@@ -599,10 +599,14 @@ export async function getRouteMetaAsync(pathname: string, search: string = ""): 
       const pageNum = parseInt(new URLSearchParams(search).get("page") ?? "1", 10);
       const block = await buildListPage(normalized, Number.isFinite(pageNum) ? pageNum : 1);
       if (block) {
+        // ?page=N (N>=2) is self-canonical; page 1 / no param keep the base canonical.
+        const canonical = block.page >= 2 ? `${base.canonical}?page=${block.page}` : base.canonical;
         return {
           ...base,
+          canonical,
+          ogUrl: canonical,
           bodyContent: block.bodyContent,
-          jsonLd: itemListJsonLd(base.title, base.description, base.canonical, block),
+          jsonLd: itemListJsonLd(base.title, base.description, canonical, block),
         };
       }
     } catch {

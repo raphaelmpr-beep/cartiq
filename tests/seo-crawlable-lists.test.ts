@@ -59,3 +59,21 @@ test("route meta: list pages keep title/canonical/description, add block + ItemL
   assert.equal(m.bodyContent, undefined);
   __setListingLoader(null);
 });
+
+test("page>=2 is self-canonical; page 1 keeps base", async () => {
+  const { __setListingLoader } = await import("../server/seo-ssr-lists.ts");
+  __setListingLoader(async () => Array.from({ length: 120 }, (_, i) => mk(i + 1)));
+  assert.equal((await getRouteMetaAsync("/search", "?page=2")).canonical, "https://golfcartiq.com/search?page=2");
+  assert.equal((await getRouteMetaAsync("/search", "?page=1")).canonical, "https://golfcartiq.com/search");
+  assert.equal((await getRouteMetaAsync("/search", "")).canonical, "https://golfcartiq.com/search");
+  assert.equal((await getRouteMetaAsync("/search", "?page=999")).canonical, "https://golfcartiq.com/search?page=3");
+  __setListingLoader(null);
+});
+
+test("search order mirrors Search.tsx default sort; renderable first", async () => {
+  const { sortLikeSearch, sortLikeHub } = await import("../server/seo-ssr-lists.ts");
+  const r = (id: number, bs: any, dd: any, img = "x", price: any = 1) => ({ id, buyer_score: bs, deal_delta: dd, image_url: img, asking_price: price }) as any;
+  const out = sortLikeSearch([r(1, 5, 0), r(2, 9, 0, ""), r(3, 5, -10), r(4, 7, 0)]).map((x: any) => x.id);
+  assert.deepEqual(out, [4, 3, 1, 2]);
+  assert.deepEqual(sortLikeHub([r(1, null, 0), r(2, 5, 0), r(3, 5, 0), r(4, 8, 0)]).map((x: any) => x.id), [4, 3, 2, 1]);
+});

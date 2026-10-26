@@ -97,10 +97,35 @@ export function itemListJsonLd(name: string, description: string, url: string, b
   };
 }
 
+const num = (v: unknown) => (v == null || v === "" ? null : Number(v));
+const isRenderable = (l: any) => !!(l.image_url && String(l.image_url).trim()) && l.asking_price != null;
+
+/** Mirrors Search.tsx default sort over /api/listings (renderable rows, API order
+ *  created_at desc, id desc; then stable sort buyerScore desc, dealDelta asc).
+ *  Non-renderable rows (not shown in the React search grid) follow, same order. */
+export function sortLikeSearch(rows: Listing[]): Listing[] {
+  const cmp = (a: any, b: any) => {
+    const d = (num(b.buyer_score) ?? 0) - (num(a.buyer_score) ?? 0);
+    return d !== 0 ? d : (num(a.deal_delta) ?? 0) - (num(b.deal_delta) ?? 0);
+  };
+  return [...rows.filter(isRenderable).sort(cmp), ...rows.filter((l) => !isRenderable(l)).sort(cmp)];
+}
+
+/** Mirrors CityPage/BrandPage PostgREST order: buyer_score.desc.nullslast,id.desc. */
+export function sortLikeHub(rows: Listing[]): Listing[] {
+  return [...rows].sort((a: any, b: any) => {
+    const sa = num(a.buyer_score), sb = num(b.buyer_score);
+    if (sa == null && sb != null) return 1;
+    if (sb == null && sa != null) return -1;
+    if (sa != null && sb != null && sa !== sb) return sb - sa;
+    return Number(b.id) - Number(a.id);
+  });
+}
+
 /** Returns null when the path isn't a list page (or the city/brand is unknown). */
 export async function buildListPage(normalized: string, page: number): Promise<ListBlock | null> {
   if (normalized === "/search") {
-    const rows = await eligible();
+    const rows = sortLikeSearch(await eligible());
     return renderListBlock({ kind: "search", heading: "Golf Carts for Sale in Florida & Georgia", basePath: "/search", rows, page });
   }
   if (normalized.startsWith("/golf-carts-for-sale/")) {
@@ -108,7 +133,7 @@ export async function buildListPage(normalized: string, page: number): Promise<L
     const cfg = CITY_CONFIGS.find((c) => c.slug === slug);
     if (!cfg) return null;
     const city = cfg.city.toLowerCase();
-    const rows = (await eligible()).filter((l) => String(l.state) === cfg.state && String(l.city ?? "").toLowerCase() === city);
+    const rows = sortLikeHub((await eligible()).filter((l) => String(l.state) === cfg.state && String(l.city ?? "").toLowerCase() === city));
     return renderListBlock({ kind: "city", heading: cfg.h1, basePath: normalized, rows, page });
   }
   if (normalized.startsWith("/brands/")) {
@@ -116,7 +141,7 @@ export async function buildListPage(normalized: string, page: number): Promise<L
     const brand = getBrandWiki(BRAND_SLUG_ALIASES[raw] ?? raw);
     if (!brand) return null;
     const want = brand.dbBrand.toLowerCase();
-    const rows = (await eligible()).filter((l) => String(l.brand ?? "").toLowerCase() === want);
+    const rows = sortLikeHub((await eligible()).filter((l) => String(l.brand ?? "").toLowerCase() === want));
     return renderListBlock({ kind: "brand", heading: `${brand.name} Golf Carts for Sale`, basePath: normalized, rows, page });
   }
   return null;
