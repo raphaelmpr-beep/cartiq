@@ -24,6 +24,7 @@
     }
   ],
   "routes": [
+    { "src": "/(golf-carts-for-sale|listings)/?", "status": 301, "headers": { "Location": "/search" } },
     { "src": "/api/(.*)",              "dest": "dist/vercel-handler.cjs" },
     { "src": "/sitemap.xml",           "dest": "dist/vercel-handler.cjs" },
     { "src": "/sitemap-pages.xml",     "dest": "dist/vercel-handler.cjs" },

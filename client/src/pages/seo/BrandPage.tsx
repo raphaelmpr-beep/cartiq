@@ -35,7 +35,7 @@ async function fetchBrandListings(dbBrand: string): Promise<Listing[]> {
     status:         `eq.active`,
     public_listing: `eq.true`,
     select:         "id,title,slug,brand,model,year,condition,asking_price,deal_rating,buyer_score,image_url,city,state,battery_type,seating,source_listing_url",
-    order:          "buyer_score.desc.nullslast",
+    order:          "buyer_score.desc.nullslast,id.desc",
     limit:          "12",
   });
   const res = await fetch(`${SUPA}/rest/v1/listings?${params}`, {

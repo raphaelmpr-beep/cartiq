@@ -13,6 +13,8 @@
 
 import { storage } from "./storage";
 import type { Listing } from "@shared/schema";
+import { listingHeadlineCore, isScraperSlugTitle } from "./listing-title";
+import { buildListPage, itemListJsonLd } from "./seo-ssr-lists";
 
 const BASE_URL = "https://golfcartiq.com";
 const SITE_NAME = "GolfCartIQ";
@@ -448,7 +450,10 @@ export function getRouteMeta(pathname: string): RouteMeta {
 
 /** Product JSON-LD for a single listing. */
 function productSchema(l: Listing, canonical: string, imageUrl: string | null): object {
-  const name = String(l.title ?? "").trim() || `Golf Cart Listing #${l.id}`;
+  const rawTitle = String(l.title ?? "").trim();
+  const name = rawTitle && !isScraperSlugTitle(rawTitle)
+    ? rawTitle
+    : (listingHeadlineCore(l) !== "Golf Cart" ? listingHeadlineCore(l) : `Golf Cart Listing #${l.id}`);
   const brand = l.brand ? { "@type": "Brand", name: String(l.brand) } : undefined;
   const offers =
     l.asking_price != null && Number(l.asking_price) > 0
@@ -503,7 +508,9 @@ function listingDescriptor(l: Listing): {
       ? `$${Math.round(priceNum).toLocaleString("en-US")}`
       : "";
 
-  const headlineCore = yearBrandModel || String(l.title ?? "").trim() || "Golf Cart";
+  // Falls back to a cleaned scraper-ID title (e.g. "Golf-Carts-E-Z-GO-RXV-2019-…-<uuid>"
+  // → "2019 E-Z-GO RXV") rather than printing the raw ID.
+  const headlineCore = listingHeadlineCore(l);
   const headline = cityState
     ? `${headlineCore} for sale in ${cityState}`
     : `${headlineCore} for sale`;
@@ -545,12 +552,12 @@ function buildListingMeta(l: Listing): RouteMeta {
   // Non-active listings should be noindex, but the page can stay live for link equity.
   const isIndexable = l.status === "active" && l.public_listing === true;
 
-  // Server-rendered content block. Hidden from user (React re-renders on hydrate)
-  // but visible to Googlebot in the initial HTML. Includes title, geo, dealer,
+  // Server-rendered content block. Visible in the initial HTML (crawlers and
+  // pre-JS users); React's createRoot() replaces it on mount, so no duplication. Includes title, geo, dealer,
   // price if any, year/brand/model, and an SEO paragraph.
   const dealer = (l as any).dealer_name ?? (l as any).seller_name ?? "";
   const bodyContent =
-    `<div id="__seo_ssr__" data-seo="listing" hidden>` +
+    `<div id="__seo_ssr__" data-seo="listing" style="max-width:72rem;margin:0 auto;padding:1rem;font-family:system-ui,sans-serif">` +
     `<h1>${escHtml(d.headline)}</h1>` +
     (d.attrLine ? `<p>${escHtml(d.attrLine)}</p>` : "") +
     (d.locationLine ? `<p>Location: ${escHtml(d.locationLine)}</p>` : "") +
@@ -579,9 +586,34 @@ function buildListingMeta(l: Listing): RouteMeta {
  * listing meta + a body-content block. All other routes delegate to the
  * synchronous getRouteMeta so existing behavior is unchanged.
  */
-export async function getRouteMetaAsync(pathname: string): Promise<RouteMeta> {
+export async function getRouteMetaAsync(pathname: string, search: string = ""): Promise<RouteMeta> {
   const normalized =
     pathname === "/" ? "/" : pathname.replace(/\/$/, "").toLowerCase();
+
+  // List pages: visible SSR block (real count + /listing/ links + pagination)
+  // and an ItemList JSON-LD with the same items. Title/description/canonical are
+  // left exactly as getRouteMeta() produces them.
+  if (normalized === "/search" || normalized.startsWith("/golf-carts-for-sale/") || normalized.startsWith("/brands/")) {
+    const base = getRouteMeta(pathname);
+    try {
+      const pageNum = parseInt(new URLSearchParams(search).get("page") ?? "1", 10);
+      const block = await buildListPage(normalized, Number.isFinite(pageNum) ? pageNum : 1);
+      if (block) {
+        // ?page=N (N>=2) is self-canonical; page 1 / no param keep the base canonical.
+        const canonical = block.page >= 2 ? `${base.canonical}?page=${block.page}` : base.canonical;
+        return {
+          ...base,
+          canonical,
+          ogUrl: canonical,
+          bodyContent: block.bodyContent,
+          jsonLd: itemListJsonLd(base.title, base.description, canonical, block),
+        };
+      }
+    } catch {
+      // DB unavailable: serve the plain shell (never an invented count)
+    }
+    return base;
+  }
 
   if (normalized.startsWith("/listing/")) {
     const idOrSlug = normalized.replace("/listing/", "").split("?")[0];

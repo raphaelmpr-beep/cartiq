@@ -67,7 +67,7 @@ export function serveStatic(app: Express) {
     // Parse pathname from originalUrl. With `app.use("/{*path}")`, req.path
     // may be "/" because Express strips the mount; originalUrl preserves
     // the real request path.
-    const { pathname } = new URL(req.originalUrl || req.url || "/", "https://golfcartiq.com");
+    const { pathname, search } = new URL(req.originalUrl || req.url || "/", "https://golfcartiq.com");
 
     // Skip requests that look like files (has extension) — serve 404 rather than SPA
     const ext = path.extname(pathname);
@@ -87,7 +87,7 @@ export function serveStatic(app: Express) {
     // unique title/description/JSON-LD in the initial response.
     let meta;
     try {
-      meta = await getRouteMetaAsync(pathname);
+      meta = await getRouteMetaAsync(pathname, search);
     } catch {
       meta = getRouteMeta(pathname);
     }

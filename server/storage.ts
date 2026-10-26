@@ -141,6 +141,9 @@ class SupabaseStorage implements IStorage {
         .eq("status", "active")
         .eq("public_listing", true)
         .order("created_at", { ascending: false })
+        // Tiebreaker: created_at has ties, and without a unique order key the
+        // 1000-row pages can repeat some rows and skip others.
+        .order("id", { ascending: false })
         .range(from, to);
       if (renderable) {
         q = q
