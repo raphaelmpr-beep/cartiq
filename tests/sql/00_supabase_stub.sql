@@ -11,7 +11,7 @@ create table storage.buckets (id text primary key, name text, public boolean);
 grant usage on schema public to anon, authenticated, service_role;
 create table public.dealers (id integer primary key, name text, slug text, state text, city text, zip text, street_address text,
   hours_text text, phone text, email text, website_url text, adapter_key text, sync_enabled boolean, updated_at timestamptz);
-create table public.listings (id integer primary key, dealer_id integer references dealers(id), brand text, state text);
+create table public.listings (id integer primary key, dealer_id integer references dealers(id), brand text, state text, title text, model text, year int, sale_price float8, asking_price float8, city text, image_url text, public_listing boolean default true, status text default 'active', updated_at timestamptz);
 create table public.homepage_events (id bigserial primary key, event_type text, listing_id int, dealer_id int, created_at timestamptz default now());
 create table public.dealers_backup_20261016 (id int, phone text);
 create table public.dealers_contact_backup_20261016 (id int);

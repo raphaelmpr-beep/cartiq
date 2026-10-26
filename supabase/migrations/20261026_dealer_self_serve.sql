@@ -301,6 +301,175 @@ grant execute on function public.dealer_is_featured(integer), public.my_approved
   public._metric(bigint, timestamptz), public._tracking_since(text)
   to service_role;
 
+-- ─── Per-ZIP paid placement (AutoTrader/CarGurus style) ────────────────────
+-- A dealer reserves ZIPs per product; billing is a Stripe subscription item per product
+-- with quantity = number of ZIPs (graduated tiers configured in Stripe, not here).
+alter table public.dealer_subscriptions
+  add column if not exists zip_featured_quantity integer not null default 0,
+  add column if not exists zip_listings_quantity integer not null default 0;
+
+create table if not exists public.dealer_zip_placements (
+  id         bigserial primary key,
+  dealer_id  integer not null references public.dealers(id),
+  zip        text not null check (zip ~ '^[0-9]{5}$'),
+  product    text not null check (product in ('featured_dealer','featured_listings')),
+  -- pending  = reserved, not yet paid (holds a slot for 24h)
+  -- active   = paid: within the subscription item's quantity, subscription active/trialing, claim approved
+  -- inactive = subscription ended / unpaid / over quantity after a downgrade
+  status     text not null default 'pending' check (status in ('pending','active','inactive')),
+  created_at timestamptz not null default now(),
+  activated_at timestamptz,
+  unique (dealer_id, zip, product)
+);
+create index if not exists dzp_zip_product on public.dealer_zip_placements(zip, product, status);
+
+create table if not exists public.dealer_zip_listings (     -- selected listings for featured_listings
+  placement_id bigint not null references public.dealer_zip_placements(id) on delete cascade,
+  listing_id   integer not null references public.listings(id) on delete cascade,
+  primary key (placement_id, listing_id)
+);
+
+alter table public.dealer_zip_placements enable row level security;
+alter table public.dealer_zip_listings   enable row level security;
+revoke all on public.dealer_zip_placements, public.dealer_zip_listings from anon, authenticated;
+revoke all on sequence public.dealer_zip_placements_id_seq from anon, authenticated;
+grant select on public.dealer_zip_placements, public.dealer_zip_listings to authenticated;
+-- Writes only via the RPCs below (capacity + ownership enforced there) or service role.
+drop policy if exists dzp_select_own on public.dealer_zip_placements;
+create policy dzp_select_own on public.dealer_zip_placements for select to authenticated
+  using (dealer_id = public.my_approved_dealer_id());
+drop policy if exists dzl_select_own on public.dealer_zip_listings;
+create policy dzl_select_own on public.dealer_zip_listings for select to authenticated
+  using (placement_id in (select id from public.dealer_zip_placements where dealer_id = public.my_approved_dealer_id()));
+
+-- Capacity rule (single place to change it)
+create or replace function public.zip_slot_capacity(p_product text)
+returns integer language sql immutable set search_path = public, pg_temp as $$
+  select case p_product when 'featured_dealer' then 3 when 'featured_listings' then 3 end;
+$$;
+create or replace function public.zip_listing_cap()
+returns integer language sql immutable set search_path = public, pg_temp as $$ select 5 $$;
+
+-- Slots taken = active rows + pending reservations younger than 24h.
+create or replace function public._zip_slots_taken(p_zip text, p_product text, p_exclude_dealer integer default null)
+returns integer language sql stable security definer set search_path = public, pg_temp as $$
+  select count(*)::int from public.dealer_zip_placements
+  where zip = p_zip and product = p_product
+    and (p_exclude_dealer is null or dealer_id <> p_exclude_dealer)
+    and (status = 'active' or (status = 'pending' and created_at > now() - interval '24 hours'));
+$$;
+
+-- Public availability (no dealer identities).
+create or replace function public.get_zip_availability(p_zips text[])
+returns jsonb language sql stable security definer set search_path = public, pg_temp as $$
+  select coalesce(jsonb_agg(jsonb_build_object('zip', z, 'product', p,
+           'capacity', public.zip_slot_capacity(p),
+           'slots_left', greatest(0, public.zip_slot_capacity(p) - public._zip_slots_taken(z, p, public.my_approved_dealer_id())),
+           'sold_out', public._zip_slots_taken(z, p, public.my_approved_dealer_id()) >= public.zip_slot_capacity(p))), '[]'::jsonb)
+  from unnest(p_zips[1:50]) z, unnest(array['featured_dealer','featured_listings']) p
+  where z ~ '^[0-9]{5}$';
+$$;
+
+-- First come, first served: serialized per zip+product with an advisory lock.
+create or replace function public.reserve_zip_placement(p_zip text, p_product text)
+returns text language plpgsql security definer set search_path = public, pg_temp as $$
+declare d integer := public.my_approved_dealer_id(); cur text;
+begin
+  if d is null then raise exception 'approved claim required' using errcode = '42501'; end if;
+  if p_zip !~ '^[0-9]{5}$' or p_product not in ('featured_dealer','featured_listings') then
+    raise exception 'bad zip or product' using errcode = '22023'; end if;
+  perform pg_advisory_xact_lock(hashtext('zip:'||p_zip||':'||p_product));
+  select status into cur from dealer_zip_placements where dealer_id=d and zip=p_zip and product=p_product;
+  if cur = 'active' then return 'active'; end if;
+  if public._zip_slots_taken(p_zip, p_product, d) >= public.zip_slot_capacity(p_product) then
+    raise exception 'sold out' using errcode = 'P0001', hint = 'sold_out'; end if;
+  insert into dealer_zip_placements(dealer_id, zip, product, status) values (d, p_zip, p_product, 'pending')
+  on conflict (dealer_id, zip, product) do update set status = 'pending', created_at = now(), activated_at = null;
+  return 'pending';
+end $$;
+
+create or replace function public.release_zip_placement(p_zip text, p_product text)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare d integer := public.my_approved_dealer_id();
+begin
+  if d is null then raise exception 'approved claim required' using errcode = '42501'; end if;
+  delete from dealer_zip_placements where dealer_id=d and zip=p_zip and product=p_product;
+end $$;
+
+create or replace function public.set_zip_listings(p_zip text, p_listing_ids integer[])
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare d integer := public.my_approved_dealer_id(); pid bigint;
+begin
+  if d is null then raise exception 'approved claim required' using errcode = '42501'; end if;
+  if coalesce(array_length(p_listing_ids,1),0) > public.zip_listing_cap() then
+    raise exception 'at most % listings per zip', public.zip_listing_cap() using errcode = '22023'; end if;
+  select id into pid from dealer_zip_placements where dealer_id=d and zip=p_zip and product='featured_listings';
+  if pid is null then raise exception 'reserve this zip for featured listings first' using errcode = '22023'; end if;
+  if exists (select 1 from unnest(p_listing_ids) x where not exists
+             (select 1 from listings l where l.id = x and l.dealer_id = d)) then
+    raise exception 'listing not yours' using errcode = '42501'; end if;
+  delete from dealer_zip_listings where placement_id = pid;
+  insert into dealer_zip_listings(placement_id, listing_id) select distinct pid, x from unnest(p_listing_ids) x;
+end $$;
+
+-- Called by the webhook (service role) after dealer_subscriptions is upserted.
+-- Oldest reservations win up to the paid quantity; everything else pending/inactive.
+create or replace function public.sync_zip_placements(p_dealer_id integer)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare live boolean; qf int; ql int;
+begin
+  select s.status in ('active','trialing') and exists (select 1 from dealer_accounts a where a.dealer_id = s.dealer_id and a.status='approved'),
+         s.zip_featured_quantity, s.zip_listings_quantity
+    into live, qf, ql from dealer_subscriptions s where s.dealer_id = p_dealer_id;
+  live := coalesce(live, false);
+  with ranked as (
+    select id, product, status, row_number() over (partition by product order by
+             (status='active') desc, created_at, id) rn
+    from dealer_zip_placements where dealer_id = p_dealer_id)
+  update dealer_zip_placements z set
+    status = case
+      when live and r.rn <= case r.product when 'featured_dealer' then coalesce(qf,0) else coalesce(ql,0) end then 'active'
+      when r.status = 'pending' and z.created_at > now() - interval '24 hours' then 'pending'
+      else 'inactive' end,
+    activated_at = case when live and r.rn <= case r.product when 'featured_dealer' then coalesce(qf,0) else coalesce(ql,0) end
+                        then coalesce(z.activated_at, now()) else null end
+  from ranked r where r.id = z.id;
+end $$;
+
+-- Placement: what to show a searcher in a zip. Public. Labelled 'Featured'.
+-- Live only if placement active AND subscription active/trialing AND claim approved (checked at read time too).
+create or replace function public.get_featured_for_zip(p_zip text)
+returns jsonb language sql stable security definer set search_path = public, pg_temp as $$
+  with live as (
+    select z.* from dealer_zip_placements z
+    join dealer_subscriptions s on s.dealer_id = z.dealer_id and s.status in ('active','trialing')
+    join dealer_accounts a on a.dealer_id = z.dealer_id and a.status = 'approved'
+    where z.zip = p_zip and z.status = 'active')
+  select jsonb_build_object('zip', p_zip, 'label', 'Featured',
+    'dealers', coalesce((select jsonb_agg(jsonb_build_object('label','Featured','dealer_id',d.id,'name',d.name,'slug',d.slug,
+                 'city',d.city,'state',d.state,'phone',d.phone,'logo_url',d.logo_url) order by l.activated_at, l.id)
+               from live l join dealers d on d.id = l.dealer_id where l.product = 'featured_dealer'), '[]'::jsonb),
+    'listings', coalesce((select jsonb_agg(jsonb_build_object('label','Featured','listing_id',li.id,'dealer_id',li.dealer_id,
+                 'title',li.title,'brand',li.brand,'model',li.model,'year',li.year,'price',coalesce(li.sale_price,li.asking_price),
+                 'city',li.city,'state',li.state,'image_url',li.image_url) order by l.activated_at, li.id)
+               from live l join dealer_zip_listings x on x.placement_id = l.id
+               join listings li on li.id = x.listing_id and li.dealer_id = l.dealer_id
+                 and coalesce(li.public_listing, true) and coalesce(li.status,'active') = 'active'
+               where l.product = 'featured_listings'), '[]'::jsonb))
+  where p_zip ~ '^[0-9]{5}$';
+$$;
+
+revoke all on function public.zip_slot_capacity(text), public.zip_listing_cap(), public._zip_slots_taken(text,text,integer),
+  public.get_zip_availability(text[]), public.reserve_zip_placement(text,text), public.release_zip_placement(text,text),
+  public.set_zip_listings(text,integer[]), public.sync_zip_placements(integer), public.get_featured_for_zip(text)
+  from public, anon, authenticated;
+grant execute on function public.get_zip_availability(text[]), public.reserve_zip_placement(text,text),
+  public.release_zip_placement(text,text), public.set_zip_listings(text,integer[]) to authenticated;
+grant execute on function public.get_featured_for_zip(text), public.sync_zip_placements(integer),
+  public.get_zip_availability(text[]), public._zip_slots_taken(text,text,integer), public.zip_slot_capacity(text),
+  public.zip_listing_cap() to service_role;
+-- get_featured_for_zip is served via the server endpoint /api/featured?zip= (service role), not called by clients directly.
+
 -- ─── Storage bucket for logos (public read; uploads go through the server) ──
 insert into storage.buckets (id, name, public) values ('dealer-logos','dealer-logos', true)
 on conflict (id) do nothing;

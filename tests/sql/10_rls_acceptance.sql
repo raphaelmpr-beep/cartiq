@@ -7,7 +7,7 @@ $$ begin perform set_config('request.jwt.claims', json_build_object('sub',u,'rol
 
 insert into dealers(id,name,state,adapter_key,sync_enabled) values
  (1,'A Carts','FL','botero',true),(2,'B Carts','FL','jax',true),(3,'C Carts','FL',null,false),(4,'D Carts','FL',null,false);
-insert into listings values (11,1,'Evolution','FL'),(12,2,'Evolution','FL'),(13,3,'Evolution','FL'),(14,4,'Icon','FL');
+insert into listings(id,dealer_id,brand,state) values (11,1,'Evolution','FL'),(12,2,'Evolution','FL'),(13,3,'Evolution','FL'),(14,4,'Icon','FL');
 insert into auth.users values ('00000000-0000-0000-0000-00000000000a','a@a.com'),
  ('00000000-0000-0000-0000-00000000000b','b@b.com'),('00000000-0000-0000-0000-00000000000c','c@c.com');
 insert into dealer_accounts(user_id,dealer_id,status) values

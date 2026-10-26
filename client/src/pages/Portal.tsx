@@ -191,6 +191,82 @@ function BrandTable({ title, block, valueKey }: { title: string; block: any; val
   );
 }
 
+const PRODUCT_LABEL: Record<string, string> = { featured_dealer: "Featured dealer", featured_listings: "Featured listings" };
+const fmt = (c: number, cur = "usd") => (c / 100).toLocaleString(undefined, { style: "currency", currency: cur.toUpperCase() });
+
+function ZipManager({ listings, hasSub, go }: { listings: any[]; hasSub: boolean; go: (u: string, b?: any) => void }) {
+  const [mine, setMine] = useState<{ placements: any[]; listings: any[] }>({ placements: [], listings: [] });
+  const [input, setInput] = useState(""); const [avail, setAvail] = useState<any[]>([]);
+  const [pricing, setPricing] = useState<any>(null); const [msg, setMsg] = useState("");
+  const live = (p: any) => p.status === "active" || (p.status === "pending" && Date.now() - new Date(p.created_at).getTime() < 864e5);
+  const counts = { featured_dealer: mine.placements.filter((p) => p.product === "featured_dealer" && live(p)).length,
+                   featured_listings: mine.placements.filter((p) => p.product === "featured_listings" && live(p)).length };
+  const load = useCallback(async () => { const r = await dealerFetch("/api/portal/zips"); if (r.ok) setMine(await r.json()); }, []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    fetch(`/api/zip-pricing?featured_dealer=${counts.featured_dealer}&featured_listings=${counts.featured_listings}`)
+      .then(async (r) => setPricing(r.ok ? await r.json() : { error: (await r.json().catch(() => ({}))).error })).catch(() => {});
+  }, [counts.featured_dealer, counts.featured_listings]);
+  async function check() {
+    const zips = input.split(/[\s,]+/).filter((z) => /^\d{5}$/.test(z));
+    if (!zips.length) return setMsg("Enter 5-digit ZIP codes");
+    const r = await dealerFetch(`/api/zip-availability?zips=${zips.join(",")}`); setAvail(r.ok ? await r.json() : []); setMsg("");
+  }
+  async function act(action: string, body: any) {
+    const r = await dealerFetch(`/api/portal/zips/${action}`, { method: "POST", body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({})); setMsg(r.ok ? "" : j.error || "Failed"); await load(); if (avail.length) check();
+  }
+  const own = (zip: string, product: string) => mine.placements.find((p) => p.zip === zip && p.product === product);
+  async function updateBilling() {
+    if (!hasSub) return go("/api/checkout", {});
+    const r = await dealerFetch("/api/portal/zip-billing", { method: "POST", body: "{}" });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 409 && j.checkout) return go("/api/checkout", {});
+    setMsg(r.ok ? "Billing updated. Your ZIPs go live as soon as Stripe confirms (a few seconds)." : j.error || "Failed");
+  }
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">Buy featured placement per ZIP code. Each ZIP holds at most 3 featured dealers and 3 featured-listing dealers, first come, first served. A reservation is held 24 hours until paid.</p>
+      <div className="flex gap-2"><Input placeholder="ZIP codes, e.g. 32162, 32163" value={input} onChange={(e) => setInput(e.target.value)} /><Button variant="outline" onClick={check}>Check</Button></div>
+      {avail.length > 0 && (
+        <table className="w-full text-sm"><tbody>{avail.map((a) => {
+          const o = own(a.zip, a.product);
+          return (<tr key={a.zip + a.product} className="border-t"><td className="py-1">{a.zip}</td><td>{PRODUCT_LABEL[a.product]}</td>
+            <td>{o ? <span>{o.status === "active" ? "Yours (live)" : "Reserved"}</span> : a.sold_out ? <span className="text-red-700 font-medium">Sold out</span> : `${a.slots_left} of ${a.capacity} left`}</td>
+            <td className="text-right">{o ? <Button size="sm" variant="ghost" onClick={() => act("release", { zip: a.zip, product: a.product })}>Remove</Button>
+              : !a.sold_out && <Button size="sm" onClick={() => act("reserve", { zip: a.zip, product: a.product })}>Add</Button>}</td></tr>);
+        })}</tbody></table>
+      )}
+      <div>
+        <h3 className="font-medium text-sm mb-1">Your ZIPs</h3>
+        {mine.placements.length === 0 ? <p className="text-sm text-muted-foreground">None yet.</p> : (
+          <table className="w-full text-sm"><tbody>{mine.placements.map((p) => {
+            const sel = mine.listings.filter((l) => l.placement_id === p.id).map((l) => l.listing_id);
+            return (<tr key={p.id} className="border-t align-top"><td className="py-1">{p.zip}</td><td>{PRODUCT_LABEL[p.product]}</td>
+              <td>{p.status === "active" ? "Live" : live(p) ? "Reserved — awaiting payment" : "Inactive"}</td>
+              <td>{p.product === "featured_listings" && (
+                <details><summary className="cursor-pointer text-xs underline">Listings ({sel.length}/5)</summary>
+                  <div className="max-h-48 overflow-auto">{listings.map((l: any) => (
+                    <label key={l.id} className="flex gap-1 text-xs"><input type="checkbox" checked={sel.includes(l.id)} disabled={!sel.includes(l.id) && sel.length >= 5}
+                      onChange={(e) => act("listings", { zip: p.zip, listing_ids: e.target.checked ? [...sel, l.id] : sel.filter((x: number) => x !== l.id) })} />{l.title || `${l.year ?? ""} ${l.brand ?? ""} ${l.model ?? ""}`}</label>
+                  ))}</div></details>)}</td>
+              <td className="text-right"><Button size="sm" variant="ghost" onClick={() => act("release", { zip: p.zip, product: p.product })}>Remove</Button></td></tr>);
+          })}</tbody></table>
+        )}
+      </div>
+      <div className="rounded border p-3 text-sm bg-gray-50">
+        {pricing?.error ? <span className="text-muted-foreground">{pricing.error}</span> : pricing ? (
+          <>{(["featured_dealer", "featured_listings"] as const).map((k) => pricing.prices[k] && (
+            <div key={k}>{PRODUCT_LABEL[k]}: {counts[k]} ZIP{counts[k] === 1 ? "" : "s"} = <b>{fmt(pricing.totals_cents[k], pricing.prices[k].currency)}</b>/mo</div>))}
+            <div className="text-xs text-muted-foreground mt-1">Live price from Stripe. Volume tiers: the per-ZIP rate drops as you add ZIPs, your total grows with each ZIP.</div></>
+        ) : "Loading price…"}
+      </div>
+      <Button onClick={updateBilling} disabled={!counts.featured_dealer && !counts.featured_listings}>{hasSub ? "Update ZIP billing" : "Check out ZIPs"}</Button>
+      {msg && <p className="text-sm">{msg}</p>}
+    </div>
+  );
+}
+
 export default function Portal() {
   const [me, setMe] = useState<any>(null); const [authed, setAuthed] = useState(false); const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -263,7 +339,14 @@ export default function Portal() {
         </section>
       )}
 
-      {approved && subActive && (
+      {approved && (
+        <section className="rounded-xl border p-5 bg-white space-y-3">
+          <h2 className="font-semibold">ZIP code placement</h2>
+          <ZipManager listings={listings} hasSub={Boolean(sub && ["active", "trialing", "past_due"].includes(sub.status))} go={go} />
+        </section>
+      )}
+
+      {approved && subActive && sub?.plan && (
         <section className="space-y-3">
           <h2 className="font-semibold">Metrics</h2>
           <Dashboard />

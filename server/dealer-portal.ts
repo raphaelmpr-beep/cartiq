@@ -10,7 +10,7 @@ import rateLimit from "express-rate-limit";
 import Stripe from "stripe";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin, getSupabaseUrl } from "./supabase-admin";
-import { handleStripeEvent, verifyStripeEvent, planToPrice, type BillingDb } from "./dealer-billing";
+import { handleStripeEvent, verifyStripeEvent, planToPrice, zipPriceFor, priceForQuantity, type BillingDb, type ZipProduct } from "./dealer-billing";
 
 let _stripe: Stripe | null = null;
 export function stripeClient(): Stripe {
@@ -228,8 +228,9 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
   app.post("/api/checkout", requireUser, async (req: AuthedReq, res) => {
     try {
       const plan = String(req.body?.plan || "");
-      const price = planToPrice(plan);
-      if (!price) return res.status(plan === "featured" || plan === "insights" ? 503 : 400).json({ error: plan === "featured" || plan === "insights" ? "Billing is not configured yet" : "Unknown plan" });
+      const price = plan ? planToPrice(plan) : null;
+      if (plan && plan !== "featured" && plan !== "insights") return res.status(400).json({ error: "Unknown plan" });
+      if (plan && !price) return res.status(503).json({ error: "Billing is not configured yet" });
       const claim = await myClaim(req.token!);
       if (!claim) return res.status(400).json({ error: "Claim your dealership first" });
       if (!claim.dealer_id) return res.status(400).json({ error: "We're reviewing your new-dealer submission. You can pay once it's added." });
@@ -249,12 +250,21 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
         const c = await stripe.customers.create({ email: req.user!.email, metadata: { dealer_id: String(claim.dealer_id), user_id: req.user!.id } });
         customer = c.id;
       }
+      const lineItems: { price: string; quantity: number }[] = price ? [{ price, quantity: 1 }] : [];
+      if (claim.status === "approved") {
+        const counts = await zipCounts(claim.dealer_id);
+        for (const p of ["featured_dealer", "featured_listings"] as ZipProduct[]) {
+          const zp = zipPriceFor(p);
+          if (counts[p] > 0) { if (!zp) return res.status(503).json({ error: "ZIP billing is not configured yet" }); lineItems.push({ price: zp, quantity: counts[p] }); }
+        }
+      }
+      if (!lineItems.length) return res.status(400).json({ error: "Pick a plan or reserve at least one ZIP" });
       const metadata = { user_id: req.user!.id, dealer_id: String(claim.dealer_id), plan };
       const base = siteUrl(req);
       const session = await stripe.checkout.sessions.create({
         mode: "subscription",
         customer,
-        line_items: [{ price, quantity: 1 }],
+        line_items: lineItems,
         client_reference_id: claim.user_id, // dealer_accounts is keyed by user_id: that is the claim id
         metadata,
         subscription_data: { metadata },
@@ -292,6 +302,106 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
       console.error("[stripe-webhook]", event.type, e?.message);
       res.status(500).json({ error: "processing failed" }); // Stripe retries; event not recorded
     }
+  });
+
+  // ─── Per-ZIP placement ─────────────────────────────────────────────────────
+  const pricesCache: { at: number; data: any } = { at: 0, data: null };
+  app.get("/api/zip-pricing", async (req, res) => {
+    try {
+      const ids = { featured_dealer: zipPriceFor("featured_dealer"), featured_listings: zipPriceFor("featured_listings") };
+      if (!ids.featured_dealer && !ids.featured_listings) return res.status(503).json({ error: "ZIP pricing is not configured yet" });
+      if (!pricesCache.data || Date.now() - pricesCache.at > 5 * 60_000) {
+        const stripe = stripeClient(); const out: any = {};
+        for (const [k, id] of Object.entries(ids)) if (id) {
+          const p = await stripe.prices.retrieve(id, { expand: ["tiers"] });
+          out[k] = { currency: p.currency, billing_scheme: p.billing_scheme, tiers_mode: p.tiers_mode, unit_amount: p.unit_amount,
+                     tiers: (p.tiers || []).map((t) => ({ up_to: t.up_to, unit_amount: t.unit_amount, flat_amount: t.flat_amount })), interval: p.recurring?.interval };
+        }
+        pricesCache.data = out; pricesCache.at = Date.now();
+      }
+      const q = (k: string) => Math.min(500, Math.max(0, Number(req.query[k]) || 0));
+      const prices = pricesCache.data;
+      const totals: any = {};
+      for (const k of Object.keys(prices)) totals[k] = priceForQuantity(prices[k], q(k));
+      res.json({ prices, quantities: { featured_dealer: q("featured_dealer"), featured_listings: q("featured_listings") }, totals_cents: totals });
+    } catch (e) { fail(res, e); }
+  });
+
+  app.get("/api/zip-availability", requireUser, async (req: AuthedReq, res) => {
+    try {
+      const zips = String(req.query.zips || "").split(",").map((z) => z.trim()).filter((z) => /^\d{5}$/.test(z)).slice(0, 50);
+      if (!zips.length) return res.json([]);
+      const { data, error } = await userClient(req.token!).rpc("get_zip_availability", { p_zips: zips });
+      if (error) throw error;
+      res.json(data);
+    } catch (e) { fail(res, e); }
+  });
+
+  app.get("/api/portal/zips", requireUser, async (req: AuthedReq, res) => {
+    try {
+      const sb = userClient(req.token!);
+      const { data: placements, error } = await sb.from("dealer_zip_placements").select("id,zip,product,status,created_at,activated_at").order("created_at");
+      if (error) throw error;
+      const { data: sel } = await sb.from("dealer_zip_listings").select("placement_id,listing_id");
+      res.json({ placements: placements || [], listings: sel || [] });
+    } catch (e) { fail(res, e); }
+  });
+
+  app.post("/api/portal/zips/:action", requireUser, async (req: AuthedReq, res) => {
+    try {
+      const sb = userClient(req.token!);
+      const zip = String(req.body?.zip || ""), product = String(req.body?.product || "");
+      let r: any;
+      if (req.params.action === "reserve") r = await sb.rpc("reserve_zip_placement", { p_zip: zip, p_product: product });
+      else if (req.params.action === "release") r = await sb.rpc("release_zip_placement", { p_zip: zip, p_product: product });
+      else if (req.params.action === "listings") {
+        const ids = Array.isArray(req.body?.listing_ids) ? req.body.listing_ids.map(Number).filter(Number.isInteger) : [];
+        r = await sb.rpc("set_zip_listings", { p_zip: zip, p_listing_ids: ids });
+      } else return res.status(404).json({ error: "unknown action" });
+      if (r.error) {
+        const msg = r.error.hint === "sold_out" || /sold out/.test(r.error.message) ? "That ZIP is sold out" : r.error.code === "42501" ? "Not allowed" : r.error.message;
+        return res.status(r.error.hint === "sold_out" || /sold out/.test(r.error.message) ? 409 : 400).json({ error: msg });
+      }
+      res.json({ ok: true, status: r.data ?? null });
+    } catch (e) { fail(res, e); }
+  });
+
+  /** Sets the ZIP subscription items' quantities to the dealer's reserved+active ZIP counts. */
+  app.post("/api/portal/zip-billing", requireUser, async (req: AuthedReq, res) => {
+    try {
+      const claim = await myClaim(req.token!);
+      if (!claim?.dealer_id || claim.status !== "approved") return res.status(403).json({ error: "Your claim must be approved first" });
+      const admin = supabaseAdmin();
+      const { data: sub } = await admin.from("dealer_subscriptions").select("stripe_subscription_id,status").eq("dealer_id", claim.dealer_id).maybeSingle();
+      if (!sub?.stripe_subscription_id || !["active", "trialing", "past_due"].includes(sub.status)) {
+        return res.status(409).json({ error: "No active subscription yet", checkout: true });
+      }
+      const stripe = stripeClient();
+      const s = await stripe.subscriptions.retrieve(sub.stripe_subscription_id);
+      const counts = await zipCounts(claim.dealer_id);
+      const items: Stripe.SubscriptionUpdateParams.Item[] = [];
+      for (const p of ["featured_dealer", "featured_listings"] as ZipProduct[]) {
+        const priceId = zipPriceFor(p);
+        if (!priceId) { if (counts[p]) return res.status(503).json({ error: "ZIP billing is not configured yet" }); continue; }
+        const existing = s.items.data.find((i) => i.price.id === priceId);
+        if (existing && counts[p] === 0) items.push({ id: existing.id, deleted: true });
+        else if (existing) items.push({ id: existing.id, quantity: counts[p] });
+        else if (counts[p] > 0) items.push({ price: priceId, quantity: counts[p] });
+      }
+      if (items.length) await stripe.subscriptions.update(s.id, { items, proration_behavior: "create_prorations" });
+      res.json({ ok: true, quantities: counts }); // webhook (customer.subscription.updated) syncs DB + activates zips
+    } catch (e) { fail(res, e); }
+  });
+
+  // Placement for a searcher's ZIP: paid, live placements only, every item labelled "Featured".
+  app.get("/api/featured", async (req, res) => {
+    try {
+      const zip = String(req.query.zip || "");
+      if (!/^\d{5}$/.test(zip)) return res.status(400).json({ error: "zip must be 5 digits" });
+      const { data, error } = await supabaseAdmin().rpc("get_featured_for_zip", { p_zip: zip });
+      if (error) throw error;
+      res.set("Cache-Control", "public, max-age=60").json(data ?? { zip, label: "Featured", dealers: [], listings: [] });
+    } catch (e) { fail(res, e); }
   });
 
   // ─── Tracking ─────────────────────────────────────────────────────────────
@@ -376,6 +486,16 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
   });
 }
 
+/** Billable ZIPs per product = reserved (pending, fresh) + active. */
+async function zipCounts(dealerId: number): Promise<Record<ZipProduct, number>> {
+  const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const { data, error } = await supabaseAdmin().from("dealer_zip_placements").select("product,status,created_at").eq("dealer_id", dealerId);
+  if (error) throw error;
+  const out: Record<ZipProduct, number> = { featured_dealer: 0, featured_listings: 0 };
+  for (const r of data || []) if (r.status === "active" || (r.status === "pending" && r.created_at > since)) out[r.product as ZipProduct]++;
+  return out;
+}
+
 function pickSession(s: any) {
   return { access_token: s.access_token, refresh_token: s.refresh_token, expires_at: s.expires_at };
 }
@@ -394,6 +514,10 @@ function supabaseBillingDb(): BillingDb {
     },
     async upsertSubscription(row) {
       const { error } = await admin.from("dealer_subscriptions").upsert(row, { onConflict: "dealer_id" });
+      if (error) throw error;
+    },
+    async syncZipPlacements(dealerId) {
+      const { error } = await admin.rpc("sync_zip_placements", { p_dealer_id: dealerId });
       if (error) throw error;
     },
     async findDealerBySubscription(subId) {
