@@ -3,13 +3,13 @@
  * and /brands/:slug. Injected into <div id="root">; React's createRoot() replaces
  * it on mount, so users never see it twice.
  *
- * Counts and links come only from active + public listings that pass the same
- * eligibility rule as the listing sitemap (isListingSitemapEligible), so the
- * /search total always equals the number of listing URLs in the sitemap.
+ * Counts and links come only from active + public listings — the same query
+ * the live /sitemap-N.xml uses (routes.ts, storage.getListings) — so the /search
+ * total equals the number of listing URLs in the sitemap.
  */
 import type { Listing } from "@shared/schema";
 import { storage } from "./storage";
-import { isListingSitemapEligible, canonicalListingUrl } from "./sitemaps";
+import { canonicalListingUrl } from "./sitemaps";
 import { CITY_CONFIGS } from "../client/src/lib/seo-config";
 import { getBrandWiki } from "../client/src/lib/brand-wiki-data";
 import { listingHeadlineCore } from "./listing-title";
@@ -21,13 +21,13 @@ const BRAND_SLUG_ALIASES: Record<string, string> = { ezgo: "e-z-go", denago: "de
 let cache: { at: number; rows: Listing[] } | null = null;
 type Loader = () => Promise<Listing[]>;
 let loader: Loader = async () =>
-  ((await storage.getListings({ limit: 50_000 })) as Listing[]).filter(isListingSitemapEligible);
+  (await storage.getListings({ limit: 50_000 })) as Listing[];
 
 /** Test hook. */
 export function __setListingLoader(fn: Loader | null): void {
   cache = null;
   loader = fn ?? (async () =>
-    ((await storage.getListings({ limit: 50_000 })) as Listing[]).filter(isListingSitemapEligible));
+    (await storage.getListings({ limit: 50_000 })) as Listing[]);
 }
 
 async function eligible(): Promise<Listing[]> {
