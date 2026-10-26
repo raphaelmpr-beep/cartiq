@@ -1,6 +1,7 @@
 import { setSEO } from "@/lib/seo";
 import { normalizeWarranty } from "@shared/warranty";
 import { useQuery } from "@tanstack/react-query";
+import { trackSiteEvent } from "@/lib/track";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getSavedLocation, zipToCoords } from "@/lib/geo";
 import { SlidersHorizontal, X, MapPin } from "lucide-react";
@@ -306,6 +307,14 @@ export default function Search() {
     }
     setFilters(init);
   }, []);
+
+  // site_events: debounced "search" event when the shopper settles on filters
+  useEffect(() => {
+    const brand = filters.brands ? filters.brands.split(",")[0] : undefined;
+    if (!brand && !filters.state && !filters.city && !filters.q) return;
+    const t = setTimeout(() => trackSiteEvent({ eventType: "search", brand, state: filters.state, city: filters.city, query: filters.q }), 2000);
+    return () => clearTimeout(t);
+  }, [filters.brands, filters.state, filters.city, filters.q]);
 
   // Sync filters to URL
   const syncUrl = useCallback((next: ClientFilters) => {

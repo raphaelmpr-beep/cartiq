@@ -1,3 +1,4 @@
+import { registerDealerRoutes } from "./dealer-portal";
 import { BOT_UA } from './sync/polite-fetch.js';
 import { extractListingPrice } from "./sync/price-extract.js";
 import type { Express } from "express";
@@ -378,6 +379,7 @@ ${pageUrls.join("\n")}
     return res.status(401).json({ error: "Unauthorized" });
   }
   registerRecheckRoutes(app, requireAdmin);
+  registerDealerRoutes(app, requireAdmin);
 
 
   // GET /api/admin/verify — lightweight endpoint the Admin UI uses to gate
