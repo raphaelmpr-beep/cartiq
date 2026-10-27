@@ -99,4 +99,43 @@ reset role;
 select public.sync_zip_placements(1);
 select pg_temp.ok(jsonb_array_length(public.get_featured_for_zip('32162')->'dealers')=0 and (select bool_and(status<>'active') from dealer_zip_placements where dealer_id=1), 'canceled base plan => ZIPs come off');
 select pg_temp.ok(public.zip_slot_capacity('featured_dealer')=3 and public.zip_slot_capacity('featured_listings')=3, 'capacity 3 per ZIP for both products');
+
+-- Reservation hold: re-reserving does NOT refresh created_at; pending cap of 10 per 24h
+update dealer_subscriptions set status='active', plan='featured' where dealer_id=4;
+delete from dealer_zip_placements where dealer_id=4;
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d'); set role authenticated;
+select public.reserve_zip_placement('40001','featured_dealer');
+reset role;
+update dealer_zip_placements set created_at = now() - interval '23 hours' where dealer_id=4 and zip='40001';
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d'); set role authenticated;
+select pg_temp.ok(public.reserve_zip_placement('40001','featured_dealer')='pending', 're-reserve of live hold returns pending');
+reset role;
+select pg_temp.ok((select created_at < now() - interval '22 hours' from dealer_zip_placements where dealer_id=4 and zip='40001'), 're-reserve does NOT refresh created_at');
+update dealer_zip_placements set created_at = now() - interval '25 hours' where dealer_id=4 and zip='40001';
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d'); set role authenticated;
+select pg_temp.ok(public.reserve_zip_placement('40001','featured_dealer')='pending', 'expired hold can be re-reserved');
+reset role;
+select pg_temp.ok((select created_at > now() - interval '1 minute' from dealer_zip_placements where dealer_id=4 and zip='40001'), 'expired hold revived with fresh created_at');
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d'); set role authenticated;
+select public.reserve_zip_placement('4000'||g, 'featured_dealer') from generate_series(2,9) g;  -- now 9 pending (40001..40009)
+select pg_temp.ok(public.reserve_zip_placement('40010','featured_dealer')='pending', '10th pending hold allowed');
+do $$ begin perform public.reserve_zip_placement('40011','featured_dealer'); raise exception 'FAIL: 11th hold allowed';
+  exception when raise_exception then
+    if sqlerrm <> 'too many pending reservations' then raise; end if;
+    raise notice 'PASS: 11th pending hold => too many pending reservations'; end $$;
+select pg_temp.ok(public.reserve_zip_placement('40005','featured_dealer')='pending', 'at cap, re-reserving an existing live hold still returns pending');
+reset role;
+select pg_temp.ok((select count(*) from dealer_zip_placements where dealer_id=4 and status='pending')=10, 'exactly 10 pending holds');
+-- Profile URLs must be https
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000d'); set role authenticated;
+select public.update_my_dealer_profile('{"website_url":"https://ok.example","logo_url":"https://ok.example/l.png"}');
+select public.update_my_dealer_profile('{"website_url":"javascript:alert(1)","logo_url":"http://x.example/l.png"}');
+reset role;
+select pg_temp.ok((select website_url='https://ok.example' and logo_url='https://ok.example/l.png' from dealers where id=4), 'non-https website/logo URLs rejected (kept previous)');
+-- Retention + indexes
+insert into site_events(event_type,state,created_at) values ('search','FL', now()-interval '14 months');
+select pg_temp.ok(public.purge_old_site_events() >= 1, 'site_events purge deletes >13-month rows');
+select pg_temp.ok(not exists(select 1 from site_events where created_at < now()-interval '13 months'), 'no site_events older than 13 months remain');
+select pg_temp.ok(not has_function_privilege('anon','public.purge_old_site_events()','execute') and not has_function_privilege('authenticated','public.purge_old_site_events()','execute'), 'purge not callable by anon/authenticated');
+select pg_temp.ok(to_regclass('public.dzl_listing_id') is not null and to_regclass('public.site_events_created') is not null, 'dzl_listing_id + site_events_created indexes exist');
 \echo ALL_ZIP_TESTS_PASSED

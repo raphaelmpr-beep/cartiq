@@ -60,15 +60,25 @@ insert into site_events(event_type,brand,state,created_at) select 'search','Icon
 select pg_temp.as_user('00000000-0000-0000-0000-00000000000a'); set role authenticated;
 select pg_temp.ok((select (m->'listing_views'->>'value')::int = 30 from (select public.get_dealer_metrics(30) m) x), 'A listing_views=30 (own only, not B/C)');
 select pg_temp.ok((select (m->'profile_views'->>'status')='insufficient' from (select public.get_dealer_metrics(30) m) x), 'A profile views 5 (<20) => insufficient');
+-- k-anon excludes the caller: A + 2 competitors (only 2 OTHER dealers) => suppressed
+select pg_temp.ok((select jsonb_array_length(coalesce(m->'listing_views_by_brand'->'buckets','[]'))=0
+                   and not (m->'share_of_area_listing_views' ? 'area_total')
+                   and (select count(*) from jsonb_array_elements(coalesce(m->'searches_by_brand'->'buckets','[]')) b where b->>'brand'='evolution')=0
+                   from (select public.get_area_metrics(30) m) x), 'k-anon: caller + 2 others (2 competitors) => buckets and share suppressed');
+reset role;
+insert into site_events(event_type,dealer_id,listing_id,brand,state,created_at)
+  select 'listing_view', 4, 41, 'Evolution','FL', now()-interval '20 days' + (g||' hours')::interval from generate_series(1,30) g;
+insert into listings(id,dealer_id,brand,state) values (17,4,'Evolution','FL');
+select pg_temp.as_user('00000000-0000-0000-0000-00000000000a'); set role authenticated;
 select pg_temp.ok((select m::text not like '%B Carts%' and m::text not like '%"dealer_id"%' from (select public.get_area_metrics(30) m) x), 'area metrics expose no dealer names/ids');
-select pg_temp.ok((select jsonb_array_length(m->'listing_views_by_brand'->'buckets')=1 and (m->'share_of_area_listing_views'->>'mine')::int=30 and (m->'share_of_area_listing_views'->>'area_total')::int=90 from (select public.get_area_metrics(30) m) x), 'area listing views bucket (3 dealers, 90 ev) shown; share 30/90');
+select pg_temp.ok((select jsonb_array_length(m->'listing_views_by_brand'->'buckets')=1 and (m->'share_of_area_listing_views'->>'mine')::int=30 and (m->'share_of_area_listing_views'->>'area_total')::int=120 from (select public.get_area_metrics(30) m) x), 'area listing views bucket (caller + 3 others, 120 ev) shown; share 30/120');
 select pg_temp.ok((select (select count(*) from jsonb_array_elements(m->'searches_by_brand'->'buckets') b where b->>'brand'='icon')=0
                       and (select count(*) from jsonb_array_elements(m->'searches_by_brand'->'buckets') b where b->>'brand'='evolution')=1
-                   from (select public.get_area_metrics(30) m) x), 'k-anon: Icon (1 dealer) suppressed, Evolution (3 dealers) shown');
+                   from (select public.get_area_metrics(30) m) x), 'k-anon: Icon (1 dealer) suppressed, Evolution (3 other dealers) shown');
 reset role;
 -- spot-check 3 numbers vs hand count
 select pg_temp.ok((select count(*) from site_events where event_type='listing_view' and dealer_id=1 and created_at>=now()-interval '30 days')=30, 'spot-check A listing_view count(*)=30');
-select pg_temp.ok((select count(*) from site_events where event_type='listing_view' and state='FL' and created_at>=now()-interval '30 days')=90, 'spot-check area listing_view count(*)=90');
+select pg_temp.ok((select count(*) from site_events where event_type='listing_view' and state='FL' and created_at>=now()-interval '30 days')=120, 'spot-check area listing_view count(*)=120');
 select pg_temp.ok((select count(*) from site_events where event_type='search' and brand='Evolution' and state='FL')=22, 'spot-check Evolution search count(*)=22');
 
 -- Dealer C (pending claim, paid): no metrics, no profile edit, not featured

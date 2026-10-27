@@ -68,6 +68,14 @@ create table if not exists public.site_events (
 );
 create index if not exists site_events_type_dealer_time on public.site_events(event_type, dealer_id, created_at);
 create index if not exists site_events_type_state_time  on public.site_events(event_type, state, created_at);
+create index if not exists site_events_created on public.site_events(created_at);
+-- 13-month retention (service role / cron only; scheduling is a separate approved step).
+create or replace function public.purge_old_site_events()
+returns integer language sql security definer set search_path = public, pg_temp as $$
+  with x as (delete from public.site_events where created_at < now() - interval '13 months' returning 1)
+  select count(*)::int from x;
+$$;
+revoke all on function public.purge_old_site_events() from public, anon, authenticated;
 
 -- ─── RLS ─────────────────────────────────────────────────────────────────────
 alter table public.dealer_accounts      enable row level security;
@@ -169,12 +177,12 @@ begin
     hours_text          = case when p ? 'hours_text'          then left(p->>'hours_text',500) else hours_text end,
     phone               = case when p ? 'phone'               then left(p->>'phone',40) else phone end,
     email               = case when p ? 'email'               then left(p->>'email',200) else email end,
-    website_url         = case when p ? 'website_url'         then left(p->>'website_url',300) else website_url end,
+    website_url         = case when p ? 'website_url'         then (case when p->>'website_url' ~ '^https://' then left(p->>'website_url',300) else website_url end) else website_url end,
     profile_description = case when p ? 'profile_description' then left(p->>'profile_description',2000) else profile_description end,
     brands_carried      = case when p ? 'brands_carried'
                                then (select array_agg(left(x,60)) from jsonb_array_elements_text(p->'brands_carried') x)
                                else brands_carried end,
-    logo_url            = case when p ? 'logo_url'            then left(p->>'logo_url',500) else logo_url end,
+    logo_url            = case when p ? 'logo_url'            then (case when p->>'logo_url' ~ '^https://' then left(p->>'logo_url',500) else logo_url end) else logo_url end,
     updated_at          = now()
   where id = d;
 end $$;
@@ -232,12 +240,12 @@ begin
     select unnest(brands_carried) b from dealers where id = d
     union select brand from listings where dealer_id = d and brand is not null) z;
 
-  select count(*) filter (where dealer_id = d), count(*), count(distinct dealer_id)
+  select count(*) filter (where dealer_id = d), count(*), count(distinct dealer_id) filter (where dealer_id is distinct from d)
     into my_lv, area_lv, area_dealers
     from site_events where event_type='listing_view' and state=st and created_at>=since;
 
   with lv as (
-    select lower(brand) b, count(*) n, count(distinct dealer_id) nd from site_events
+    select lower(brand) b, count(*) n, count(distinct dealer_id) filter (where dealer_id is distinct from d) nd from site_events
     where event_type='listing_view' and state=st and created_at>=since and brand is not null group by 1),
   -- searches carry no dealer; bucket's dealer count = distinct dealers in-state with public listings of that brand
   sr0 as (
@@ -246,7 +254,7 @@ begin
   sr as (
     select sr0.b, sr0.n,
       (select count(distinct l.dealer_id) from listings l
-        where l.state = st and lower(l.brand) = sr0.b and l.dealer_id is not null) nd
+        where l.state = st and lower(l.brand) = sr0.b and l.dealer_id is not null and l.dealer_id <> d) nd
     from sr0)
   select jsonb_build_object(
     'area', jsonb_build_object('type','state','state',st),
@@ -329,6 +337,7 @@ create table if not exists public.dealer_zip_listings (     -- selected listings
   listing_id   integer not null references public.listings(id) on delete cascade,
   primary key (placement_id, listing_id)
 );
+create index if not exists dzl_listing_id on public.dealer_zip_listings(listing_id);
 
 alter table public.dealer_zip_placements enable row level security;
 alter table public.dealer_zip_listings   enable row level security;
@@ -382,12 +391,18 @@ begin
   if p_zip !~ '^[0-9]{5}$' or p_product not in ('featured_dealer','featured_listings') then
     raise exception 'bad zip or product' using errcode = '22023'; end if;
   perform pg_advisory_xact_lock(hashtext('zip:'||p_zip||':'||p_product));
-  select status into cur from dealer_zip_placements where dealer_id=d and zip=p_zip and product=p_product;
-  if cur = 'active' then return 'active'; end if;
+  select status into cur from dealer_zip_placements where dealer_id=d and zip=p_zip and product=p_product
+    and (status = 'active' or (status = 'pending' and created_at > now() - interval '24 hours'));
+  if cur is not null then return cur; end if;   -- existing live hold: do NOT refresh created_at
+  if (select count(*) from dealer_zip_placements where dealer_id=d and status='pending'
+        and created_at > now() - interval '24 hours') >= 10 then
+    raise exception 'too many pending reservations' using errcode = 'P0001', hint = 'pending_cap'; end if;
   if public._zip_slots_taken(p_zip, p_product, d) >= public.zip_slot_capacity(p_product) then
     raise exception 'sold out' using errcode = 'P0001', hint = 'sold_out'; end if;
   insert into dealer_zip_placements(dealer_id, zip, product, status) values (d, p_zip, p_product, 'pending')
-  on conflict (dealer_id, zip, product) do update set status = 'pending', created_at = now(), activated_at = null;
+  on conflict (dealer_id, zip, product) do update set status = 'pending', created_at = now(), activated_at = null
+    where dealer_zip_placements.status <> 'active'
+      and not (dealer_zip_placements.status = 'pending' and dealer_zip_placements.created_at > now() - interval '24 hours');
   return 'pending';
 end $$;
 
