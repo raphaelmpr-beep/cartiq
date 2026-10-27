@@ -17,6 +17,7 @@ import { normalizeWarranty } from "@shared/warranty";
 import { formatPrice, batteryTypeLabel, yesNoUnknownLabel, warrantyProviderLabel, parseJsonField, dealDeltaColor, dealDeltaText } from "@/lib/utils";
 import type { Listing, Dealer } from "@/lib/types";
 import { apiRequest } from "@/lib/queryClient";
+import { useLeadTracking, LeadContactButton } from "@/components/leads/LeadTracking";
 
 // We run the pricing engine client-side so questions/redFlags are available
 function usePricingResult(listing?: Listing) {
@@ -60,6 +61,9 @@ export default function ListingDetail() {
     enabled: !!dealerSlug && listing?.sellerType === "dealer",
     retry: false,
   });
+
+  // Lead tracking (DRAFT): build-time constant, folded away when the flag is off.
+  if (__LEAD_TRACKING_ENABLED__) useLeadTracking(listing);
 
   // SEO — injected once listing loads.
   // Any lifecycle state other than "active" is marked noindex so Google drops
@@ -494,9 +498,20 @@ export default function ListingDetail() {
                     <Button className="w-full gap-2" data-testid="btn-view-retailer"><ExternalLink className="h-4 w-4" /> View Retailer</Button>
                   </a>
                 ) : listing.sellerPhone ? (
-                  <a href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}>
-                    <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Call Seller</Button>
-                  </a>
+                  __LEAD_TRACKING_ENABLED__ ? (
+                    <>
+                      <a href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}>
+                        <Button className="w-full gap-2" style={{ minHeight: 44 }} data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Call Seller</Button>
+                      </a>
+                      <LeadContactButton listingId={listing.id} dealerId={listing.dealerId} title={listing.title} variant="quote" />
+                    </>
+                  ) : (
+                    <a href={`tel:${listing.sellerPhone.replace(/\D/g, "")}`}>
+                      <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Call Seller</Button>
+                    </a>
+                  )
+                ) : __LEAD_TRACKING_ENABLED__ ? (
+                  <LeadContactButton listingId={listing.id} dealerId={listing.dealerId} title={listing.title} />
                 ) : (
                   <Button className="w-full gap-2" data-testid="btn-contact-seller"><Phone className="h-4 w-4" /> Contact Seller</Button>
                 )}

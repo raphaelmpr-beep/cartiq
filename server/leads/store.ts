@@ -1,0 +1,274 @@
+// Lead tracking store (DRAFT). Supabase implementation uses the server-side
+// service_role client; a memory store is used by tests. Nothing here runs
+// unless LEAD_TRACKING_ENABLED is on.
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { LeadEventType, LeadInput, DealerMonthRow, DayCount } from "@shared/leadTracking";
+
+export interface AdminLeadRow {
+  id: number; created_at: string; listing_id: number; listing_title: string | null; listing_slug: string | null;
+  dealer_id: number | null; dealer_name: string | null; name: string; email: string | null; phone: string | null;
+  zip: string; message: string | null; status: string; contacted_at: string | null; forwarded_at: string | null;
+}
+
+export type LeadRow = LeadInput & {
+  dealerId: number | null; consentText: string; ipHash: string | null; contactHash: string; dedupeBucket: number;
+};
+
+/** Memory lead table with the same uniqueness rules as the draft SQL (fixture + tests). */
+type MemLead = LeadRow & { id: number; created_at: string; status: string; contacted_at: string | null; forwarded_at: string | null };
+export function memoryLeads(rows: MemLead[] = [], nowFn = Date.now,
+  lookup: (listingId: number) => { title?: string; slug?: string; dealerName?: string } = () => ({})) {
+  let nextId = 1;
+  const toAdmin = (r: MemLead): AdminLeadRow => {
+    const x = lookup(r.listingId);
+    return { id: r.id, created_at: r.created_at, listing_id: r.listingId, listing_title: x.title ?? null, listing_slug: x.slug ?? null,
+      dealer_id: r.dealerId, dealer_name: r.dealerId == null ? null : x.dealerName ?? null, name: r.name, email: r.email, phone: r.phone,
+      zip: r.zip, message: r.message, status: r.status, contacted_at: r.contacted_at, forwarded_at: r.forwarded_at };
+  };
+  return {
+    rows,
+    async listLeads(page: number, pageSize: number) {
+      const sorted = [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+      return { rows: sorted.slice((page - 1) * pageSize, page * pageSize).map(toAdmin), total: rows.length };
+    },
+    async markContacted(id: number, at: string) {
+      const r = rows.find((x) => x.id === id);
+      if (!r) return null;
+      r.contacted_at ??= at; r.status = r.status === "forwarded" ? r.status : "contacted";
+      return toAdmin(r);
+    },
+    async findDuplicateLead(q: { listingId: number; idempotencyKey: string; contactHash: string; since: string }) {
+      return rows.some((r) => r.idempotencyKey === q.idempotencyKey ||
+        (r.listingId === q.listingId && r.contactHash === q.contactHash && r.created_at >= q.since));
+    },
+    async insertLead(l: LeadRow) {
+      if (rows.some((r) => r.idempotencyKey === l.idempotencyKey ||
+        (r.listingId === l.listingId && r.contactHash === l.contactHash && r.dedupeBucket === l.dedupeBucket))) return { duplicate: true };
+      rows.push({ ...l, id: nextId++, created_at: new Date(nowFn()).toISOString(), status: "new", contacted_at: null, forwarded_at: null });
+      return { duplicate: false };
+    },
+  };
+}
+
+export interface ListingRef { listingId: number; dealerId: number | null; }
+export interface LeadsStore {
+  /** Returns the listing's dealer if the listing exists, is active and public; else null. */
+  getPublicListing(listingId: number): Promise<ListingRef | null>;
+  insertEvent(e: { eventType: LeadEventType; listingId: number; dealerId: number | null; sessionId: string }): Promise<void>;
+  /** Existing lead with this idempotency key, or same listing + contact hash since `since`. */
+  findDuplicateLead(q: { listingId: number; idempotencyKey: string; contactHash: string; since: string }): Promise<boolean>;
+  /** Inserts; returns {duplicate:true} when a unique constraint (key or listing+contact+bucket) already holds it. */
+  insertLead(l: LeadRow): Promise<{ duplicate: boolean }>;
+  /** Admin list, newest first. */
+  listLeads(page: number, pageSize: number): Promise<{ rows: AdminLeadRow[]; total: number }>;
+  /** Sets contacted_at (if unset) + status 'contacted'. null if no such lead. */
+  markContacted(id: number, at: string): Promise<AdminLeadRow | null>;
+  monthlyReport(month: string): Promise<DealerMonthRow[]>;
+  /** Atomic counter in lead_rate_limits. true = allowed. */
+  hitRateLimit(scope: string, key: string, windowMs: number, limit: number, now: number): Promise<boolean>;
+  /** Current count for the window (no increment). Throws if unreadable (caller fails closed). */
+  peekRateLimit(scope: string, key: string, windowMs: number, now: number): Promise<number>;
+  /** Retention: leads 12 months, events 90 days, expired rate-limit rows. */
+  cleanup(): Promise<{ leads: number; events: number; rate_limits: number }>;
+  /** Last `days` complete UTC days of listing_events counts (oldest first). */
+  dailyEventCounts(days: number, now: number): Promise<DayCount[]>;
+  /** lead_tracking_paused row. Throws if it can't be read (caller fails closed). */
+  getPaused(): Promise<{ paused: boolean; reason: string | null }>;
+  setPaused(reason: string): Promise<void>;
+  clearPaused(): Promise<void>;
+}
+
+/** In-memory pause switch (fixture mode + tests only). */
+export function memoryPaused() {
+  const k = { paused: false, reason: null as string | null, failRead: false };
+  return {
+    state: k,
+    getPaused: async () => { if (k.failRead) throw new Error("read failed"); return { paused: k.paused, reason: k.reason }; },
+    setPaused: async (reason: string) => { k.paused = true; k.reason = reason; },
+    clearPaused: async () => { k.paused = false; k.reason = null; },
+  };
+}
+
+export const windowStart = (now: number, windowMs: number) => new Date(Math.floor(now / windowMs) * windowMs).toISOString();
+
+/** In-memory fixed-window counters with the same semantics as lead_rate_limit_hit
+ *  (fixture mode + tests only). The returned hit function also carries .peek. */
+export function memoryRateLimits() {
+  const counts = new Map<string, number>();
+  const k = (scope: string, key: string, windowMs: number, now: number) => `${scope}|${key}|${windowStart(now, windowMs)}`;
+  const hit = (scope: string, key: string, windowMs: number, limit: number, now: number) => {
+    if (counts.size > 50_000) counts.clear();
+    const id = k(scope, key, windowMs, now);
+    const n = (counts.get(id) ?? 0) + 1;
+    counts.set(id, n);
+    return Promise.resolve(n <= limit);
+  };
+  const peek = (scope: string, key: string, windowMs: number, now: number) => Promise.resolve(counts.get(k(scope, key, windowMs, now)) ?? 0);
+  return Object.assign(hit, { peek });
+}
+
+export function monthBounds(month: string): { start: string; end: string } {
+  const [y, m] = month.split("-").map(Number);
+  const start = new Date(Date.UTC(y, m - 1, 1));
+  const end = new Date(Date.UTC(y, m, 1));
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+/** Same aggregation as db/drafts/20261018_dealer_monthly_report.sql, in JS. */
+export function aggregateMonthly(
+  month: string,
+  events: { event_type: string; dealer_id: number | null }[],
+  leads: { dealer_id: number | null; status?: string | null }[],
+  dealerNames: Map<number, string>,
+): DealerMonthRow[] {
+  const rows = new Map<string, DealerMonthRow>();
+  const row = (d: number | null) => {
+    const k = String(d);
+    let r = rows.get(k);
+    if (!r) { r = { month, dealer_id: d, dealer_name: d == null ? null : dealerNames.get(d) ?? null, views: 0, outbound_clicks: 0, leads: 0 }; rows.set(k, r); }
+    return r;
+  };
+  for (const e of events) {
+    if (e.event_type === "listing_view") row(e.dealer_id).views++;
+    else if (e.event_type === "contact_click" || e.event_type === "outbound_click") row(e.dealer_id).outbound_clicks++;
+  }
+  for (const l of leads) if (l.status !== "spam") row(l.dealer_id).leads++;
+  return Array.from(rows.values()).sort((a, b) =>
+    b.leads - a.leads || b.outbound_clicks - a.outbound_clicks || b.views - a.views ||
+    (a.dealer_id ?? Infinity) - (b.dealer_id ?? Infinity));
+}
+
+export function supabaseLeadsStore(sb: SupabaseClient): LeadsStore {
+  const cache = new Map<number, { ref: ListingRef | null; at: number }>();
+  async function fetchAll<T>(table: string, cols: string, start: string, end: string): Promise<T[]> {
+    const out: T[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sb.from(table).select(cols).gte("created_at", start).lt("created_at", end).range(from, from + 999);
+      if (error) throw new Error(error.message);
+      out.push(...((data ?? []) as T[]));
+      if (!data || data.length < 1000) return out;
+    }
+  }
+  return {
+    async getPublicListing(listingId) {
+      const c = cache.get(listingId);
+      if (c && Date.now() - c.at < 10 * 60_000) return c.ref;
+      const { data, error } = await sb.from("listings").select("id, dealer_id, status, public_listing").eq("id", listingId).maybeSingle();
+      if (error) throw new Error(error.message);
+      const ref = data && data.public_listing === true && (data.status ?? "active") === "active"
+        ? { listingId, dealerId: (data.dealer_id as number | null) ?? null } : null;
+      if (cache.size > 20_000) cache.clear();
+      cache.set(listingId, { ref, at: Date.now() });
+      return ref;
+    },
+    async insertEvent(e) {
+      const { error } = await sb.from("listing_events").insert({ event_type: e.eventType, listing_id: e.listingId, dealer_id: e.dealerId, session_id: e.sessionId });
+      if (error) throw new Error(error.message);
+    },
+    async findDuplicateLead(q) {
+      const byKey = await sb.from("listing_leads").select("id").eq("idempotency_key", q.idempotencyKey).limit(1);
+      if (byKey.error) throw new Error(byKey.error.message);
+      if (byKey.data?.length) return true;
+      const byContact = await sb.from("listing_leads").select("id")
+        .eq("listing_id", q.listingId).eq("contact_hash", q.contactHash).gte("created_at", q.since).limit(1);
+      if (byContact.error) throw new Error(byContact.error.message);
+      return !!byContact.data?.length;
+    },
+    async insertLead(l) {
+      const { error } = await sb.from("listing_leads").insert({
+        listing_id: l.listingId, dealer_id: l.dealerId, name: l.name, email: l.email, phone: l.phone,
+        zip: l.zip, message: l.message, consent_text: l.consentText, ip_hash: l.ipHash,
+        idempotency_key: l.idempotencyKey, contact_hash: l.contactHash, dedupe_bucket: l.dedupeBucket,
+      });
+      if (error && (error as any).code === "23505") return { duplicate: true }; // lost the race: already stored
+      if (error) throw new Error(error.message);
+      return { duplicate: false };
+    },
+    async listLeads(page, pageSize) {
+      const from = (page - 1) * pageSize;
+      const { data, error, count } = await sb.from("listing_leads")
+        .select("id, created_at, listing_id, dealer_id, name, email, phone, zip, message, status, contacted_at, forwarded_at, listings(title, slug), dealers(name)", { count: "exact" })
+        .order("created_at", { ascending: false }).order("id", { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw new Error(error.message);
+      const rows = ((data ?? []) as any[]).map((r) => ({
+        id: r.id, created_at: r.created_at, listing_id: r.listing_id, listing_title: r.listings?.title ?? null, listing_slug: r.listings?.slug ?? null,
+        dealer_id: r.dealer_id, dealer_name: r.dealers?.name ?? null, name: r.name, email: r.email, phone: r.phone, zip: r.zip,
+        message: r.message, status: r.status, contacted_at: r.contacted_at, forwarded_at: r.forwarded_at,
+      }));
+      return { rows, total: count ?? rows.length };
+    },
+    async markContacted(id, at) {
+      // Keep the first contacted_at; don't downgrade a forwarded lead's status.
+      const { data: cur, error: e1 } = await sb.from("listing_leads").select("id, status, contacted_at").eq("id", id).maybeSingle();
+      if (e1) throw new Error(e1.message);
+      if (!cur) return null;
+      const patch: Record<string, unknown> = { contacted_at: cur.contacted_at ?? at };
+      if (cur.status !== "forwarded") patch.status = "contacted";
+      const { error: e2 } = await sb.from("listing_leads").update(patch).eq("id", id);
+      if (e2) throw new Error(e2.message);
+      const { data, error } = await sb.from("listing_leads")
+        .select("id, created_at, listing_id, dealer_id, name, email, phone, zip, message, status, contacted_at, forwarded_at, listings(title, slug), dealers(name)")
+        .eq("id", id).maybeSingle();
+      if (error) throw new Error(error.message);
+      const r: any = data;
+      return r ? { id: r.id, created_at: r.created_at, listing_id: r.listing_id, listing_title: r.listings?.title ?? null, listing_slug: r.listings?.slug ?? null,
+        dealer_id: r.dealer_id, dealer_name: r.dealers?.name ?? null, name: r.name, email: r.email, phone: r.phone, zip: r.zip,
+        message: r.message, status: r.status, contacted_at: r.contacted_at, forwarded_at: r.forwarded_at } : null;
+    },
+    async monthlyReport(month) {
+      const { start, end } = monthBounds(month);
+      const [events, leads] = await Promise.all([
+        fetchAll<{ event_type: string; dealer_id: number | null }>("listing_events", "event_type, dealer_id", start, end),
+        fetchAll<{ dealer_id: number | null; status: string }>("listing_leads", "dealer_id, status", start, end),
+      ]);
+      const ids = Array.from(new Set([...events, ...leads].map((r) => r.dealer_id).filter((d): d is number => d != null)));
+      const names = new Map<number, string>();
+      if (ids.length) {
+        const { data } = await sb.from("dealers").select("id, name").in("id", ids);
+        for (const d of data ?? []) names.set(d.id as number, d.name as string);
+      }
+      return aggregateMonthly(month, events, leads, names);
+    },
+    async hitRateLimit(scope, key, windowMs, limit, now) {
+      const { data, error } = await sb.rpc("lead_rate_limit_hit", {
+        p_scope: scope, p_key: key, p_window_start: windowStart(now, windowMs), p_limit: limit,
+      });
+      if (error) throw new Error(error.message);
+      return data === true;
+    },
+    async peekRateLimit(scope, key, windowMs, now) {
+      const { data, error } = await sb.from("lead_rate_limits").select("count")
+        .eq("scope", scope).eq("key", key).eq("window_start", windowStart(now, windowMs)).maybeSingle();
+      if (error) throw new Error(error.message);
+      return Number((data as any)?.count ?? 0);
+    },
+    async cleanup() {
+      const { data, error } = await sb.rpc("lead_tracking_cleanup");
+      if (error) throw new Error(error.message);
+      const r = (Array.isArray(data) ? data[0] : data) ?? {};
+      return { leads: Number(r.leads_deleted ?? 0), events: Number(r.events_deleted ?? 0), rate_limits: Number(r.rate_limits_deleted ?? 0) };
+    },
+    async dailyEventCounts(days, now) {
+      const { data, error } = await sb.rpc("listing_events_daily_counts", { p_days: days, p_until: new Date(now).toISOString() });
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as any[]).map((r) => ({ day: String(r.day), events: Number(r.events) }));
+    },
+    async getPaused() {
+      const { data, error } = await sb.from("lead_tracking_paused").select("paused, reason").eq("id", 1).maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) throw new Error("lead_tracking_paused row missing");
+      return { paused: data.paused === true, reason: (data.reason as string | null) ?? null };
+    },
+    async setPaused(reason) {
+      const at = new Date().toISOString();
+      const { error } = await sb.from("lead_tracking_paused").upsert({ id: 1, paused: true, reason: reason.slice(0, 500), set_at: at, updated_at: at });
+      if (error) throw new Error(error.message);
+    },
+    async clearPaused() {
+      const at = new Date().toISOString();
+      const { error } = await sb.from("lead_tracking_paused").upsert({ id: 1, paused: false, reason: null, cleared_at: at, updated_at: at });
+      if (error) throw new Error(error.message);
+    },
+  };
+}

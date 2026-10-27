@@ -1,0 +1,28 @@
+{
+  "dealers": [
+    { "id": 9001, "name": "Fixture Carts of Orlando", "slug": "fixture-carts-orlando", "city": "Orlando", "state": "FL", "zip": "32801",
+      "deliveryAvailable": true, "deliveryIncluded": false, "deliveryBaseFee": 99 }
+  ],
+  "listings": [
+    { "id": 990001, "title": "FIXTURE 2023 Club Car Onward 4 Passenger Lithium", "slug": "fixture-2023-club-car-onward",
+      "description": "Fixture listing with a dealer and the dead Contact Seller button (no phone).", "sourceType": "dealer_sync",
+      "publicListing": true, "sellerType": "dealer", "status": "active", "dealerId": 9001, "syncSource": "fixture-carts-orlando",
+      "sellerName": "Fixture Carts of Orlando", "askingPrice": 11995, "year": 2023, "brand": "Club Car", "model": "Onward",
+      "condition": "used", "powerType": "electric", "batteryType": "lithium", "seating": 4, "warrantyIncluded": "unknown",
+      "city": "Orlando", "state": "FL", "zip": "32801", "dealRating": "unknown",
+      "createdAt": "2026-10-01T12:00:00Z", "updatedAt": "2026-10-18T12:00:00Z" },
+    { "id": 990002, "title": "FIXTURE 2021 EZGO Valor Private Seller", "slug": "fixture-2021-ezgo-valor",
+      "description": "Fixture listing with NO dealer (private seller, no phone).", "sourceType": "manual",
+      "publicListing": true, "sellerType": "private", "status": "active", "sellerName": "Private seller",
+      "askingPrice": 7500, "year": 2021, "brand": "EZGO", "model": "Valor", "condition": "used", "powerType": "electric",
+      "batteryType": "lead_acid", "seating": 4, "warrantyIncluded": "no", "city": "Tampa", "state": "FL", "zip": "33602",
+      "dealRating": "unknown", "createdAt": "2026-10-02T12:00:00Z", "updatedAt": "2026-10-18T12:00:00Z" },
+    { "id": 990003, "title": "FIXTURE 2022 Icon i40 (dealer with phone)", "slug": "fixture-2022-icon-i40",
+      "description": "Fixture listing with a dealer phone (Call Seller link; outbound click tracking).", "sourceType": "dealer_sync",
+      "publicListing": true, "sellerType": "dealer", "status": "active", "dealerId": 9001, "syncSource": "fixture-carts-orlando",
+      "sellerName": "Fixture Carts of Orlando", "sellerPhone": "407-555-0100", "askingPrice": 9800, "year": 2022, "brand": "Icon",
+      "model": "i40", "condition": "used", "powerType": "electric", "batteryType": "lithium", "seating": 4,
+      "warrantyIncluded": "yes", "city": "Orlando", "state": "FL", "zip": "32801", "dealRating": "unknown",
+      "createdAt": "2026-10-03T12:00:00Z", "updatedAt": "2026-10-18T12:00:00Z" }
+  ]
+}

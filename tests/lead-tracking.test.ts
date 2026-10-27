@@ -1,0 +1,772 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import express from "express";
+import type { AddressInfo } from "node:net";
+import {
+  parseFlag, isBotUserAgent, validateEvent, validateLead, Deduper, RateLimiter,
+  LEAD_CONSENT_TEXT, LEAD_SUCCESS_TEXT, LEAD_MIN_FILL_MS,
+} from "../shared/leadTracking";
+import { registerLeadRoutes } from "../server/leads/routes";
+import { aggregateMonthly, monthBounds, memoryRateLimits, memoryPaused, memoryLeads, windowStart, type LeadsStore } from "../server/leads/store";
+import { volumeAlert } from "../shared/leadTracking";
+
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36";
+const T0 = 1_760_000_000_000;
+const SALT = "test-salt-0123456789abcdef";
+const CRON = "test-cron-secret-0123456789";
+let leadN = 0;
+const goodLead = (o: Record<string, unknown> = {}) => ({
+  idempotencyKey: randomUUID(), listingId: 5, name: "Pat Smith", email: `pat${++leadN}@example.com`, phone: "", zip: "32801",
+  message: "Is it still available?", consent: true, website: "", startedAt: T0 - 10_000, ...o,
+});
+
+test("flag parsing defaults off", () => {
+  for (const v of [undefined, null, "", "0", "false", "off", "no", "nope"]) assert.equal(parseFlag(v as any), false);
+  for (const v of ["1", "true", "ON", " yes "]) assert.equal(parseFlag(v), true);
+});
+
+test("bot filtering", () => {
+  assert.equal(isBotUserAgent(UA), false);
+  assert.equal(isBotUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1"), false);
+  for (const ua of ["Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", "Mozilla/5.0 (compatible; bingbot/2.0)",
+    "curl/8.4.0", "python-requests/2.31", "Mozilla/5.0 HeadlessChrome/120", "GPTBot/1.0", "facebookexternalhit/1.1", "Chrome-Lighthouse", "", undefined])
+    assert.equal(isBotUserAgent(ua as any), true, String(ua));
+});
+
+test("event validation", () => {
+  assert.ok(validateEvent({ eventType: "listing_view", listingId: 1, sessionId: "abcdef123456" }).ok);
+  assert.ok(validateEvent({ eventType: "contact_click", listingId: "7", dealerId: 3, sessionId: "abcdef123456" }).ok);
+  assert.equal(validateEvent({ eventType: "impression", listingId: 1, sessionId: "abcdef123456" }).ok, false);
+  assert.equal(validateEvent({ eventType: "listing_view", listingId: -1, sessionId: "abcdef123456" }).ok, false);
+  assert.equal(validateEvent({ eventType: "listing_view", listingId: 1, sessionId: "a@b.com" }).ok, false);
+  assert.equal(validateEvent({ eventType: "listing_view", listingId: 1, dealerId: "x", sessionId: "abcdef123456" }).ok, false);
+});
+
+test("dedupe window", () => {
+  const d = new Deduper(1000);
+  assert.equal(d.check("k", 0), true);
+  assert.equal(d.check("k", 500), false);
+  assert.equal(d.check("other", 500), true);
+  assert.equal(d.check("k", 1001), true);
+});
+
+test("rate limiter", () => {
+  const r = new RateLimiter(2, 1000);
+  assert.equal(r.allow("ip", 0), true);
+  assert.equal(r.allow("ip", 1), true);
+  assert.equal(r.allow("ip", 2), false);
+  assert.equal(r.allow("ip2", 2), true);
+  assert.equal(r.allow("ip", 1000), true);
+});
+
+test("lead validation", () => {
+  const ok = validateLead(goodLead(), T0);
+  assert.ok(ok.ok);
+  assert.ok(validateLead(goodLead({ email: "", phone: "(407) 555-0123" }), T0).ok);
+  const bad: [Record<string, unknown>, string][] = [
+    [{ email: "", phone: "" }, "contact_required"], [{ email: "nope" }, "email"], [{ email: "", phone: "123" }, "phone"],
+    [{ zip: "3280" }, "zip"], [{ name: "x" }, "name"], [{ name: "Buy http://spam.ru" }, "name"], [{ name: "visit cheap.com" }, "name"],
+    [{ name: "a".repeat(81) }, "name"], [{ message: "m".repeat(1001) }, "message"], [{ consent: false }, "consent"],
+    [{ listingId: 0 }, "listingId"], [{ startedAt: T0 - 3 * 60 * 60_000 }, "stale_form"],
+  ];
+  for (const [o, err] of bad) { const r = validateLead(goodLead(o), T0); assert.equal(r.ok, false); assert.equal((r as any).error, err, JSON.stringify(o)); }
+});
+
+test("honeypot and min fill time are silent", () => {
+  const h = validateLead(goodLead({ website: "http://x" }), T0);
+  assert.deepEqual([h.ok, (h as any).silent], [false, true]);
+  const f = validateLead(goodLead({ startedAt: T0 - (LEAD_MIN_FILL_MS - 1) }), T0);
+  assert.deepEqual([f.ok, (f as any).silent], [false, true]);
+});
+
+test("consent and success copy (Raphael scope change, exact text)", async () => {
+  assert.equal(LEAD_CONSENT_TEXT, "GolfCartIQ will contact you about this cart and may connect you with the dealer.");
+  assert.equal(LEAD_SUCCESS_TEXT, "Thanks, GolfCartIQ will reply within 1 business day.");
+  const { LEAD_FORM_TITLE, LEAD_FORM_FOLLOWUP } = await import("../shared/leadTracking");
+  assert.equal(LEAD_FORM_TITLE, "Check availability / Get a quote");
+  assert.match(LEAD_FORM_FOLLOWUP, /GolfCartIQ will follow up/);
+  const form = readFileSync(new URL("../client/src/components/leads/LeadQuoteForm.tsx", import.meta.url), "utf8");
+  assert.match(form, /<DialogTitle>\{LEAD_FORM_TITLE\}<\/DialogTitle>/);
+  assert.match(form, /data-testid="lead-followup">\{LEAD_FORM_FOLLOWUP\}/);
+  for (const f of ["shared/leadTracking.ts", "client/src/components/leads/LeadQuoteForm.tsx", "client/src/components/leads/LeadTracking.tsx"]) {
+    const src = readFileSync(new URL(`../${f}`, import.meta.url), "utf8");
+    assert.doesNotMatch(src, /dealer selling this cart|No dealer has been contacted|contact_unavailable/, f);
+  }
+});
+
+function memStore(nowFn: () => number = Date.now) {
+  const events: any[] = [];
+  const fail = { event: false, lead: false };
+  const ml = memoryLeads([], nowFn);
+  const leads = ml.rows;
+  const paused = memoryPaused();
+  const rl = memoryRateLimits();
+  const store: LeadsStore = {
+    async getPublicListing(id) { return id === 404 ? null : { listingId: id, dealerId: id === 12 ? null : 9 }; },
+    async insertEvent(e) { if (fail.event) throw new Error("db down"); events.push(e); },
+    findDuplicateLead: (q) => ml.findDuplicateLead(q),
+    listLeads: (p, n) => ml.listLeads(p, n),
+    markContacted: (id, at) => ml.markContacted(id, at),
+    async insertLead(l) { if (fail.lead) throw new Error("db down"); return ml.insertLead(l); },
+    hitRateLimit: rl, peekRateLimit: rl.peek,
+    getPaused: paused.getPaused, setPaused: paused.setPaused, clearPaused: paused.clearPaused,
+    async cleanup() { return { leads: 1, events: 2, rate_limits: 3 }; },
+    async dailyEventCounts() { return Array.from({ length: 15 }, (_, i) => ({ day: `2026-10-${String(i + 1).padStart(2, "0")}`, events: i === 14 ? 1000 : 100 })); },
+    async monthlyReport(m) { return aggregateMonthly(m, events.map((e) => ({ event_type: e.eventType, dealer_id: e.dealerId })), leads.map((l) => ({ dealer_id: l.dealerId })), new Map([[9, "D9"]])); },
+  };
+  return { store, events, leads, fail, paused: paused.state };
+}
+
+async function withApp(enabled: boolean, fn: (base: string, m: ReturnType<typeof memStore>, clock: { t: number }) => Promise<void>) {
+  const app = express();
+  app.use(express.json());
+  const clock = { t: T0 };
+  const m = memStore(() => clock.t);
+  const admin = (req: any, res: any, next: any) => (req.headers["x-admin-token"] === "pw" ? next() : res.status(401).end());
+  const logs: string[] = [];
+  const alerts: any[] = [];
+  const registered = registerLeadRoutes(app, admin, { enabled, store: () => m.store, now: () => clock.t, ipSalt: SALT, cronSecret: CRON, log: (msg) => logs.push(msg), notifier: (a) => alerts.push(a), pausedCacheMs: 0 });
+  (m as any).alerts = alerts;
+  (m as any).logs = logs;
+  assert.equal(registered, enabled);
+  app.use((_req, res) => res.status(404).send("fallthrough"));
+  const srv = app.listen(0);
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try { await fn(base, m, clock); } finally { srv.close(); }
+}
+const post = (url: string, body: unknown, ua = UA, ip = "1.1.1.1") =>
+  fetch(url, { method: "POST", headers: { "content-type": "application/json", "user-agent": ua, "x-forwarded-for": ip }, body: JSON.stringify(body) });
+const tick = () => new Promise((r) => setTimeout(r, 20));
+
+test("flag off: no routes registered (fall through to 404), nothing stored", async () => {
+  await withApp(false, async (base, m) => {
+    for (const p of ["/api/leads/event", "/api/leads/quote"]) assert.equal((await post(base + p, {})).status, 404);
+    assert.equal((await fetch(base + "/api/admin/leads/monthly-report", { headers: { "x-admin-token": "pw" } })).status, 404);
+    assert.equal(m.events.length + m.leads.length, 0);
+  });
+});
+
+test("events: stored, dealer from DB, bots dropped, views deduped", async () => {
+  await withApp(true, async (base, m, clock) => {
+    const ev = { eventType: "listing_view", listingId: 5, dealerId: 777, sessionId: "abcdef123456" };
+    const r = await post(base + "/api/leads/event", ev);
+    assert.equal(r.status, 204);
+    assert.equal(r.headers.get("x-robots-tag"), "noindex");
+    await post(base + "/api/leads/event", ev);
+    await post(base + "/api/leads/event", { ...ev, sessionId: "zzzzzz999999" }, "Googlebot/2.1 (+http://www.google.com/bot.html)");
+    await post(base + "/api/leads/event", { ...ev, listingId: 404 });
+    await tick();
+    assert.equal(m.events.length, 1);
+    assert.equal(m.events[0].dealerId, 9);
+    clock.t += 31 * 60_000;
+    await post(base + "/api/leads/event", ev);
+    await post(base + "/api/leads/event", { ...ev, eventType: "contact_click" });
+    await tick();
+    assert.equal(m.events.length, 3);
+  });
+});
+
+test("quote: stores lead, honeypot silent, per-IP and per-listing limits", async () => {
+  await withApp(true, async (base, m, clock) => {
+    const r = await post(base + "/api/leads/quote", goodLead());
+    assert.equal(r.status, 200);
+    assert.equal(m.leads.length, 1);
+    assert.equal(m.leads[0].dealerId, 9);
+    assert.equal(m.leads[0].consentText, LEAD_CONSENT_TEXT);
+    assert.ok(!JSON.stringify(m.leads[0]).includes("1.1.1.1"));
+    assert.equal((await post(base + "/api/leads/quote", goodLead({ website: "x" }), UA, "2.2.2.2")).status, 200);
+    assert.equal(m.leads.length, 1);
+    assert.equal((await post(base + "/api/leads/quote", goodLead({ zip: "x" }), UA, "2.2.2.2")).status, 400);
+    assert.equal((await post(base + "/api/leads/quote", goodLead({ email: m.leads[0].email }), UA, "1.1.1.1")).status, 200); // same contact+listing: duplicate
+    assert.equal(m.leads.length, 1);
+    for (let i = 0; i < 4; i++) await post(base + "/api/leads/quote", goodLead({ listingId: 100 + i }), UA, "3.3.3.3");
+    assert.equal((await post(base + "/api/leads/quote", goodLead({ listingId: 200 }), UA, "3.3.3.3")).status, 200);
+    assert.equal((await post(base + "/api/leads/quote", goodLead({ listingId: 201 }), UA, "3.3.3.3")).status, 429); // 5/h per IP
+    let last = 0;
+    for (let i = 0; i < 21; i++) last = (await post(base + "/api/leads/quote", goodLead({ listingId: 50 }), UA, `9.9.9.${i}`)).status;
+    assert.equal(last, 429); // 20/day per listing
+    assert.equal((await post(base + "/api/leads/quote", goodLead({ listingId: 404 }), UA, "8.8.8.8")).status, 404);
+  });
+});
+
+test("monthly report: admin-only, shape", async () => {
+  await withApp(true, async (base) => {
+    await post(base + "/api/leads/event", { eventType: "listing_view", listingId: 5, sessionId: "abcdef123456" });
+    await post(base + "/api/leads/event", { eventType: "outbound_click", listingId: 5, sessionId: "abcdef123456" });
+    await post(base + "/api/leads/quote", goodLead());
+    await tick();
+    assert.equal((await fetch(base + "/api/admin/leads/monthly-report")).status, 401);
+    assert.equal((await fetch(base + "/api/admin/leads/monthly-report?month=2026-13", { headers: { "x-admin-token": "pw" } })).status, 400);
+    const j = await (await fetch(base + "/api/admin/leads/monthly-report?month=2026-10", { headers: { "x-admin-token": "pw" } })).json();
+    assert.equal(j.month, "2026-10");
+    assert.deepEqual(j.rows, [{ month: "2026-10", dealer_id: 9, dealer_name: "D9", views: 1, outbound_clicks: 1, leads: 1 }]);
+  });
+});
+
+test("aggregateMonthly + monthBounds", () => {
+  const rows = aggregateMonthly("2026-10",
+    [{ event_type: "listing_view", dealer_id: 1 }, { event_type: "listing_view", dealer_id: 2 }, { event_type: "contact_click", dealer_id: 2 }, { event_type: "listing_view", dealer_id: null }],
+    [{ dealer_id: 1, status: "new" }, { dealer_id: 1, status: "spam" }], new Map([[1, "A"]]));
+  assert.deepEqual(rows.map((r) => [r.dealer_id, r.views, r.outbound_clicks, r.leads]), [[1, 1, 0, 1], [2, 1, 1, 0], [null, 1, 0, 0]]);
+  assert.deepEqual(monthBounds("2026-12"), { start: "2026-12-01T00:00:00.000Z", end: "2027-01-01T00:00:00.000Z" });
+});
+
+test("draft SQL: RLS on, no policies, grants revoked, report columns", () => {
+  const ddl = readFileSync(new URL("../db/drafts/20261018_lead_tracking_draft.sql", import.meta.url), "utf8");
+  for (const t of ["listing_events", "listing_leads"]) {
+    assert.match(ddl, new RegExp(`alter table public\\.${t}\\s+enable row level security`));
+    assert.match(ddl, new RegExp(`revoke all on table public\\.${t}\\s+from public, anon, authenticated`));
+  }
+  assert.match(ddl, /alter table public\.lead_rate_limits enable row level security/);
+  assert.match(ddl, /revoke all on table public\.lead_rate_limits from public, anon, authenticated/);
+  assert.doesNotMatch(ddl, /create policy/i);
+  assert.doesNotMatch(ddl, /grant [^;]* to [^;]*(anon|authenticated|public)/i);
+  for (const f of ["20261018_lead_tracking_draft.sql", "20261018_lead_retention_draft.sql", "20261018_listing_events_volume.sql"]) {
+    const sql = readFileSync(new URL(`../db/drafts/${f}`, import.meta.url), "utf8");
+    const fns = Array.from(sql.matchAll(/create or replace function public\.(\w+)/g)).map((x) => x[1]);
+    assert.ok(fns.length > 0, f);
+    for (const fn of fns) assert.match(sql, new RegExp(`revoke execute on function public\\.${fn}\\([^)]*\\) from public, anon, authenticated`), `${f}:${fn}`);
+  }
+  const rpt = readFileSync(new URL("../db/drafts/20261018_dealer_monthly_report.sql", import.meta.url), "utf8");
+  for (const c of ["month", "dealer_id", "dealer_name", "views", "outbound_clicks", "leads"]) assert.match(rpt, new RegExp(`as ${c}\\b`));
+});
+
+test("client: ListingDetail gates on build-time flag only", () => {
+  const src = readFileSync(new URL("../client/src/pages/ListingDetail.tsx", import.meta.url), "utf8");
+  assert.match(src, /if \(__LEAD_TRACKING_ENABLED__\) useLeadTracking\(listing\);/);
+  assert.match(src, /__LEAD_TRACKING_ENABLED__ \? \(\s*<LeadContactButton/);
+  assert.match(src, /data-testid="btn-contact-seller"><Phone className="h-4 w-4" \/> Contact Seller<\/Button>/);
+  assert.match(src, /__LEAD_TRACKING_ENABLED__ \? \(\s*<>\s*<a href=\{`tel:/);
+});
+
+test("quote: listing without a dealer is accepted and stored with null dealer_id", async () => {
+  await withApp(true, async (base, m) => {
+    const r = await post(base + "/api/leads/quote", goodLead({ listingId: 12 }), UA, "4.4.4.4");
+    assert.equal(r.status, 200);
+    assert.equal(m.leads.length, 1);
+    assert.equal(m.leads[0].dealerId, null);
+  });
+});
+
+test("write failures: event dropped+logged (still 204), lead returns 500 not success", async () => {
+  await withApp(true, async (base, m) => {
+    m.fail.event = true; m.fail.lead = true;
+    const r = await post(base + "/api/leads/event", { eventType: "listing_view", listingId: 5, sessionId: "abcdef123456" });
+    assert.equal(r.status, 204);
+    await tick();
+    assert.ok((m as any).logs.includes("event write dropped"));
+    const q = await post(base + "/api/leads/quote", goodLead(), UA, "4.4.4.5");
+    assert.equal(q.status, 500);
+    assert.deepEqual(await q.json(), { error: "server_error" });
+    assert.ok((m as any).logs.includes("lead write failed"));
+    assert.equal(m.leads.length, 0);
+  });
+});
+
+test("retention cron: cron secret or admin only; volume monitor admin-only", async () => {
+  await withApp(true, async (base) => {
+    const c = (h: Record<string, string>) => fetch(base + "/api/cron/lead-retention", { method: "POST", headers: h });
+    assert.equal((await c({})).status, 401);
+    assert.equal((await c({ authorization: "Bearer wrong" })).status, 401);
+    const j = await (await c({ authorization: "Bearer " + CRON })).json();
+    assert.equal(j.ok, true);
+    assert.deepEqual(j.deleted, { leads: 1, events: 2, rate_limits: 3 });
+    assert.equal(j.volume.alert, true);
+    assert.equal((await c({ "x-admin-token": "pw" })).status, 200);
+    assert.equal((await fetch(base + "/api/admin/leads/event-volume")).status, 401);
+    const v = await (await fetch(base + "/api/admin/leads/event-volume", { headers: { "x-admin-token": "pw" } })).json();
+    assert.equal(v.alert, true);
+    assert.equal(v.baseline, 100);
+  });
+  await withApp(false, async (base) => {
+    assert.equal((await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer " + CRON } })).status, 404);
+  });
+});
+
+test("volumeAlert + windowStart", () => {
+  const days = (xs: number[]) => xs.map((events, i) => ({ day: `2026-10-${String(i + 1).padStart(2, "0")}`, events }));
+  assert.equal(volumeAlert(days([100, 100, 100])).reason, "insufficient_history");
+  assert.equal(volumeAlert(days([100, 100, 100, 100, 100, 100, 100, 299])).alert, false);
+  assert.equal(volumeAlert(days([100, 100, 100, 100, 100, 100, 100, 301])).alert, true);
+  assert.equal(volumeAlert(days([5, 5, 5, 5, 5, 5, 5, 40])).alert, false); // baseline floor 50
+  assert.equal(windowStart(Date.UTC(2026, 9, 18, 21, 17, 30), 10 * 60_000), "2026-10-18T21:10:00.000Z");
+});
+
+test("cron: volume alert sets lead_tracking_paused, logs LEAD_VOLUME_ALERT, then routes stop writing", async () => {
+  await withApp(true, async (base, m) => {
+    assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, true);
+    const j = await (await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer " + CRON } })).json();
+    assert.equal(j.pausedSet, true);
+    assert.equal(m.paused.paused, true);
+    assert.match(m.paused.reason!, /volume monitor/);
+    assert.equal((m as any).alerts.length, 1);
+    assert.equal((m as any).alerts[0].type, "LEAD_VOLUME_ALERT");
+    // paused: UI flag off, events dropped, leads refused (no fake success)
+    assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, false);
+    await post(base + "/api/leads/event", { eventType: "listing_view", listingId: 5, sessionId: "abcdef123456" });
+    await tick();
+    assert.equal(m.events.length, 0);
+    const q = await post(base + "/api/leads/quote", goodLead(), UA, "4.4.9.9");
+    assert.equal(q.status, 503);
+    assert.equal(m.leads.length, 0);
+    // admin clears it
+    assert.equal((await fetch(base + "/api/admin/leads/paused/clear", { method: "POST" })).status, 401);
+    assert.equal((await fetch(base + "/api/admin/leads/paused/clear", { method: "POST", headers: { "x-admin-token": "pw" } })).status, 200);
+    assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, true);
+    assert.equal((await post(base + "/api/leads/quote", goodLead(), UA, "4.4.9.9")).status, 200);
+  });
+});
+
+test("paused read failure fails closed", async () => {
+  await withApp(true, async (base, m) => {
+    (m.paused as any).failRead = true;
+    assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, false);
+    assert.equal((await post(base + "/api/leads/quote", goodLead(), UA, "4.4.8.8")).status, 503);
+    await post(base + "/api/leads/event", { eventType: "listing_view", listingId: 5, sessionId: "abcdef123456" });
+    await tick();
+    assert.equal(m.events.length + m.leads.length, 0);
+    assert.ok((m as any).logs.includes("lead_tracking_paused read failed; failing closed"));
+  });
+});
+
+test("paused gate is cached (default 30 s)", async () => {
+  const app = express(); app.use(express.json());
+  const m = memStore(); let reads = 0; const orig = m.store.getPaused;
+  m.store.getPaused = async () => { reads++; return orig(); };
+  const clock = { t: T0 };
+  registerLeadRoutes(app, (_q, r) => { r.status(401).end(); }, { enabled: true, store: () => m.store, now: () => clock.t, ipSalt: SALT });
+  const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try {
+    for (let i = 0; i < 3; i++) await fetch(base + "/api/leads/status");
+    assert.equal(reads, 1);
+    clock.t += 31_000; await fetch(base + "/api/leads/status");
+    assert.equal(reads, 2);
+  } finally { srv.close(); }
+});
+
+test("client UI flag: leadTrackingLive is off on paused/error/non-OK", async () => {
+  const realFetch = globalThis.fetch;
+  const { leadTrackingLive } = await import("../client/src/components/leads/LeadTracking");
+  const cases: [() => Promise<Response>, boolean][] = [
+    [async () => new Response(JSON.stringify({ enabled: false })), false],
+    [async () => new Response("", { status: 404 }), false],
+    [async () => { throw new Error("net"); }, false],
+    [async () => new Response(JSON.stringify({ enabled: true })), true],
+  ];
+  const realNow = Date.now; let t = 0; Date.now = () => (t += 61_000);
+  try {
+    for (const [f, want] of cases) { globalThis.fetch = f as any; assert.equal(await leadTrackingLive(), want); }
+  } finally { globalThis.fetch = realFetch; Date.now = realNow; }
+});
+
+test("draft SQL: lead_tracking_paused locked down", () => {
+  const sql = readFileSync(new URL("../db/drafts/20261018_lead_tracking_paused_draft.sql", import.meta.url), "utf8");
+  assert.match(sql, /alter table public\.lead_tracking_paused enable row level security/);
+  assert.match(sql, /revoke all on table public\.lead_tracking_paused from public, anon, authenticated/);
+  assert.doesNotMatch(sql, /create policy|create (or replace )?function|grant /i);
+});
+
+test("notifier: structured LEAD_VOLUME_ALERT line only", async () => {
+  const { logNotifier } = await import("../server/leads/notifier");
+  const lines: string[] = [];
+  logNotifier((l) => lines.push(l))({ type: "LEAD_VOLUME_ALERT", at: "x", reason: "r", latest: null, baseline: 1, pausedSet: true });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^LEAD_VOLUME_ALERT \{"type":"LEAD_VOLUME_ALERT"/);
+});
+
+test("UI: controls shown on every listing when live (incl. no dealer); hidden when paused/failed/pending", async () => {
+  const { contactButtonMode, LeadContactButton } = await import("../client/src/components/leads/LeadTracking");
+  for (const variant of ["contact", "quote"] as const) {
+    assert.equal(contactButtonMode({ live: true, variant }), variant);     // dealer or no dealer
+    assert.equal(contactButtonMode({ live: false, variant }), "hidden");   // paused / salt missing / status failed / pending
+  }
+  const tr = readFileSync(new URL("../client/src/components/leads/LeadTracking.tsx", import.meta.url), "utf8");
+  assert.match(tr, /data-testid="btn-contact-seller" onClick=\{open\}>\{LEAD_FORM_TITLE\}<\/Button>/);
+  assert.match(tr, /data-testid="btn-get-quote" onClick=\{open\}>\{LEAD_FORM_TITLE\}<\/Button>/);
+  assert.doesNotMatch(tr, /Contact Seller<\/Button>/);
+  // First render (before the status check resolves) emits no markup: no dead button flash.
+  const React = await import("react");
+  const { renderToString } = await import("react-dom/server");
+  for (const variant of ["contact", "quote"] as const) {
+    assert.equal(renderToString(React.createElement(LeadContactButton, { listingId: 1, dealerId: 9001, variant })), "");
+    assert.equal(renderToString(React.createElement(LeadContactButton, { listingId: 1, variant })), "");
+  }
+});
+
+test("double submit: same idempotency key twice -> one lead, both succeed, not counted", async () => {
+  await withApp(true, async (base, m) => {
+    const lead = goodLead({ listingId: 61 });
+    const a = await post(base + "/api/leads/quote", lead, UA, "6.1.1.1");
+    const b = await post(base + "/api/leads/quote", lead, UA, "6.1.1.1");
+    assert.deepEqual([a.status, b.status], [200, 200]);
+    assert.deepEqual(await b.json(), { ok: true });
+    assert.equal(m.leads.length, 1);
+    // duplicate didn't consume the per-IP budget (5/h): 4 more distinct leads still pass
+    for (let i = 0; i < 4; i++) assert.equal((await post(base + "/api/leads/quote", goodLead({ listingId: 70 + i }), UA, "6.1.1.1")).status, 200);
+  });
+});
+
+test("double submit: same listing + same contact within 10 min, new key -> one lead", async () => {
+  await withApp(true, async (base, m, clock) => {
+    const a = await post(base + "/api/leads/quote", goodLead({ listingId: 62, email: "same@example.com" }), UA, "6.2.1.1");
+    clock.t += 5 * 60_000;
+    const b = await post(base + "/api/leads/quote", goodLead({ listingId: 62, email: "SAME@example.com", startedAt: clock.t - 10_000 }), UA, "6.2.1.2");
+    assert.deepEqual([a.status, b.status], [200, 200]);
+    assert.equal(m.leads.length, 1);
+    clock.t += 6 * 60_000; // > 10 min after the first: a genuine new request
+    const c = await post(base + "/api/leads/quote", goodLead({ listingId: 62, email: "same@example.com", startedAt: clock.t - 10_000 }), UA, "6.2.1.3");
+    assert.equal(c.status, 200);
+    assert.equal(m.leads.length, 2);
+  });
+});
+
+test("double submit: concurrent POSTs race -> unique conflict caught, one lead, both succeed", async () => {
+  await withApp(true, async (base, m) => {
+    // Force both requests past the pre-check so the insert-level uniqueness decides.
+    m.store.findDuplicateLead = async () => false;
+    const lead = goodLead({ listingId: 63 });
+    const rs = await Promise.all([1, 2, 3].map(() => post(base + "/api/leads/quote", lead, UA, "6.3.1.1")));
+    assert.deepEqual(rs.map((r) => r.status), [200, 200, 200]);
+    assert.equal(m.leads.length, 1);
+  });
+});
+
+test("supabase store maps unique violation 23505 to duplicate, other errors throw", async () => {
+  const { supabaseLeadsStore } = await import("../server/leads/store");
+  const mk = (error: any) => ({ from: () => ({ insert: async () => ({ error }) }) }) as any;
+  const row: any = { ...goodLead(), dealerId: 1, consentText: "c", ipHash: null, contactHash: "a".repeat(32), dedupeBucket: 1 };
+  assert.deepEqual(await supabaseLeadsStore(mk({ code: "23505", message: "dup" })).insertLead(row), { duplicate: true });
+  assert.deepEqual(await supabaseLeadsStore(mk(null)).insertLead(row), { duplicate: false });
+  await assert.rejects(() => supabaseLeadsStore(mk({ code: "08006", message: "down" })).insertLead(row));
+});
+
+test("idempotency key required and UUID-shaped", () => {
+  assert.equal((validateLead(goodLead({ idempotencyKey: undefined }), T0) as any).error, "idempotency_key");
+  assert.equal((validateLead(goodLead({ idempotencyKey: "abc" }), T0) as any).error, "idempotency_key");
+});
+
+test("form checks: ZIP same rule as server with ZIP message; contact error; server code -> field", async () => {
+  const { checkLeadForm, serverErrorField, ZIP_MESSAGE } = await import("../shared/leadTracking");
+  const ok = { name: "Pat Smith", email: "p@example.com", phone: "", zip: "32801", consent: true };
+  assert.deepEqual(checkLeadForm(ok), {});
+  for (const zip of ["3280", "abcde", "32801-12", ""]) {
+    assert.equal(checkLeadForm({ ...ok, zip }).zip, ZIP_MESSAGE);
+    assert.equal(validateLead(goodLead({ zip }), T0).ok, false); // server agrees
+  }
+  assert.equal(checkLeadForm({ ...ok, zip: "32801-1234" }).zip, undefined);
+  assert.equal(checkLeadForm({ ...ok, email: "", phone: "" }).contact, "Add an email or a phone number.");
+  assert.ok(checkLeadForm({ ...ok, phone: "123" }).phone);
+  assert.ok(checkLeadForm({ ...ok, name: "see x.com" }).name);
+  assert.equal(serverErrorField("zip"), "zip");
+  assert.equal(serverErrorField("contact_required"), "contact");
+  assert.equal(serverErrorField("rate_limited"), null);
+});
+
+test("form markup: labels, aria wiring, 44px targets, idempotency + no auto-resend", async () => {
+  const src = readFileSync(new URL("../client/src/components/leads/LeadQuoteForm.tsx", import.meta.url), "utf8");
+  for (const k of ["name", "email", "phone", "zip", "message", "consent"]) {
+    assert.match(src, new RegExp(`htmlFor=\\{id\\("${k}"\\)\\}`), `label for ${k}`);
+    assert.match(src, new RegExp(`id=\\{id\\("${k}"\\)\\}`), `control id ${k}`);
+  }
+  assert.doesNotMatch(src, /placeholder=/); // labels, not placeholders
+  assert.match(src, /"aria-invalid"/);
+  assert.match(src, /"aria-describedby"/);
+  assert.match(src, /a11y\("email", "contact"\)/);
+  assert.match(src, /a11y\("phone", "contact"\)/);
+  assert.match(src, /<fieldset aria-describedby=\{fe\.contact \? id\("contact-err"\)/);
+  assert.equal((src.match(/style=\{TAP\}/g) ?? []).length, 5); // name, email, phone, zip, submit
+  assert.match(src, /const TAP = \{ minHeight: 44 \}/);
+  assert.match(src, /idempotencyKey: idemKey\.current/);
+  assert.match(src, /if \(inFlight\.current\) return;/);
+  assert.match(src, /disabled=\{state === "sending"\}/);
+  const tr = readFileSync(new URL("../client/src/components/leads/LeadTracking.tsx", import.meta.url), "utf8");
+  assert.equal((tr.match(/style=\{\{ minHeight: 44 \}\}/g) ?? []).length, 2); // quote + contact buttons
+  const { newIdempotencyKey } = await import("../client/src/components/leads/LeadQuoteForm");
+  const k1 = newIdempotencyKey(), k2 = newIdempotencyKey();
+  assert.match(k1, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.notEqual(k1, k2);
+});
+
+test("draft SQL: idempotency file keeps lockdown", () => {
+  const sql = readFileSync(new URL("../db/drafts/20261018_lead_idempotency_draft.sql", import.meta.url), "utf8");
+  assert.match(sql, /create unique index if not exists uq_listing_leads_idempotency_key/);
+  assert.match(sql, /create unique index if not exists uq_listing_leads_contact_bucket/);
+  assert.match(sql, /revoke all on table public\.listing_leads from public, anon, authenticated/);
+  assert.doesNotMatch(sql, /create policy|create (or replace )?function|grant /i);
+});
+
+async function saltApp(ipSalt: string | undefined, fn: (base: string, m: ReturnType<typeof memStore>, errs: string[]) => Promise<void>, cronSecret: string | undefined = CRON) {
+  const saved = process.env.LEAD_IP_SALT; delete process.env.LEAD_IP_SALT;
+  const errs: string[] = []; const realErr = console.error;
+  console.error = (...a: unknown[]) => { errs.push(a.map(String).join(" ")); };
+  const app = express(); app.use(express.json());
+  const m = memStore();
+  registerLeadRoutes(app, (req: any, res: any, next: any) => (req.headers["x-admin-token"] === "pw" ? next() : res.status(401).end()),
+    { enabled: true, store: () => m.store, ipSalt, cronSecret, pausedCacheMs: 0, log: () => {}, now: () => T0 });
+  const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try { await fn(base, m, errs); } finally { srv.close(); console.error = realErr; if (saved !== undefined) process.env.LEAD_IP_SALT = saved; }
+}
+
+for (const [label, salt] of [["missing", undefined], ["short", "only-15-chars.."]] as const) {
+  test(`LEAD_IP_SALT ${label}: tracking off (status off, events dropped, lead + cron 503), LEAD_CONFIG_ERROR logged once, no value`, async () => {
+    await saltApp(salt, async (base, m, errs) => {
+      assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, false);
+      await post(base + "/api/leads/event", { eventType: "listing_view", listingId: 5, sessionId: "abcdef123456" });
+      await tick();
+      assert.equal(m.events.length, 0);
+      const q = await post(base + "/api/leads/quote", goodLead(), UA, "7.7.0.1");
+      assert.equal(q.status, 503);
+      assert.equal(m.leads.length, 0);
+      const c = await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer " + CRON } });
+      assert.equal(c.status, 503);
+      const cfg = errs.filter((e) => e.startsWith("LEAD_CONFIG_ERROR"));
+      assert.equal(cfg.length, 1); // rate-limited
+      if (salt) for (const e of errs) assert.ok(!e.includes(salt));
+    });
+  });
+}
+
+test("LEAD_IP_SALT present (>=16): tracking on", async () => {
+  await saltApp(SALT, async (base, m, errs) => {
+    assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, true);
+    assert.equal((await post(base + "/api/leads/quote", goodLead(), UA, "7.7.0.2")).status, 200);
+    assert.equal(m.leads.length, 1);
+    assert.equal((await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer " + CRON } })).status, 200);
+    assert.equal(errs.filter((e) => e.startsWith("LEAD_CONFIG_ERROR")).length, 0);
+  });
+});
+
+test("LEAD_IP_SALT read from env when not injected", async () => {
+  const app = express(); app.use(express.json());
+  const m = memStore(); const saved = process.env.LEAD_IP_SALT;
+  process.env.LEAD_IP_SALT = SALT;
+  try {
+    registerLeadRoutes(app, (_q, r) => { r.status(401).end(); }, { enabled: true, store: () => m.store, pausedCacheMs: 0 });
+  } finally { if (saved === undefined) delete process.env.LEAD_IP_SALT; else process.env.LEAD_IP_SALT = saved; }
+  const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try { assert.equal((await (await fetch(base + "/api/leads/status")).json()).enabled, true); } finally { srv.close(); }
+});
+
+test("CRON_SECRET missing or short: bearer rejected (401), admin token still works", async () => {
+  for (const cs of [undefined, "short-secret"]) {
+    await saltApp(SALT, async (base, _m, errs) => {
+      assert.equal((await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: "Bearer " + (cs ?? "anything-at-all-123") } })).status, 401);
+      const ar = await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { "x-admin-token": "pw" } });
+      assert.equal(ar.status, 200);
+      assert.ok(errs.some((e) => e.startsWith("LEAD_CONFIG_ERROR") && e.includes("CRON_SECRET")));
+      if (cs) for (const e of errs) assert.ok(!e.includes(cs));
+    }, cs ?? "");
+  }
+});
+
+test("44px targets: dialog Close hit area (scoped style) and flag-on Call Seller only", () => {
+  const form = readFileSync(new URL("../client/src/components/leads/LeadQuoteForm.tsx", import.meta.url), "utf8");
+  assert.match(form, /data-lead-dialog=""/);
+  assert.match(form, /\[data-lead-dialog\] > button\.absolute\{min-width:44px;min-height:44px/);
+  const src = readFileSync(new URL("../client/src/pages/ListingDetail.tsx", import.meta.url), "utf8");
+  const flagOn = src.slice(src.indexOf("__LEAD_TRACKING_ENABLED__ ? (\n                    <>"), src.indexOf(") : (\n                    <a href"));
+  assert.match(flagOn, /style=\{\{ minHeight: 44 \}\} data-testid="btn-contact-seller"><Phone className="h-4 w-4" \/> Call Seller/);
+  assert.equal((src.match(/Check Similar Deals/g) ?? []).length, 1);
+  assert.doesNotMatch(src, /minHeight: 44 \}\}[^\n]*Check Similar/);
+});
+
+test("admin leads list: newest first, 50/page, admin-only, null dealer shown", async () => {
+  await withApp(true, async (base, m, clock) => {
+    for (let i = 0; i < 52; i++) { clock.t += 1000; await post(base + "/api/leads/quote", goodLead({ listingId: i === 51 ? 12 : 300 + i, startedAt: clock.t - 10_000 }), UA, `5.0.${i}.1`); }
+    assert.equal(m.leads.length, 52);
+    assert.equal((await fetch(base + "/api/admin/leads")).status, 401);
+    const p1 = await (await fetch(base + "/api/admin/leads", { headers: { "x-admin-token": "pw" } })).json();
+    assert.deepEqual([p1.page, p1.pageSize, p1.total, p1.rows.length], [1, 50, 52, 50]);
+    assert.equal(p1.rows[0].listing_id, 12);       // newest first
+    assert.equal(p1.rows[0].dealer_id, null);
+    for (const k of ["id", "created_at", "listing_id", "listing_title", "dealer_id", "dealer_name", "name", "email", "phone", "zip", "message", "status", "contacted_at"]) assert.ok(k in p1.rows[0], k);
+    const p2 = await (await fetch(base + "/api/admin/leads?page=2", { headers: { "x-admin-token": "pw" } })).json();
+    assert.equal(p2.rows.length, 2);
+    assert.ok(p1.rows[49].created_at >= p2.rows[0].created_at);
+  });
+  await withApp(false, async (base) => {
+    assert.equal((await fetch(base + "/api/admin/leads", { headers: { "x-admin-token": "pw" } })).status, 404);
+    assert.equal((await fetch(base + "/api/admin/leads/1/contacted", { method: "POST", headers: { "x-admin-token": "pw" } })).status, 404);
+  });
+});
+
+test("mark contacted: admin-only, sets contacted_at + status, keeps first time, 404 unknown", async () => {
+  await withApp(true, async (base, m, clock) => {
+    await post(base + "/api/leads/quote", goodLead(), UA, "5.1.0.1");
+    const id = m.leads[0].id;
+    assert.equal((await fetch(base + `/api/admin/leads/${id}/contacted`, { method: "POST" })).status, 401);
+    const r = await (await fetch(base + `/api/admin/leads/${id}/contacted`, { method: "POST", headers: { "x-admin-token": "pw" } })).json();
+    assert.equal(r.lead.status, "contacted");
+    assert.equal(r.lead.contacted_at, new Date(T0).toISOString());
+    clock.t += 3600_000;
+    const r2 = await (await fetch(base + `/api/admin/leads/${id}/contacted`, { method: "POST", headers: { "x-admin-token": "pw" } })).json();
+    assert.equal(r2.lead.contacted_at, new Date(T0).toISOString()); // first time kept
+    assert.equal((await fetch(base + "/api/admin/leads/999/contacted", { method: "POST", headers: { "x-admin-token": "pw" } })).status, 404);
+    assert.equal((await fetch(base + "/api/admin/leads/1abc/contacted", { method: "POST", headers: { "x-admin-token": "pw" } })).status, 400);
+  });
+});
+
+test("admin token in the query string is refused (header only)", async () => {
+  const { makeRequireAdmin, rejectQueryTokens } = await import("../server/leads/admin-auth");
+  await withApp(true, async (base) => {
+    for (const q of ["token=pw", "x-admin-token=pw", "admin_token=pw", "password=pw"]) {
+      assert.equal((await fetch(base + `/api/admin/leads?${q}`)).status, 400, q);
+      assert.equal((await fetch(base + `/api/admin/leads?${q}`, { headers: { "x-admin-token": "pw" } })).status, 400, q);
+      assert.equal((await fetch(base + `/api/admin/leads/1/contacted?${q}`, { method: "POST" })).status, 400, q);
+    }
+  });
+  // fixture/test requireAdmin mirrors production: header only, timing-safe, wrong length rejected
+  const app = express();
+  app.get("/x", rejectQueryTokens, makeRequireAdmin("correct-horse-battery"), (_q, r) => { r.json({ ok: true }); });
+  const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try {
+    assert.equal((await fetch(base + "/x?token=correct-horse-battery")).status, 400);
+    assert.equal((await fetch(base + "/x", { headers: { "x-admin-token": "wrong" } })).status, 401);
+    assert.equal((await fetch(base + "/x", { headers: { "x-admin-token": "correct-horse-battery" } })).status, 200);
+  } finally { srv.close(); }
+  // production requireAdmin (server/routes.ts) reads only the header
+  const routes = readFileSync(new URL("../server/routes.ts", import.meta.url), "utf8");
+  const fn = routes.slice(routes.indexOf("function requireAdmin("), routes.indexOf("registerRecheckRoutes(app, requireAdmin);"));
+  assert.match(fn, /req\.headers\["x-admin-token"\]/);
+  assert.match(fn, /timingSafeEqual/);
+  assert.doesNotMatch(fn, /req\.query/);
+});
+
+test("Admin page: Leads tab only behind the build flag (ternary folds away when off)", () => {
+  const src = readFileSync(new URL("../client/src/pages/Admin.tsx", import.meta.url), "utf8");
+  assert.match(src, /\{__LEAD_TRACKING_ENABLED__ \? \(\s*<>\s*<TabsTrigger value="settings"[^\n]*\n\s*<TabsTrigger value="leads"/);
+  assert.match(src, /<TabsContent value="leads">\s*<AdminLeads adminToken=\{adminToken\} \/>/);
+  assert.equal((src.match(/value="leads"/g) ?? []).length, 2);
+});
+
+// ─── Admin sign-in guard (lead admin routes only; Director FINAL ruling) ─────────────
+import { makeAdminGuard, ADMIN_FAIL, MIN_ADMIN_PASSWORD_LEN } from "../server/leads/admin-guard";
+import { execFileSync } from "node:child_process";
+
+// Mirrors server/routes.ts wiring: plain requireAdmin for main routes (verify, price refresh),
+// guard.wrapLead(requireAdmin) for registerLeadRoutes. flagOn=false → no guard at all.
+async function withGuardApp(o: { pw: string; flagOn?: boolean; limiterFails?: boolean },
+  fn: (base: string, logs: string[]) => Promise<void>) {
+  const flagOn = o.flagOn ?? true;
+  const app = express();
+  app.use(express.json());
+  const m = memStore(() => T0);
+  const requireAdmin = (req: any, res: any, next: any) =>
+    (req.headers["x-admin-token"] === o.pw ? next() : res.status(401).json({ error: "Unauthorized" }));
+  const logs: string[] = [];
+  const failing = { peekRateLimit: async () => { throw new Error("db down"); }, hitRateLimit: async () => { throw new Error("db down"); } };
+  const leadAdmin = flagOn
+    ? makeAdminGuard({ adminPassword: o.pw, limiter: () => (o.limiterFails ? failing : m.store) as any, salt: () => SALT, now: () => T0,
+        logError: (l) => logs.push(l), logWarn: (l) => logs.push(l) }).wrapLead(requireAdmin)
+    : requireAdmin;
+  app.get("/api/admin/verify", requireAdmin, (_q, r) => { r.json({ ok: true }); });
+  app.post("/api/admin/daily-price-refresh", async (req, res) => {
+    const token = req.headers["x-admin-token"] as string;
+    if (token !== o.pw) return res.status(401).json({ error: "Unauthorized" });
+    res.json({ ok: true });
+  });
+  registerLeadRoutes(app, leadAdmin, { enabled: flagOn, store: () => m.store, now: () => T0, ipSalt: SALT, cronSecret: CRON, log: (l) => logs.push(l), pausedCacheMs: 0 });
+  const srv = app.listen(0);
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try { await fn(base, logs); } finally { srv.close(); }
+}
+const GOOD = "a-random-admin-password-32chars!";
+const tok = (t: string, ip = "4.4.4.4") => ({ headers: { "x-admin-token": t, "x-forwarded-for": ip } });
+
+test("admin guard: short ADMIN_PASSWORD → 503 on lead routes + LEAD_CONFIG_ERROR without the value", async () => {
+  assert.equal(MIN_ADMIN_PASSWORD_LEN, 16);
+  const short = "twelve-chars"; // 12
+  await withGuardApp({ pw: short }, async (base, logs) => {
+    for (const p of ["/api/admin/leads", "/api/admin/leads/event-volume", "/api/admin/leads/paused"]) {
+      assert.equal((await fetch(base + p, tok(short))).status, 503, p);
+    }
+    assert.equal((await fetch(base + "/api/cron/lead-retention", { method: "POST", ...tok(short) })).status, 503);
+    // CRON_SECRET bearer path is not the admin-token path → unaffected
+    assert.notEqual((await fetch(base + "/api/cron/lead-retention", { method: "POST", headers: { authorization: `Bearer ${CRON}` } })).status, 503);
+    assert.equal(logs.filter((l) => l.startsWith("LEAD_CONFIG_ERROR")).length, 1); // rate-limited
+    assert.ok(!logs.join("\n").includes(short));
+  });
+});
+
+test("admin guard: flag on + 12-char password → verify and daily-price-refresh unchanged (200 w/ correct token, unlimited 401s)", async () => {
+  const short = "twelve-chars";
+  await withGuardApp({ pw: short }, async (base) => {
+    assert.equal((await fetch(base + "/api/admin/verify", tok(short))).status, 200);
+    assert.equal((await fetch(base + "/api/admin/daily-price-refresh", { method: "POST", ...tok(short) })).status, 200);
+    for (let i = 0; i < 15; i++) {
+      assert.equal((await fetch(base + "/api/admin/verify", tok("bad"))).status, 401);
+      assert.equal((await fetch(base + "/api/admin/daily-price-refresh", { method: "POST", ...tok("bad") })).status, 401);
+    }
+    assert.equal((await fetch(base + "/api/admin/verify", tok(short))).status, 200);
+    assert.equal((await fetch(base + "/api/admin/daily-price-refresh", { method: "POST", ...tok(short) })).status, 200);
+  });
+});
+
+test("admin guard: 11 bad tries on lead routes → 429 before compare; good token works under the cap; token never logged", async () => {
+  await withGuardApp({ pw: GOOD }, async (base, logs) => {
+    const statuses: number[] = [];
+    for (let i = 0; i < ADMIN_FAIL.limit + 1; i++) statuses.push((await fetch(base + "/api/admin/leads", tok(`wrong-guess-${i}`))).status);
+    assert.deepEqual(statuses, [...Array(10).fill(401), 429]);
+    assert.equal((await fetch(base + "/api/admin/leads", tok(GOOD))).status, 429); // capped IP: rejected before compare
+    assert.equal((await fetch(base + "/api/admin/leads", tok(GOOD, "5.5.5.5"))).status, 200); // other IP fine
+    for (let i = 0; i < 9; i++) await fetch(base + "/api/admin/leads", tok("x", "6.6.6.6"));
+    assert.equal((await fetch(base + "/api/admin/leads", tok(GOOD, "6.6.6.6"))).status, 200); // 9 fails: under cap
+    assert.equal((await fetch(base + "/api/admin/leads", tok(GOOD, "6.6.6.6"))).status, 200); // successes never count
+    // main routes unaffected for the capped IP
+    assert.equal((await fetch(base + "/api/admin/verify", tok(GOOD))).status, 200);
+    const fails = logs.filter((l) => l.startsWith("ADMIN_AUTH_FAIL"));
+    assert.equal(fails.length, 10 + 9);
+    const j = JSON.parse(fails[0].slice("ADMIN_AUTH_FAIL ".length));
+    assert.deepEqual(Object.keys(j).sort(), ["ip_hash", "route"]);
+    const all = logs.join("\n");
+    assert.ok(!all.includes(GOOD) && !all.includes("wrong-guess") && !all.includes("4.4.4.4"));
+  });
+});
+
+test("admin guard: limiter failure → 503 on lead routes (fail closed); main routes unaffected", async () => {
+  await withGuardApp({ pw: GOOD, limiterFails: true }, async (base, logs) => {
+    assert.equal((await fetch(base + "/api/admin/leads", tok(GOOD))).status, 503);
+    assert.equal((await fetch(base + "/api/admin/leads/paused/clear", { method: "POST", ...tok(GOOD) })).status, 503);
+    assert.ok(logs.some((l) => l.startsWith("ADMIN_GUARD_ERROR")));
+    assert.equal((await fetch(base + "/api/admin/verify", tok(GOOD))).status, 200);
+    assert.equal((await fetch(base + "/api/admin/daily-price-refresh", { method: "POST", ...tok(GOOD) })).status, 200);
+  });
+});
+
+test("admin guard: flag off → no cap, no minimum anywhere", async () => {
+  await withGuardApp({ pw: "short", flagOn: false }, async (base) => {
+    for (let i = 0; i < 15; i++) assert.equal((await fetch(base + "/api/admin/verify", tok("bad"))).status, 401);
+    assert.equal((await fetch(base + "/api/admin/verify", tok("short"))).status, 200);
+    assert.equal((await fetch(base + "/api/admin/leads", tok("short"))).status, 404); // lead routes not registered
+  });
+});
+
+test("routes.ts: verify, daily-price-refresh and requireAdmin are byte-identical to main d58633e", () => {
+  const cur = readFileSync(new URL("../server/routes.ts", import.meta.url), "utf8");
+  let main: string;
+  try { main = execFileSync("git", ["show", "d58633e:server/routes.ts"], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"], cwd: new URL("..", import.meta.url).pathname }); }
+  catch { return; } // no git history available: skip
+  // Pure additions vs main (no main line removed/changed), and none touch verify/price refresh.
+  const diff = execFileSync("git", ["--no-pager", "diff", "--no-ext-diff", "-U0", "d58633e", "--", "server/routes.ts"], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"], cwd: new URL("..", import.meta.url).pathname });
+  const removed = diff.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
+  assert.deepEqual(removed, []);
+  const added = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).join("\n");
+  const addedCode = added.split("\n").filter((l) => !/^\+\s*\/\//.test(l)).join("\n");
+  assert.ok(!/verify|daily-price-refresh/.test(addedCode));
+  for (const start of ['app.get("/api/admin/verify"', 'app.post("/api/admin/daily-price-refresh"', "function requireAdmin("]) assert.ok(cur.includes(start) && main.includes(start));
+  assert.equal((cur.match(/requireAdmin\b/g) ?? []).length - (main.match(/requireAdmin\b/g) ?? []).length, 3); // only the lead wiring adds uses
+  assert.match(cur, /wrapLead\(requireAdmin\)/);
+});
+
+test("fixture admin password meets the 16-char minimum", async () => {
+  const { FIXTURE_ADMIN_PASSWORD } = await import("../server/fixture/app");
+  assert.ok(FIXTURE_ADMIN_PASSWORD.length >= MIN_ADMIN_PASSWORD_LEN);
+});
+
+test("lead form copy: no wording implying the dealer receives the details", () => {
+  const src = readFileSync(new URL("../client/src/components/leads/LeadQuoteForm.tsx", import.meta.url), "utf8");
+  assert.ok(src.includes(">How should we reach you?<"));
+  assert.ok(!/dealer reach you/i.test(src));
+});

@@ -17,6 +17,7 @@ import { formatPrice } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import type { Listing, Dealer, InventorySource } from "@/lib/types";
 import InventoryCoverage from "@/pages/InventoryCoverage";
+import { AdminLeads } from "@/components/leads/AdminLeads";
 
 // The admin token is whatever the user types — never a compiled constant.
 // The server is the source of truth: we probe /api/admin/verify with the
@@ -1666,7 +1667,14 @@ export default function Admin() {
             <TabsTrigger value="inventory" data-testid="tab-inventory">Inventory Gap</TabsTrigger>
             <TabsTrigger value="pending" data-testid="tab-pending">Pending Imports</TabsTrigger>
             <TabsTrigger value="algorithm" data-testid="tab-algorithm">Algorithm</TabsTrigger>
-            <TabsTrigger value="settings" data-testid="tab-settings">Settings</TabsTrigger>
+            {__LEAD_TRACKING_ENABLED__ ? (
+              <>
+                <TabsTrigger value="settings" data-testid="tab-settings">Settings</TabsTrigger>
+                <TabsTrigger value="leads" data-testid="tab-leads">Leads</TabsTrigger>
+              </>
+            ) : (
+              <TabsTrigger value="settings" data-testid="tab-settings">Settings</TabsTrigger>
+            )}
           </TabsList>
 
           {/* Listings Tab */}
@@ -1883,9 +1891,20 @@ export default function Admin() {
             <AlgorithmTweaker adminToken={adminToken} />
           </TabsContent>
           {/* Settings Tab */}
-          <TabsContent value="settings">
-            <SettingsPanel adminToken={adminToken} dealers={dealers} />
-          </TabsContent>
+          {__LEAD_TRACKING_ENABLED__ ? (
+            <>
+              <TabsContent value="settings">
+                <SettingsPanel adminToken={adminToken} dealers={dealers} />
+              </TabsContent>
+              <TabsContent value="leads">
+                <AdminLeads adminToken={adminToken} />
+              </TabsContent>
+            </>
+          ) : (
+            <TabsContent value="settings">
+              <SettingsPanel adminToken={adminToken} dealers={dealers} />
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </div>

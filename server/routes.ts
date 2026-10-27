@@ -54,6 +54,10 @@ function norm(row: any): any { return toCamel(row); }
 import { getMetaConnectorStatus } from "./connectors/metaMarketplace";
 import { getRetailConnectorStatus } from "./connectors/retailSource";
 import { supabaseAdmin } from "./supabase-admin";
+import { registerLeadRoutes } from "./leads/routes";
+import { supabaseLeadsStore, type LeadsStore } from "./leads/store";
+import { makeAdminGuard } from "./leads/admin-guard";
+import { parseFlag } from "../shared/leadTracking";
 import { registerRecheckRoutes } from "./recheck/routes";
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -387,6 +391,16 @@ ${pageUrls.join("\n")}
     return res.status(401).json({ error: "Unauthorized" });
   }
   registerRecheckRoutes(app, requireAdmin);
+  // Lead tracking (DRAFT): no-op unless LEAD_TRACKING_ENABLED is on.
+  // Flag ON only: lead admin routes (and the admin-token path of /api/cron/lead-retention) get
+  // the 16-char ADMIN_PASSWORD minimum + failed-sign-in cap. requireAdmin itself, verify,
+  // daily-price-refresh and every other main admin route are untouched (Director ruling).
+  let _leadsStore: LeadsStore | null = null;
+  const leadsStore = () => (_leadsStore ??= supabaseLeadsStore(supabaseAdmin()));
+  const leadAdmin = parseFlag(process.env.LEAD_TRACKING_ENABLED)
+    ? makeAdminGuard({ adminPassword: ADMIN_PASSWORD, limiter: leadsStore, salt: () => process.env.LEAD_IP_SALT ?? "" }).wrapLead(requireAdmin)
+    : requireAdmin;
+  registerLeadRoutes(app, leadAdmin, { store: leadsStore });
 
 
   // GET /api/admin/verify — lightweight endpoint the Admin UI uses to gate
