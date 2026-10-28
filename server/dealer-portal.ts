@@ -10,7 +10,7 @@ import rateLimit from "express-rate-limit";
 import Stripe from "stripe";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin, getSupabaseUrl } from "./supabase-admin";
-import { handleStripeEvent, verifyStripeEvent, planToPrice, zipPriceFor, priceForQuantity, buildCheckoutItems, canBillZips, type BillingDb, type ZipProduct } from "./dealer-billing";
+import { STRIPE_API_VERSION, assertExpectedEvent, handleStripeEvent, verifyStripeEvent, planToPrice, zipPriceFor, priceForQuantity, buildCheckoutItems, canBillZips, type BillingDb, type ZipProduct } from "./dealer-billing";
 
 let _stripe: Stripe | null = null;
 export function stripeClient(): Stripe {
@@ -19,7 +19,7 @@ export function stripeClient(): Stripe {
   if (key.startsWith("sk_live_") && process.env.STRIPE_ALLOW_LIVE !== "1") {
     throw Object.assign(new Error("Live Stripe keys are disabled for this MVP (test mode only)"), { status: 503 });
   }
-  if (!_stripe) _stripe = new Stripe(key);
+  if (!_stripe) _stripe = new Stripe(key, { apiVersion: STRIPE_API_VERSION as any });
   return _stripe;
 }
 
@@ -267,7 +267,8 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
         line_items: lineItems,
         client_reference_id: claim.user_id, // dealer_accounts is keyed by user_id: that is the claim id
         metadata,
-        subscription_data: { metadata },
+        subscription_data: { metadata, billing_mode: { type: "flexible" } } as any,
+        integration_identifier: "gcq_dealer_checkout_qkzrvmtb",
         success_url: `${base}/portal?checkout=success`,
         cancel_url: `${base}/dealers?checkout=cancelled`,
       });
@@ -281,7 +282,7 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
       if (!claim?.dealer_id) return res.status(400).json({ error: "No dealership on file" });
       const { data } = await supabaseAdmin().from("dealer_subscriptions").select("stripe_customer_id").eq("dealer_id", claim.dealer_id).maybeSingle();
       if (!data?.stripe_customer_id) return res.status(400).json({ error: "No billing account yet" });
-      const s = await stripeClient().billingPortal.sessions.create({ customer: data.stripe_customer_id, return_url: `${siteUrl(req)}/portal` });
+      const s = await stripeClient().billingPortal.sessions.create({ customer: data.stripe_customer_id, return_url: `${siteUrl(req)}/portal`, ...(process.env.STRIPE_PORTAL_CONFIG_ID ? { configuration: process.env.STRIPE_PORTAL_CONFIG_ID } : {}) });
       res.json({ url: s.url });
     } catch (e) { fail(res, e); }
   });
@@ -292,6 +293,7 @@ export function registerDealerRoutes(app: Express, requireAdmin: (req: any, res:
     try {
       stripe = stripeClient();
       event = verifyStripeEvent(stripe, (req as any).rawBody, req.headers["stripe-signature"], process.env.STRIPE_WEBHOOK_SECRET);
+      assertExpectedEvent(event);
     } catch (e: any) {
       return res.status(400).json({ error: "Invalid signature" });
     }

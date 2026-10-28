@@ -44,7 +44,7 @@ test("valid signature over raw body is accepted; tampered body rejected", () => 
 
 test("checkout.session.completed creates active row with right plan", async () => {
   const m = memDb();
-  const r = await handleStripeEvent(ev("evt_1", "checkout.session.completed", { mode: "subscription", subscription: "sub_1", metadata: { dealer_id: "7", plan: "insights" } }),
+  const r = await handleStripeEvent(ev("evt_1", "checkout.session.completed", { mode: "subscription", payment_status: "paid", subscription: "sub_1", metadata: { dealer_id: "7", plan: "insights" } }),
     m.db, async () => sub({ items: { data: [{ price: { id: "price_insights_test" } }] } }));
   assert.equal(r, "processed");
   assert.equal(m.subs.get(7)?.status, "active");
@@ -61,16 +61,17 @@ test("same event twice makes no duplicate changes", async () => {
   assert.equal(JSON.stringify([...m.subs]), snapshot.replace(/"updated_at":"[^"]+"/, (x) => x));
 });
 
-test("plan switch, past_due, cancel-at-period-end, deleted", async () => {
-  const m = memDb();
-  await handleStripeEvent(ev("e1", "customer.subscription.updated", sub()), m.db, async () => sub());
-  await handleStripeEvent(ev("e2", "customer.subscription.updated", sub({ items: { data: [{ price: { id: "price_insights_test" } }] } })), m.db, async () => sub());
+test("plan switch, past_due, cancel-at-period-end, deleted (state re-read from Stripe)", async () => {
+  const m = memDb(); let cur = sub();
+  const step = async (id: string, type: string, next: any) => { cur = next; await handleStripeEvent(ev(id, type, next), m.db, async () => cur); };
+  await step("e1", "customer.subscription.updated", sub());
+  await step("e2", "customer.subscription.updated", sub({ items: { data: [{ price: { id: "price_insights_test" } }] } }));
   assert.equal(m.subs.get(7)?.plan, "insights");
-  await handleStripeEvent(ev("e3", "customer.subscription.updated", sub({ status: "past_due" })), m.db, async () => sub());
+  await step("e3", "customer.subscription.updated", sub({ status: "past_due" }));
   assert.equal(m.subs.get(7)?.status, "past_due");
-  await handleStripeEvent(ev("e4", "customer.subscription.updated", sub({ cancel_at_period_end: true })), m.db, async () => sub());
+  await step("e4", "customer.subscription.updated", sub({ cancel_at_period_end: true }));
   assert.equal(m.subs.get(7)?.status, "active"); assert.equal(m.subs.get(7)?.cancel_at_period_end, true);
-  await handleStripeEvent(ev("e5", "customer.subscription.deleted", sub({ status: "canceled", metadata: {} })), m.db, async () => sub());
+  await step("e5", "customer.subscription.deleted", sub({ status: "canceled", metadata: {} }));
   assert.equal(m.subs.get(7)?.status, "canceled");
 });
 
@@ -102,18 +103,21 @@ test("bot filter", async () => {
 test("webhook syncs ZIP quantities per product and triggers placement sync", async () => {
   const m = memDb();
   const items = { data: [{ price: { id: "price_featured_test" }, quantity: 1 }, { price: { id: "price_zipf_test" }, quantity: 4 }, { price: { id: "price_zipl_test" }, quantity: 2 }] };
-  await handleStripeEvent(ev("z1", "customer.subscription.updated", sub({ items })), m.db, async () => sub());
+  (globalThis as any).__cur = sub({ items });
+  await handleStripeEvent(ev("z1", "customer.subscription.updated", sub({ items })), m.db, async (_id) => (globalThis as any).__cur);
   assert.equal(m.subs.get(7)?.plan, "featured");
   assert.equal(m.subs.get(7)?.zip_featured_quantity, 4);
   assert.equal(m.subs.get(7)?.zip_listings_quantity, 2);
   assert.deepEqual(m.synced, [7]);
   // zip-only subscription (no base plan), quantity drops
-  await handleStripeEvent(ev("z2", "customer.subscription.updated", sub({ items: { data: [{ price: { id: "price_zipf_test" }, quantity: 1 }] } })), m.db, async () => sub());
+  (globalThis as any).__cur = sub({ items: { data: [{ price: { id: "price_zipf_test" }, quantity: 1 }] } });
+  await handleStripeEvent(ev("z2", "customer.subscription.updated", sub({ items: { data: [{ price: { id: "price_zipf_test" }, quantity: 1 }] } })), m.db, async (_id) => (globalThis as any).__cur);
   assert.equal(m.subs.get(7)?.plan, null);
   assert.equal(m.subs.get(7)?.zip_featured_quantity, 1);
   assert.equal(m.subs.get(7)?.zip_listings_quantity, 0);
   // deleted => canceled + sync (placements then go inactive in SQL)
-  await handleStripeEvent(ev("z3", "customer.subscription.deleted", sub({ status: "canceled", items: { data: [{ price: { id: "price_zipf_test" }, quantity: 1 }] } })), m.db, async () => sub());
+  (globalThis as any).__cur = sub({ status: "canceled", items: { data: [{ price: { id: "price_zipf_test" }, quantity: 1 }] } });
+  await handleStripeEvent(ev("z3", "customer.subscription.deleted", sub({ status: "canceled", items: { data: [{ price: { id: "price_zipf_test" }, quantity: 1 }] } })), m.db, async (_id) => (globalThis as any).__cur);
   assert.equal(m.subs.get(7)?.status, "canceled");
   assert.deepEqual(m.synced, [7, 7, 7]);
 });
@@ -141,4 +145,94 @@ test("no standalone ZIP purchase: checkout and ZIP billing require a base plan",
   assert.equal(canBillZips({ plan: "featured", status: "canceled", stripe_subscription_id: "sub_1" }), false);
   assert.equal(canBillZips({ plan: "featured", status: "past_due", stripe_subscription_id: "sub_1" }), false);
   assert.equal(canBillZips({ plan: "insights", status: "trialing", stripe_subscription_id: "sub_1" }), true);
+});
+
+// ─── Gap fixes: payment_status gate, invoices, async, replay/out-of-order, mode/account ───
+const cs = (over: any = {}): any => ({ mode: "subscription", subscription: "sub_1", payment_status: "paid", metadata: { dealer_id: "7", plan: "featured" }, ...over });
+
+test("checkout.session.completed with payment_status unpaid does not fulfill; async_payment_succeeded does", async () => {
+  const m = memDb();
+  assert.equal(await handleStripeEvent(ev("c1", "checkout.session.completed", cs({ payment_status: "unpaid" })), m.db, async () => sub({ status: "incomplete" })), "ignored");
+  assert.equal(m.subs.size, 0);
+  assert.equal(await handleStripeEvent(ev("c2", "checkout.session.async_payment_succeeded", cs()), m.db, async () => sub()), "processed");
+  assert.equal(m.subs.get(7)?.status, "active");
+});
+
+test("checkout.session.async_payment_failed records the non-active state", async () => {
+  const m = memDb();
+  await handleStripeEvent(ev("c3", "checkout.session.async_payment_failed", cs({ payment_status: "unpaid" })), m.db, async () => sub({ status: "incomplete_expired" }));
+  assert.equal(m.subs.get(7)?.status, "incomplete_expired");
+});
+
+test("invoice.payment_failed lapses the plan and invoice.paid restores it (new + legacy invoice shapes)", async () => {
+  const m = memDb(); let cur = sub();
+  await handleStripeEvent(ev("i0", "checkout.session.completed", cs()), m.db, async () => cur);
+  cur = sub({ status: "past_due" });
+  assert.equal(await handleStripeEvent(ev("i1", "invoice.payment_failed", { parent: { subscription_details: { subscription: "sub_1" } } }), m.db, async () => cur), "processed");
+  assert.equal(m.subs.get(7)?.status, "past_due");
+  const { canBillZips } = await import("../server/dealer-billing");
+  assert.equal(canBillZips(m.subs.get(7) as any), false, "ZIPs pause while past_due");
+  cur = sub();
+  assert.equal(await handleStripeEvent(ev("i2", "invoice.paid", { subscription: "sub_1" }), m.db, async () => cur), "processed");
+  assert.equal(m.subs.get(7)?.status, "active");
+  assert.equal(await handleStripeEvent(ev("i3", "invoice.paid", { parent: null }), m.db, async () => cur), "ignored", "one-off invoice ignored");
+});
+
+test("out-of-order: a stale 'active' event delivered after cancellation cannot resurrect the plan", async () => {
+  const m = memDb(); const now = sub({ status: "canceled" });
+  await handleStripeEvent(ev("o2", "customer.subscription.deleted", now), m.db, async () => now);
+  await handleStripeEvent(ev("o1", "customer.subscription.updated", sub({ status: "active" })), m.db, async () => now);
+  assert.equal(m.subs.get(7)?.status, "canceled");
+  await handleStripeEvent(ev("o0", "invoice.paid", { subscription: "sub_1" }), m.db, async () => now);
+  assert.equal(m.subs.get(7)?.status, "canceled");
+});
+
+test("out-of-order: subscription.updated before checkout.session.completed still lands correctly", async () => {
+  const m = memDb(); const cur = sub();
+  assert.equal(await handleStripeEvent(ev("p1", "customer.subscription.updated", cur), m.db, async () => cur), "processed");
+  assert.equal(await handleStripeEvent(ev("p2", "checkout.session.completed", cs()), m.db, async () => cur), "processed");
+  assert.equal(m.subs.get(7)?.status, "active"); assert.equal(m.subs.get(7)?.plan, "featured");
+});
+
+test("replay: every handled event type is a no-op the second time", async () => {
+  const m = memDb(); const cur = sub();
+  const evs = [ev("r1", "checkout.session.completed", cs()), ev("r2", "invoice.paid", { subscription: "sub_1" }), ev("r3", "invoice.payment_failed", { subscription: "sub_1" }),
+    ev("r4", "customer.subscription.updated", cur), ev("r5", "checkout.session.async_payment_succeeded", cs())];
+  for (const e of evs) await handleStripeEvent(e, m.db, async () => cur);
+  const w = m.writes();
+  for (const e of evs) assert.equal(await handleStripeEvent(e, m.db, async () => { throw new Error("must not re-fetch"); }), "duplicate");
+  assert.equal(m.writes(), w);
+});
+
+test("failed processing is not recorded, so Stripe's retry is processed", async () => {
+  const m = memDb(); const e = ev("f1", "invoice.paid", { subscription: "sub_1" });
+  await assert.rejects(handleStripeEvent(e, m.db, async () => { throw new Error("stripe down"); }));
+  assert.equal(m.events.has("f1"), false);
+  assert.equal(await handleStripeEvent(e, m.db, async () => sub()), "processed");
+});
+
+test("assertExpectedEvent rejects livemode or account mismatches", async () => {
+  const { assertExpectedEvent } = await import("../server/dealer-billing");
+  const env = { STRIPE_SECRET_KEY: "sk_test_x", STRIPE_EXPECTED_ACCOUNT: "acct_good" } as any;
+  assert.doesNotThrow(() => assertExpectedEvent({ livemode: false }, env));
+  assert.throws(() => assertExpectedEvent({ livemode: true }, env), /livemode/);
+  assert.throws(() => assertExpectedEvent({ livemode: false, account: "acct_evil" }, env), /account/);
+  assert.doesNotThrow(() => assertExpectedEvent({ livemode: false, account: "acct_good" }, env));
+  assert.throws(() => assertExpectedEvent({ livemode: false }, { STRIPE_SECRET_KEY: "rk_live_x" } as any), /livemode/);
+  assert.throws(() => assertExpectedEvent({ livemode: false, account: "acct_any" }, { STRIPE_SECRET_KEY: "sk_test_x" } as any), /account/);
+});
+
+test("HTTP: correctly signed livemode event is rejected by a test-mode server", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_test_unit_test_only"; process.env.STRIPE_WEBHOOK_SECRET = SECRET;
+  const { registerDealerRoutes } = await import("../server/dealer-portal");
+  const app = express();
+  app.use(express.json({ verify: (req: any, _res, buf) => { req.rawBody = buf; } }));
+  registerDealerRoutes(app as any, (_q: any, r: any) => r.status(401).end());
+  const srv = app.listen(0); const port = (srv.address() as any).port;
+  try {
+    const body = JSON.stringify({ ...ev("evt_live", "invoice.paid", { subscription: "sub_1" }), livemode: true });
+    const header = stripe.webhooks.generateTestHeaderString({ payload: body, secret: SECRET });
+    const res = await fetch(`http://127.0.0.1:${port}/api/stripe/webhook`, { method: "POST", headers: { "Content-Type": "application/json", "stripe-signature": header }, body });
+    assert.equal(res.status, 400);
+  } finally { srv.close(); }
 });

@@ -108,10 +108,41 @@ export function subToRow(sub: Stripe.Subscription, dealerId: number): Subscripti
 
 export type HandleResult = "processed" | "duplicate" | "ignored";
 
+export const STRIPE_API_VERSION = "2026-09-30.endive";
+
+/** Events this handler acts on; the webhook endpoint should subscribe to exactly these. */
+export const HANDLED_EVENTS = [
+  "checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed",
+  "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted",
+  "invoice.paid", "invoice.payment_failed",
+] as const;
+
 /**
- * Idempotent: an event id already in stripe_events is skipped. The id is recorded
- * only after successful processing, so a failed attempt is retried by Stripe.
- * The upsert itself is keyed on dealer_id, so a concurrent duplicate is harmless.
+ * Reject events from the wrong mode or account. livemode must match the key's mode
+ * (sk_test_/rk_test_ => false). Direct (non-Connect) events carry no `account`, so any
+ * event that does carry one must equal STRIPE_EXPECTED_ACCOUNT.
+ */
+export function assertExpectedEvent(event: { livemode?: boolean; account?: string | null }, env = process.env): void {
+  const key = (env.STRIPE_SECRET_KEY || "").trim();
+  const keyLive = /^(sk|rk)_live_/.test(key);
+  if (Boolean(event.livemode) !== keyLive) throw new Error("livemode mismatch");
+  const expected = (env.STRIPE_EXPECTED_ACCOUNT || "").trim();
+  if (event.account && event.account !== expected) throw new Error("account mismatch");
+}
+
+function invoiceSubscriptionId(inv: any): string | null {
+  const s = inv?.parent?.subscription_details?.subscription ?? inv?.subscription ?? null;
+  return typeof s === "string" ? s : s?.id ?? null;
+}
+
+/**
+ * Idempotent and order-independent:
+ *  - an event id already in stripe_events is skipped (replays);
+ *  - every subscription-affecting event re-reads the subscription from Stripe and writes
+ *    its CURRENT state, so a late/out-of-order event can never roll the row back;
+ *  - the id is recorded only after successful processing, so failures are retried.
+ * Fulfillment from Checkout is gated on payment_status (paid / no_payment_required);
+ * async methods are fulfilled on checkout.session.async_payment_succeeded.
  */
 export async function handleStripeEvent(
   event: Stripe.Event,
@@ -120,28 +151,34 @@ export async function handleStripeEvent(
 ): Promise<HandleResult> {
   if (await db.hasEvent(event.id)) return "duplicate";
   let result: HandleResult = "ignored";
+  const t = event.type as string;
+  const obj: any = event.data.object;
 
-  if (event.type === "checkout.session.completed") {
-    const s = event.data.object as Stripe.Checkout.Session;
-    const dealerId = Number(s.metadata?.dealer_id);
-    if (s.mode === "subscription" && s.subscription && Number.isInteger(dealerId) && dealerId > 0) {
-      const subId = typeof s.subscription === "string" ? s.subscription : s.subscription.id;
-      const sub = await retrieveSubscription(subId);
-      await db.upsertSubscription(subToRow(sub, dealerId));
-      await db.syncZipPlacements(dealerId);
-      result = "processed";
-    }
-  } else if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
-    const sub = event.data.object as Stripe.Subscription;
+  const sync = async (subId: string, hintDealer?: number) => {
+    const sub = await retrieveSubscription(subId);
     let dealerId = Number(sub.metadata?.dealer_id);
-    if (!Number.isInteger(dealerId) || dealerId <= 0) dealerId = (await db.findDealerBySubscription(sub.id)) ?? 0;
-    if (dealerId > 0) {
-      const row = subToRow(sub, dealerId);
-      if (event.type === "customer.subscription.deleted") row.status = "canceled";
-      await db.upsertSubscription(row);
-      await db.syncZipPlacements(dealerId);
-      result = "processed";
+    if (!Number.isInteger(dealerId) || dealerId <= 0) dealerId = hintDealer && hintDealer > 0 ? hintDealer : (await db.findDealerBySubscription(sub.id)) ?? 0;
+    if (dealerId <= 0) return false;
+    await db.upsertSubscription(subToRow(sub, dealerId));
+    await db.syncZipPlacements(dealerId);
+    return true;
+  };
+
+  if (t === "checkout.session.completed" || t === "checkout.session.async_payment_succeeded" || t === "checkout.session.async_payment_failed") {
+    const s = obj as Stripe.Checkout.Session;
+    const dealerId = Number(s.metadata?.dealer_id);
+    const paid = s.payment_status === "paid" || s.payment_status === "no_payment_required";
+    // completed+unpaid = async method still pending: wait for async_payment_*.
+    const act = t === "checkout.session.async_payment_failed" || paid;
+    if (act && s.mode === "subscription" && s.subscription && Number.isInteger(dealerId) && dealerId > 0) {
+      const subId = typeof s.subscription === "string" ? s.subscription : s.subscription.id;
+      if (await sync(subId, dealerId)) result = "processed";
     }
+  } else if (t.startsWith("customer.subscription.")) {
+    if (await sync(obj.id)) result = "processed";
+  } else if (t === "invoice.paid" || t === "invoice.payment_failed") {
+    const subId = invoiceSubscriptionId(obj);
+    if (subId && (await sync(subId))) result = "processed";
   }
 
   await db.recordEvent(event.id);

@@ -328,7 +328,7 @@ export default function Portal() {
             {(sub.status === "canceled" || sub.status === "incomplete_expired") && <PlanButtons go={go} />}
             <Button variant="outline" onClick={() => go("/api/billing-portal")}>Manage billing</Button>
           </>
-        ) : claim.dealer_id ? <PlanButtons go={go} highlight={wantedPlan} /> : <p className="text-sm">You can choose a plan once we've added your dealership.</p>}
+        ) : claim.dealer_id ? <><PlanButtons go={go} highlight={wantedPlan} />{!approved && <p className="text-sm text-muted-foreground" data-testid="zip-billed-later">Your plan starts billing now. ZIP code placements aren't included yet: you can add ZIPs once your claim is approved, and they're billed from then on.</p>}</> : <p className="text-sm">You can choose a plan once we've added your dealership.</p>}
         {msg && <p className="text-sm text-red-700">{msg}</p>}
       </section>
 
