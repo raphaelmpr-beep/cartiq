@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { initStorage } from "./storage";
+import { redactForLog } from "./log-redact";
 import { createServer } from "node:http";
 
 const app = express();
@@ -92,7 +93,7 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        logLine += ` :: ${JSON.stringify(redactForLog(capturedJsonResponse))}`;
       }
       log(logLine);
     }
